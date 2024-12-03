@@ -413,7 +413,7 @@ class DiscordLLMBot(discord.Client):
                                         )
                                         self.conn.commit()
 
-                                        confirmation = "…記録しました。"
+                                        confirmation = self.BIO_RECORD_MESSAGE
                                         await message.reply(confirmation, silent=True)
                                 except json.JSONDecodeError:
                                     logging.error("Failed to decode function call arguments.")
@@ -444,7 +444,6 @@ class DiscordLLMBot(discord.Client):
                             )
                             msg_split_incoming = len(response_contents[-1] + curr_content) > max_message_length
                             is_final_edit = finish_reason is not None or msg_split_incoming
-                            is_good_finish = finish_reason and finish_reason.lower() in ("stop", "end_turn")
                             if ready_to_edit or is_final_edit:
                                 if edit_task is not None:
                                     await edit_task
