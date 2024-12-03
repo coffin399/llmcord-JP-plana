@@ -13,7 +13,8 @@
 planacordは、llmcordを基盤として開発された、Discord内でLLM（大規模言語モデル）と直接会話が可能になるツールです。リモートホスト型やローカルホスト型など、ほぼすべてのLLMに対応しています。
 
 ## 面倒な人向け:
-[ここをクリックでサンプルBOTをサーバーに入れられます](https://discord.com/api/oauth2/authorize?client_id=1031673203774464160&permissions=412317273088&scope=bot)   
+### [ここをクリックでBOTをサーバーに入れられます](https://discord.com/api/oauth2/authorize?client_id=1031673203774464160&permissions=412317273088&scope=bot)
+
 ## 概要
 
 ### 返信型LLM BOT
@@ -92,13 +93,12 @@ llmcordが対応しているAPIプラットフォームは以下の通りです:
 
 
 4. 実行:
-
-   **Dockerなし:**
+   **Dockerなし(またはstartPLANA.batをダブルクリック):**
    ```bash
    python -m pip install -U -r requirements.txt
    python llmcord.py
    ```
-
+   
    **Dockerあり:**
    ```bash
    docker compose up
