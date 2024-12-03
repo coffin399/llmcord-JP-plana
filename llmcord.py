@@ -2,6 +2,7 @@ import asyncio
 import logging
 import sqlite3
 import json
+import re
 from base64 import b64encode
 from dataclasses import dataclass, field
 from datetime import datetime as dt
@@ -34,6 +35,7 @@ EMBED_COLOR_INCOMPLETE = discord.Color.orange()
 STREAMING_INDICATOR = " <:stream:1313474295372058758>"
 EDIT_DELAY_SECONDS = 1
 MAX_MESSAGE_NODES = 100
+MENTION_PATTERN = re.compile(r'<@!?(\d+)>')
 
 
 def load_config(filename="config.yaml"):
