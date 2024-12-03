@@ -115,8 +115,7 @@ class DiscordLLMBot(discord.Client):
         max_text = self.cfg.get("max_text", 5000)
         max_images = self.cfg.get("max_images", 0) if accept_images else 0
         max_messages = self.cfg.get("max_messages", 5)
-        use_plain_responses = self.cfg.get("use_plain_responses", True)
-        max_message_length = 2000 if use_plain_responses else (4096 - len(STREAMING_INDICATOR))
+        max_message_length = 2000
 
         messages, user_warnings, user_ids = await self.build_message_chain(
             message,

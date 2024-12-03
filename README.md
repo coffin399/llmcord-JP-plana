@@ -1,119 +1,103 @@
 <h1 align="center">
-  llmcord
+  plana-cord-JP
 </h1>
 
 <h3 align="center"><i>
-  Talk to LLMs with your friends!
+  プラナちゃんとおしゃべりしよう！
 </i></h3>
 
 <p align="center">
-  <img src="https://github.com/jakobdylanc/llmcord/assets/38699060/789d49fe-ef5c-470e-b60e-48ac03057443" alt="">
+  <img src="https://cdn.discordapp.com/attachments/1231490510955483167/1313491646050209903/image.png?ex=675053eb&is=674f026b&hm=d5eabcb9184fb8cfced5bfa6c31df51c60acc5403f56381669fd36a855865724&" alt="">
 </p>
 
-llmcord lets you (and your friends) chat with LLMs directly in Discord. It works with practically any LLM, remote or locally hosted.
+planacordは、llmcordを基盤として開発された、Discord内でLLM（大規模言語モデル）と直接会話が可能になるツールです。リモートホスト型やローカルホスト型など、ほぼすべてのLLMに対応しています。
 
-## Features
+## 概要
 
-### Reply-based chat system
-Just @ the bot to start a conversation and reply to continue. Build conversations with reply chains!
+### 返信型LLM BOT
+BOTにメンションを付けて話しかけることで会話が始まり、その後返信を続けることで会話を展開できます。
 
-You can do things like:
-- Continue your own conversation or someone else's
-- "Rewind" a conversation by simply replying to an older message
-- @ the bot while replying to any message in your server to ask a question about it
+次のようなことが可能です:
+- 自分の会話を続ける、または他の人の会話を引き継ぐ
+- 過去のメッセージに返信して会話を「巻き戻す」
+- サーバー内の任意のメッセージに返信しながらBOTにメンションを付けて、その内容について質問する
 
-Additionally:
-- Back-to-back messages from the same user are automatically chained together. Just reply to the latest one and the bot will see all of them.
-- You can seamlessly move any conversation into a [thread](https://support.discord.com/hc/en-us/articles/4403205878423-Threads-FAQ). Just create a thread from any message and @ the bot inside to continue.
-- When DMing the bot, conversations continue automatically (no reply required). To start a fresh conversation, just @ the bot. You can still reply to continue from anywhere.
+さらに以下の特徴があります:
+- 同じユーザーによる連続メッセージは自動的にまとめて処理されます。最新のメッセージに返信するだけで、BOTはすべての内容を参照します。
+- 任意の会話を簡単に[スレッド](https://support.discord.com/hc/ja/articles/4403205878423-Threads-FAQ)に移行可能。任意のメッセージからスレッドを作成し、その中でBOTにメンションを付けて会話を続けられます。
+- BOTへのDMでは返信なしで会話が自動的に続きます。新しい会話を始めるには、BOTにメンションを付けます。任意の箇所から返信して続けることも可能です。
 
-### Choose any LLM
-llmcord supports remote models from:
+### 任意のLLMを選択可能
+llmcordが対応しているAPIプラットフォームは以下の通りです:
 - [OpenAI API](https://platform.openai.com/docs/models)
 - [xAI API](https://docs.x.ai/docs#models) (**New!**)
 - [Mistral API](https://docs.mistral.ai/platform/endpoints)
 - [Groq API](https://console.groq.com/docs/models)
 - [OpenRouter API](https://openrouter.ai/docs/models)
 
-Or run a local model with:
+ローカルモデルの例:
 - [Ollama](https://ollama.com)
 - [oobabooga](https://github.com/oobabooga/text-generation-webui)
 - [Jan](https://jan.ai)
 - [LM Studio](https://lmstudio.ai)
 
-Or use any other OpenAI compatible API server.
+また、OpenAI互換APIを任意のURLで利用することも可能です。
 
-### And more:
-- Supports image attachments when using a vision model (like gpt-4o, claude-3, llava, etc.)
-- Supports text file attachments (.txt, .py, .c, etc.)
-- Customizable personality (aka system prompt)
-- User identity aware (OpenAI API and xAI API only)
-- Streamed responses (turns green when complete, automatically splits into separate messages when too long)
-- Hot reloading config (you can change settings without restarting the bot)
-- Displays helpful warnings when appropriate (like "⚠️ Only using last 25 messages" when the customizable message limit is exceeded)
-- Caches message data in a size-managed (no memory leaks) and mutex-protected (no race conditions) global dictionary to maximize efficiency and minimize Discord API calls
-- Fully asynchronous
-- 1 Python file, ~200 lines of code
+### その他の特徴:
+- ビジョンモデル（gpt-4o, claude-3, llavaなど）を使用する場合、画像添付に対応
+- テキストファイル添付（.txt, .py, .c など）に対応
+- カスタマイズ可能なパーソナリティ（プラナのシステムプロンプトを書き換える事で可能）
+- ユーザーアイデンティティ対応
+- 設定のホットリロード（再起動せずに設定を変更可能）
+- 適切な警告を表示（例: "⚠️ 直近25メッセージのみを使用中"）
+- メッセージデータを効率的にキャッシュ管理（サイズ制限あり、メモリリークなし、レースコンディションなし）
+- 完全非同期処理
+- Pythonファイル1つ、約400行
 
-## Instructions
+## インストール手順
 
-1. Clone the repo:
+1. リポジトリをクローンします:
    ```bash
-   git clone https://github.com/jakobdylanc/llmcord
+   git clone https://github.com/coffin399/plana-cord-JP
    ```
 
-2. Create a copy of "config-example.yaml" named "config.yaml" and set it up:
+2. config.ymlを設定します:
 
-### Discord settings:
+### Discord 設定:
 
-| Setting | Description |
-| --- | --- |
-| **bot_token** | Create a new Discord bot at [discord.com/developers/applications](https://discord.com/developers/applications) and generate a token under the "Bot" tab. Also enable "MESSAGE CONTENT INTENT". |
-| **client_id** | Found under the "OAuth2" tab of the Discord bot you just made. |
-| **status_message** | Set a custom message that displays on the bot's Discord profile. **Max 128 characters.** |
-| **allowed_channel_ids** | A list of Discord channel IDs where the bot can be used. **Leave empty to allow all channels.** |
-| **allowed_role_ids** | A list of Discord role IDs that can use the bot. **Leave empty to allow everyone. Specifying at least one role also disables DMs.** |
-| **max_text** | The maximum amount of text allowed in a single message, including text from file attachments.<br />(Default: `100,000`) |
-| **max_images** | The maximum number of image attachments allowed in a single message. **Only applicable when using a vision model.**<br />(Default: `5`) |
-| **max_messages** | The maximum number of messages allowed in a reply chain.<br />(Default: `25`) |
-| **use_plain_responses** | When set to `true` the bot will use plaintext responses instead of embeds. Also, streamed responses and warning messages will be disabled.<br />(Default: `false`) |
+| Setting                 | Description                                                                                                                      |
+|-------------------------|----------------------------------------------------------------------------------------------------------------------------------|
+| **bot_token**           | [discord.com/developers/applications](https://discord.com/developers/applications) でbotトークンを作成し、 "MESSAGE CONTENT INTENT"を有効にします |
+| **client_id**           | "OAuth2" タブで見つけることが出来ます                                                                                                          |
+| **status_message**      | カスタムメッセージを設定することが出来ます. **最大128文字**                                                                                               |
+| **allowed_channel_ids** | チャンネルIDを指定すればそのチャンネルのみでの会話が可能です **空白にすることで全チャンネルで有効にできます**                                                                       |
+| **allowed_role_ids**    | BOTを使用できるロールIDのリスト **空にすると全員が利用可能。1つ以上指定するとDMが無効化されます。**                                                                         |
+| **max_text**            | 1つのメッセージで許可される最大テキスト量（添付ファイルのテキストも含む）。 <br />(Default: `100,000`)                                                                |
+| **max_images**          | 1つのメッセージで許可される最大画像添付数。 **ビジョンモデルを使用する場合のみ適用）**<br />(Default: `5`)                                                               |
+| **max_messages**        | 返信チェーンで許可される最大メッセージ数。<br />(Default: `25`)                                                                                       |
 
 ### LLM settings:
 
-| Setting | Description |
-| --- | --- |
-| **providers** | Add the LLM providers you want to use, each with a `base_url` and optional `api_key` entry. Common providers (`openai`, `ollama`, etc.) are already included. **Only supports OpenAI compatible APIs.** |
-| **model** | Set to `<provider name>/<model name>`, e.g:<br /><br />-`openai/gpt-4o`<br />-`ollama/llama3.2`<br />-`openrouter/anthropic/claude-3.5-sonnet` |
-| **extra_api_parameters** | Extra API parameters for your LLM. Add more entries as needed. **Refer to your provider's documentation for supported API parameters.**<br />(Default: `max_tokens=4096, temperature=1.0`) |
-| **system_prompt** | Write anything you want to customize the bot's behavior! **Leave blank for no system prompt.** |
+| Setting                  | Description                                                                                                                                       |
+|--------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------|
+| **providers**            | それぞれプロバイダを `base_url` と `api_key` で追加します。 一般的なプロバイダ (`openai`, `ollama`, etc.) は既に含まれています. **(OpenAI互換APIのみサポートします。)**                            |
+| **model**                | プロバイダとモデルの設定`<provider name>/<model name>`, 例:<br /><br />-`openai/gpt-4o`<br />-`ollama/llama3.2`<br />-`openrouter/anthropic/claude-3.5-sonnet` |
+| **extra_api_parameters** | TemperatureとMax Output Tokensの設定 <br />(Default: `max_tokens=4096, temperature=1.0`)                                                              |
+| **system_prompt**        | ここにいい感じのプロンプトを書くことでキャラクターになりきる事が出来ます。                                                                                                             |
+| **starter_prompt**       | ここにいい感じのスタータープロンプトを入力するとキャラクターの一貫性が上がります。                                                                                                         |
+| **bio_record**           | bio(記憶機能)関連の設定。bio_record.messageは記録時の特別メッセージ。                                                                                                    |
+| **error_msg**            | ユーザーに示されるエラーメッセージの設定。                                                                                                                             |
 
-3. Run the bot:
 
-   **No Docker:**
+3. 実行:
+
+   **Dockerなし:**
    ```bash
    python -m pip install -U -r requirements.txt
    python llmcord.py
    ```
 
-   **With Docker:**
+   **Dockerあり:**
    ```bash
    docker compose up
    ```
-
-## Notes
-
-- If you're having issues, try my suggestions [here](https://github.com/jakobdylanc/llmcord/issues/19)
-
-- Only models from OpenAI API and xAI API are "user identity aware" because only they support the "name" parameter in the message object. Hopefully more providers support this in the future.
-
-- PRs are welcome :)
-
-## Star History
-
-<a href="https://star-history.com/#jakobdylanc/llmcord&Date">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=jakobdylanc/llmcord&type=Date&theme=dark" />
-    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=jakobdylanc/llmcord&type=Date" />
-    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=jakobdylanc/llmcord&type=Date" />
-  </picture>
-</a>
