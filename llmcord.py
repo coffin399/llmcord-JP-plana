@@ -195,7 +195,6 @@ class DiscordLLMBot(discord.Client):
         user_ids = set()
         curr_msg = new_msg
 
-        # @TODO 文中の<@8491851898401~~~>(メンション)を実際のユーザー名に置き換える。
 
         while curr_msg is not None and len(messages) < max_messages:
             curr_node = self.message_nodes.setdefault(curr_msg.id, MessageNode())
@@ -219,14 +218,23 @@ class DiscordLLMBot(discord.Client):
 
     async def process_message_node(self, curr_node, curr_msg, accept_images, max_text):
         """Process an individual message node."""
+
+        # Replace mentions with actual usernames
+        original_content = curr_msg.content or ""
+        replaced_content = await self.replace_mentions_with_usernames(original_content)
+
+        # Continue with the existing processing using the replaced content
+        if curr_msg.author != self.user:
+            display_name = curr_msg.author.display_name
+            message_content = f"{display_name}: {replaced_content}" if replaced_content else display_name
+        else:
+            message_content = replaced_content
+
+        # Fetch and process attachments as before
         good_attachments = {
             file_type: [att for att in curr_msg.attachments if att.content_type and file_type in att.content_type]
             for file_type in ALLOWED_FILE_TYPES
         }
-        message_content = curr_msg.content or ""
-        if curr_msg.author != self.user:
-            display_name = curr_msg.author.display_name
-            message_content = f"{display_name}: {message_content}" if message_content else display_name
         attachment_texts = [await self.fetch_attachment_text(att) for att in good_attachments["text"]]
         embed_descriptions = [embed.description for embed in curr_msg.embeds if embed.description]
 
@@ -263,6 +271,37 @@ class DiscordLLMBot(discord.Client):
                 "url": f"data:{attachment.content_type};base64,{base64_content}"
             }
         }
+
+    async def replace_mentions_with_usernames(self, content):
+        """
+        Replace Discord user mentions in the content with actual usernames.
+
+        Args:
+            content (str): The message content containing mentions.
+
+        Returns:
+            str: The content with mentions replaced by usernames.
+        """
+        user_ids = {int(match.group(1)) for match in MENTION_PATTERN.finditer(content)}
+        users = {}
+
+        for user_id in user_ids:
+            user = self.get_user(user_id)
+            if not user:
+                try:
+                    user = await self.fetch_user(user_id)
+                except discord.NotFound:
+                    user = None
+            if user:
+                users[user_id] = user.display_name
+            else:
+                users[user_id] = f'User{user_id}'
+
+        def replacer(match):
+            user_id = int(match.group(1))
+            return users.get(user_id, f'User{user_id}')
+
+        return MENTION_PATTERN.sub(replacer, content)
 
     async def set_next_message(self, curr_node, curr_msg):
         """Determine the next message in the conversation chain."""
@@ -374,7 +413,8 @@ class DiscordLLMBot(discord.Client):
                                         )
                                         self.conn.commit()
 
-                                        await message.reply(self.BIO_RECORD_MESSAGE, silent=True)
+                                        confirmation = "…記録しました。"
+                                        await message.reply(confirmation, silent=True)
                                 except json.JSONDecodeError:
                                     logging.error("Failed to decode function call arguments.")
 
@@ -404,6 +444,7 @@ class DiscordLLMBot(discord.Client):
                             )
                             msg_split_incoming = len(response_contents[-1] + curr_content) > max_message_length
                             is_final_edit = finish_reason is not None or msg_split_incoming
+                            is_good_finish = finish_reason and finish_reason.lower() in ("stop", "end_turn")
                             if ready_to_edit or is_final_edit:
                                 if edit_task is not None:
                                     await edit_task
@@ -415,23 +456,18 @@ class DiscordLLMBot(discord.Client):
                                 self.last_task_time = dt.now().timestamp()
                     prev_chunk = curr_chunk
 
-            for content in response_contents:
-                if content:
-                    self.message_nodes[response_msg.id] = MessageNode(next_message=message)
-                    await self.message_nodes[response_msg.id].lock.acquire()
-                    response_msgs.append(response_msg)
         except Exception:
             logging.exception("Error while generating response")
 
         for msg in response_msgs:
             self.message_nodes[msg.id].text = "".join(response_contents)
-            self.message_nodes[msg.id].lock.release()
+            if self.message_nodes[msg.id].lock.locked():
+                self.message_nodes[msg.id].lock.release()
 
         if (num_nodes := len(self.message_nodes)) > MAX_MESSAGE_NODES:
             for msg_id in sorted(self.message_nodes.keys())[: num_nodes - MAX_MESSAGE_NODES]:
                 async with self.message_nodes.setdefault(msg_id, MessageNode()).lock:
                     self.message_nodes.pop(msg_id, None)
-
 
 async def main():
     cfg = load_config()
