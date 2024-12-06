@@ -62,7 +62,7 @@ llmcordが対応しているAPIプラットフォームは以下の通りです:
 
 1. リポジトリをクローンします:
    ```bash
-   git clone https://github.com/coffin399/plana-cord-JP
+   git clone https://github.com/coffin399/llmcord-JP-plana
    ```
 
 2. config.ymlを設定します:
