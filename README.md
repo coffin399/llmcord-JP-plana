@@ -7,7 +7,7 @@
 </i></h3>
 
 <p align="center">
-  <img src="https://discord.com/channels/1230870410963193967/1230870410963193970/1335891540249415701" alt="">
+  <img src="https://imgur.com/a/ra9QYMS" alt="">
 </p>
 
 planacordは、llmcordを基盤として開発された、Discord内でLLM（大規模言語モデル）と直接会話が可能になるツールです。リモートホスト型やローカルホスト型など、ほぼすべてのLLMに対応しています。
