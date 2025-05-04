@@ -1,125 +1,146 @@
+from __future__ import annotations
+
 import asyncio
 import logging
-import sqlite3
-import json
 import re
 from base64 import b64encode
 from dataclasses import dataclass, field
 from datetime import datetime as dt
-from typing import Literal, Optional
+from typing import Literal, Optional, Set, Tuple, List
 
 import discord
+from discord import app_commands
 import httpx
 import yaml
 from openai import AsyncOpenAI
 
-# Configure logging
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s: %(message)s",
 )
 
-# Constants
-VISION_MODEL_TAGS = ("gpt-4o", "claude-3", "gemini", "pixtral", "llava", "vision")
-PROVIDERS_SUPPORTING_USERNAMES = ("openai", "x-ai")
-ALLOWED_FILE_TYPES = ("image", "text")
-ALLOWED_CHANNEL_TYPES = (
+VISION_MODEL_TAGS: Tuple[str, ...] = (
+    "gpt-4o",
+    "claude-3",
+    "gemini",
+    "pixtral",
+    "llava",
+    "vision",
+)
+PROVIDERS_SUPPORTING_USERNAMES: Tuple[str, ...] = ("openai", "x-ai")
+
+ALLOWED_FILE_TYPES: Tuple[str, ...] = ("image", "text")
+
+ALLOWED_CHANNEL_TYPES: Tuple[discord.ChannelType, ...] = (
     discord.ChannelType.text,
     discord.ChannelType.public_thread,
     discord.ChannelType.private_thread,
     discord.ChannelType.private,
 )
+
 EMBED_COLOR_COMPLETE = discord.Color.dark_green()
 EMBED_COLOR_INCOMPLETE = discord.Color.orange()
-#STREAMING_INDICATOR = " ⚪"
-STREAMING_INDICATOR = " <:stream:1313474295372058758>"
+STREAMING_INDICATOR = "<:stream:1313474295372058758>"
 EDIT_DELAY_SECONDS = 1
 MAX_MESSAGE_NODES = 100
-MENTION_PATTERN = re.compile(r'<@!?(\d+)>')
+MENTION_PATTERN = re.compile(r"<@!?(\d+)>")
+
+def load_config(filename: str = "config.yaml") -> dict:
+    """Load (or reload) the YAML configuration file."""
+    with open(filename, "r", encoding="utf-8") as fh:
+        return yaml.safe_load(fh)
 
 
-def load_config(filename="config.yaml"):
-    """Load configuration from a YAML file."""
-    with open(filename, "r", encoding="utf-8") as file:
-        return yaml.safe_load(file)
-
+def should_respond(client_user: discord.User, message: discord.Message) -> bool:
+    """Fast path – decide whether we even parse this message."""
+    if message.channel.type not in ALLOWED_CHANNEL_TYPES:
+        return False
+    if message.channel.type != discord.ChannelType.private and client_user not in message.mentions:
+        return False
+    if message.author.bot:
+        return False
+    return True
 
 @dataclass
 class MessageNode:
-    """Represents a node in the message chain."""
+    """Represents one vertex in the message chain."""
+
     text: Optional[str] = None
-    images: list = field(default_factory=list)
+    images: List[dict] = field(default_factory=list)
     role: Literal["user", "assistant"] = "assistant"
     user_id: Optional[int] = None
     next_message: Optional[discord.Message] = None
     has_bad_attachments: bool = False
     fetch_next_failed: bool = False
-    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
-
+    lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
 
 class DiscordLLMBot(discord.Client):
-    """Discord bot that interacts with LLMs via OpenAI's API."""
+    """Discord bot that forwards conversation to an LLM."""
 
-    def __init__(self, cfg):
+    cfg_path: str
+
+    def __init__(self, cfg_path: str = "config.yaml") -> None:
+        self.cfg_path = cfg_path
+        self.cfg = load_config(cfg_path)
+
         intents = discord.Intents.default()
         intents.message_content = True
+
         activity = discord.CustomActivity(
-            name=(cfg.get("status_message") or "github.com/jakobdylanc/llmcord")[:128]
+            name=(self.cfg.get("status_message") or "github.com/jakobdylanc/llmcord")[:128]
         )
         super().__init__(intents=intents, activity=activity)
 
-        self.cfg = cfg
-        self.message_nodes = {}
-        self.last_task_time = None
+        self.tree = app_commands.CommandTree(self)
+        self._register_slash_commands()
+
+        self.message_nodes: dict[int, MessageNode] = {}
+        self.last_task_time: Optional[float] = None
         self.httpx_client = httpx.AsyncClient()
-        self.SYSTEM_PROMPT = cfg.get("system_prompt")
-        self.STARTER_PROMPT = cfg.get("starter_prompt")
-        self.BIO_RECORD_MESSAGE = cfg.get("bio_record.message")
-        self.ERROR_MESSAGES = cfg.get("error_msg")
 
-        self.conn = sqlite3.connect('bios.db')
-        self.cursor = self.conn.cursor()
-        self.cursor.execute('''
-            CREATE TABLE IF NOT EXISTS bios (
-                user_id INTEGER,
-                bio_text TEXT
-            )
-        ''')
-        self.conn.commit()
+        self.SYSTEM_PROMPT: str | None = self.cfg.get("system_prompt")
+        self.STARTER_PROMPT: str | None = self.cfg.get("starter_prompt")
+        self.ERROR_MESSAGES: dict[str, str] = self.cfg.get("error_msg", {})
 
-    async def on_message(self, message):
-        """Handle incoming messages."""
-        if not self.is_valid_message(message):
+    async def setup_hook(self) -> None:
+        """Called once the client is connected; sync application commands."""
+        await self.tree.sync()
+        logging.info("Slash‑commands registered.")
+
+    async def on_message(self, message: discord.Message) -> None:
+        """Handle incoming traditional text messages (prefixed with @mention)."""
+        if not should_respond(self.user, message):
             return
-        if not self.is_authorized_user(message):
+        if not self._is_authorised(message):
             return
 
-        self.cfg = load_config()
-
+        self.cfg = load_config(self.cfg_path)
         provider_model = self.cfg.get("model", "")
         if not provider_model:
-            logging.error("No model specified in the configuration.")
+            logging.error("No 'model' key found in config.yaml – aborting.")
             return
 
         provider, model = provider_model.split("/", 1)
         provider_cfg = self.cfg["providers"].get(provider)
         if not provider_cfg:
-            logging.error(f"No configuration found for provider '{provider}'.")
+            logging.error("Provider '%s' missing in config.yaml – aborting.", provider)
             return
 
-        base_url = provider_cfg.get("base_url")
-        api_key = provider_cfg.get("api_key", "sk-no-key-required")
-        openai_client = AsyncOpenAI(base_url=base_url, api_key=api_key)
+        openai_client = AsyncOpenAI(
+            base_url=provider_cfg.get("base_url"),
+            api_key=provider_cfg.get("api_key", "sk-no-key-required"),
+        )
 
         accept_images = any(tag in model for tag in VISION_MODEL_TAGS)
         accept_usernames = provider in PROVIDERS_SUPPORTING_USERNAMES
 
-        max_text = self.cfg.get("max_text", 5000)
+        max_text = self.cfg.get("max_text", 5_000)
         max_images = self.cfg.get("max_images", 0) if accept_images else 0
         max_messages = self.cfg.get("max_messages", 5)
-        max_message_length = 2000
+        max_message_length = 2_000
 
-        messages, user_warnings, user_ids = await self.build_message_chain(
+        messages, user_warnings = await self._build_message_chain(
             message,
             max_messages,
             max_text,
@@ -127,34 +148,20 @@ class DiscordLLMBot(discord.Client):
             accept_images,
             accept_usernames,
         )
-
-        user_bios = {}
-        for uid in user_ids:
-            self.cursor.execute('SELECT bio_text FROM bios WHERE user_id = ?', (uid,))
-            bios = self.cursor.fetchall()
-            bios_texts = [bio[0] for bio in bios]
-            if bios_texts:
-                user_bios[uid] = bios_texts
-
-        bios_content = "## User Bios:\n"
-        for uid, bios in user_bios.items():
-            user = self.get_user(uid) or await self.fetch_user(uid)
-            display_name = user.display_name if user else f"User {uid}"
-            bios_content += f"- {display_name}:\n"
-            for bio in bios:
-                bios_content += f"  - {bio}\n"
-
         logging.info(
-            f"Message received (user ID: {message.author.id}, attachments: {len(message.attachments)}, conversation length: {len(messages)}):\n{message.content}"
+            "Message from %s (attachments=%d, conversation=%d): %s",
+            message.author.id,
+            len(message.attachments),
+            len(messages),
+            message.content,
         )
 
-        full_system_prompt = {"role": "system", "content": self.SYSTEM_PROMPT}
-        starter_message = {"role": "assistant", "content": f"{bios_content} \n {self.STARTER_PROMPT}"}
-        messages.insert(0, full_system_prompt)
+        system_prompt = {"role": "system", "content": self.SYSTEM_PROMPT}
+        starter_message = {"role": "assistant", "content": self.STARTER_PROMPT}
+        messages.insert(0, system_prompt)
         messages.insert(1, starter_message)
 
-
-        await self.generate_and_send_response(
+        await self._generate_and_send_response(
             messages,
             message,
             user_warnings,
@@ -163,321 +170,273 @@ class DiscordLLMBot(discord.Client):
             max_message_length,
         )
 
-    def is_valid_message(self, message):
-        """Check if the message should be processed."""
-        if message.channel.type not in ALLOWED_CHANNEL_TYPES:
-            return False
-        if message.channel.type != discord.ChannelType.private and self.user not in message.mentions:
-            return False
-        if message.author.bot:
-            return False
-        return True
+    def _register_slash_commands(self) -> None:
+        """Register slash commands on the local CommandTree."""
 
-    def is_authorized_user(self, message):
-        """Check if the message author is authorized."""
-        allowed_channel_ids = self.cfg.get("allowed_channel_ids", [])
-        allowed_role_ids = self.cfg.get("allowed_role_ids", [])
-        channel_id = message.channel.id
+        @self.tree.command(name="help", description="Display the help message")
+        async def _help(interaction: discord.Interaction) -> None:  # noqa: WPS430
+            help_text = self.cfg.get("help_message", "Help message not configured.")
+            await interaction.response.send_message(help_text, ephemeral=True)
+
+    def _is_authorised(self, message: discord.Message) -> bool:
+        """Check whether the author or channel is allowed to interact."""
+        allowed_channels = set(self.cfg.get("allowed_channel_ids", []))
+        allowed_roles = set(self.cfg.get("allowed_role_ids", []))
+
+        chan_id = message.channel.id
         parent_id = getattr(message.channel, "parent_id", None)
-        if allowed_channel_ids and channel_id not in allowed_channel_ids and parent_id not in allowed_channel_ids:
+        if allowed_channels and chan_id not in allowed_channels and parent_id not in allowed_channels:
             return False
-        if allowed_role_ids:
-            roles = getattr(message.author, "roles", [])
-            role_ids = [role.id for role in roles]
-            if not any(role_id in allowed_role_ids for role_id in role_ids):
+        if allowed_roles:
+            user_role_ids = {role.id for role in getattr(message.author, "roles", [])}
+            if not user_role_ids & allowed_roles:
                 return False
         return True
 
-    async def build_message_chain(self, new_msg, max_messages, max_text, max_images, accept_images, accept_usernames):
-        """Build the message chain for the conversation."""
-        messages = []
-        user_warnings = set()
-        user_ids = set()
-        curr_msg = new_msg
+    async def _build_message_chain(
+        self,
+        new_msg: discord.Message,
+        max_messages: int,
+        max_text: int,
+        max_images: int,
+        accept_images: bool,
+        accept_usernames: bool,
+    ) -> tuple[list[dict], Set[str]]:
+        """Walk backwards through the thread and gather context."""
+        messages: list[dict] = []
+        user_warnings: set[str] = set()
+        curr_msg: Optional[discord.Message] = new_msg
 
+        while curr_msg and len(messages) < max_messages:
+            node = self.message_nodes.setdefault(curr_msg.id, MessageNode())
+            async with node.lock:
+                if node.text is None:
+                    await self._process_message_node(node, curr_msg, accept_images, max_text)
 
-        while curr_msg is not None and len(messages) < max_messages:
-            curr_node = self.message_nodes.setdefault(curr_msg.id, MessageNode())
-            async with curr_node.lock:
-                if curr_node.text is None:
-                    await self.process_message_node(curr_node, curr_msg, accept_images, max_text)
-                content = self.get_message_content(curr_node, max_text, max_images)
-                if content != "":
-                    message = {"content": content, "role": curr_node.role}
-                    if accept_usernames and curr_node.user_id is not None:
-                        message["name"] = str(curr_node.user_id)
-                    messages.append(message)
-                self.update_user_warnings(curr_node, max_text, max_images, user_warnings)
-                if curr_node.fetch_next_failed or (curr_node.next_message is not None and len(messages) == max_messages):
-                    user_warnings.add(f"⚠️ Only using last {len(messages)} message{'s' if len(messages) != 1 else ''}")
-                if curr_node.user_id:
-                    user_ids.add(curr_node.user_id)
-                curr_msg = curr_node.next_message
+                content = self._compose_message_content(node, max_text, max_images)
+                if content:
+                    payload: dict = {"content": content, "role": node.role}
+                    if accept_usernames and node.user_id:
+                        payload["name"] = str(node.user_id)
+                    messages.append(payload)
 
-        return messages[::-1], user_warnings, user_ids  # Reverse messages to correct order
+                self._update_user_warnings(node, max_text, max_images, user_warnings)
+                if node.fetch_next_failed or (
+                    node.next_message is not None and len(messages) == max_messages
+                ):
+                    user_warnings.add(
+                        f"⚠️ Only using last {len(messages)} message{'s' if len(messages)!=1 else ''}"
+                    )
+                curr_msg = node.next_message
 
-    async def process_message_node(self, curr_node, curr_msg, accept_images, max_text):
-        """Process an individual message node."""
+        return messages[::-1], user_warnings
 
-        # Replace mentions with actual usernames
-        original_content = curr_msg.content or ""
-        replaced_content = await self.replace_mentions_with_usernames(original_content)
+    async def _process_message_node(
+        self,
+        node: MessageNode,
+        msg: discord.Message,
+        accept_images: bool,
+        max_text: int,
+    ) -> None:
+        """Parse a Discord message into a MessageNode."""
 
-        # Continue with the existing processing using the replaced content
-        if curr_msg.author != self.user:
-            display_name = curr_msg.author.display_name
+        raw_content = msg.content or ""
+        replaced_content = await self._replace_mentions(raw_content)
+
+        if msg.author != self.user:
+            display_name = msg.author.display_name
             message_content = f"{display_name}: {replaced_content}" if replaced_content else display_name
         else:
             message_content = replaced_content
 
-        # Fetch and process attachments as before
-        good_attachments = {
-            file_type: [att for att in curr_msg.attachments if att.content_type and file_type in att.content_type]
-            for file_type in ALLOWED_FILE_TYPES
+        good_atts: dict[str, list[discord.Attachment]] = {
+            ft: [att for att in msg.attachments if att.content_type and ft in att.content_type]
+            for ft in ALLOWED_FILE_TYPES
         }
-        attachment_texts = [await self.fetch_attachment_text(att) for att in good_attachments["text"]]
-        embed_descriptions = [embed.description for embed in curr_msg.embeds if embed.description]
+        attachment_texts = [await self._fetch_attachment_text(att) for att in good_atts["text"]]
+        embed_desc = [embed.description for embed in msg.embeds if embed.description]
 
-        curr_node.text = "\n".join(
-            [message_content] + embed_descriptions + attachment_texts
+        node.text = "\n".join([message_content] + embed_desc + attachment_texts)
+
+        if node.text.startswith(self.user.mention):
+            node.text = node.text.replace(self.user.mention, "", 1).lstrip()
+            if msg.author != self.user:
+                node.text = f"{msg.author.display_name}: {node.text}"
+
+        node.images = (
+            [await self._process_image(att) for att in good_atts["image"]] if accept_images else []
         )
+        node.role = "assistant" if msg.author == self.user else "user"
+        node.user_id = msg.author.id if node.role == "user" else None
+        node.has_bad_attachments = len(msg.attachments) > sum(len(v) for v in good_atts.values())
+        await self._set_next_message(node, msg)
 
-        if curr_node.text.startswith(self.user.mention):
-            curr_node.text = curr_node.text.replace(self.user.mention, "", 1).lstrip()
-            if curr_msg.author != self.user:
-                curr_node.text = f"{curr_msg.author.display_name}: {curr_node.text}"
-
-        curr_node.images = [
-            await self.process_image_attachment(att) for att in good_attachments["image"]
-        ] if accept_images else []
-        curr_node.role = "assistant" if curr_msg.author == self.user else "user"
-        curr_node.user_id = curr_msg.author.id if curr_node.role == "user" else None
-        curr_node.has_bad_attachments = len(curr_msg.attachments) > sum(
-            len(att_list) for att_list in good_attachments.values())
-        await self.set_next_message(curr_node, curr_msg)
-
-    async def fetch_attachment_text(self, attachment):
-        """Fetch text from an attachment."""
-        response = await self.httpx_client.get(attachment.url)
+    async def _fetch_attachment_text(self, att: discord.Attachment) -> str:
+        response = await self.httpx_client.get(att.url)
         return response.text
 
-    async def process_image_attachment(self, attachment):
-        """Process an image attachment."""
-        response = await self.httpx_client.get(attachment.url)
-        base64_content = b64encode(response.content).decode('utf-8')
+    async def _process_image(self, att: discord.Attachment) -> dict:
+        response = await self.httpx_client.get(att.url)
+        b64 = b64encode(response.content).decode()
         return {
             "type": "image_url",
-            "image_url": {
-                "url": f"data:{attachment.content_type};base64,{base64_content}"
-            }
+            "image_url": {"url": f"data:{att.content_type};base64,{b64}"},
         }
 
-    async def replace_mentions_with_usernames(self, content):
-        """
-        Replace Discord user mentions in the content with actual usernames.
+    async def _replace_mentions(self, content: str) -> str:
+        user_ids = {int(m.group(1)) for m in MENTION_PATTERN.finditer(content)}
+        users: dict[int, str] = {}
+        for uid in user_ids:
+            user = self.get_user(uid) or await self.fetch_user(uid)
+            users[uid] = user.display_name if user else f"User{uid}"
+        return MENTION_PATTERN.sub(lambda m: users[int(m.group(1))], content)
 
-        Args:
-            content (str): The message content containing mentions.
-
-        Returns:
-            str: The content with mentions replaced by usernames.
-        """
-        user_ids = {int(match.group(1)) for match in MENTION_PATTERN.finditer(content)}
-        users = {}
-
-        for user_id in user_ids:
-            user = self.get_user(user_id)
-            if not user:
-                try:
-                    user = await self.fetch_user(user_id)
-                except discord.NotFound:
-                    user = None
-            if user:
-                users[user_id] = user.display_name
-            else:
-                users[user_id] = f'User{user_id}'
-
-        def replacer(match):
-            user_id = int(match.group(1))
-            return users.get(user_id, f'User{user_id}')
-
-        return MENTION_PATTERN.sub(replacer, content)
-
-    async def set_next_message(self, curr_node, curr_msg):
-        """Determine the next message in the conversation chain."""
+    async def _set_next_message(self, node: MessageNode, msg: discord.Message) -> None:
         try:
             if (
-                    curr_msg.reference is None
-                    and self.user.mention not in curr_msg.content
-                    and (prev_msgs := [msg async for msg in curr_msg.channel.history(before=curr_msg, limit=1)])
-                    and prev_msgs[0].type in (discord.MessageType.default, discord.MessageType.reply)
-                    and prev_msgs[0].author == (self.user if curr_msg.channel.type == discord.ChannelType.private else curr_msg.author)
+                msg.reference is None
+                and self.user.mention not in msg.content
+                and (
+                    prev := [m async for m in msg.channel.history(before=msg, limit=1)]
+                )
+                and prev[0].type in {discord.MessageType.default, discord.MessageType.reply}
+                and prev[0].author == (
+                    self.user if msg.channel.type == discord.ChannelType.private else msg.author
+                )
             ):
-                curr_node.next_message = prev_msgs[0]
+                node.next_message = prev[0]
             else:
-                next_is_thread_parent = curr_msg.reference is None and curr_msg.channel.type == discord.ChannelType.public_thread
-                next_msg_id = curr_msg.channel.id if next_is_thread_parent else getattr(curr_msg.reference, "message_id", None)
-
+                next_is_thread_parent = (
+                    msg.reference is None and msg.channel.type == discord.ChannelType.public_thread
+                )
+                next_msg_id = (
+                    msg.channel.id if next_is_thread_parent else getattr(msg.reference, "message_id", None)
+                )
                 if next_msg_id:
                     if next_is_thread_parent:
-                        curr_node.next_message = curr_msg.channel.starter_message or await curr_msg.channel.parent.fetch_message(next_msg_id)
+                        node.next_message = (
+                            msg.channel.starter_message or await msg.channel.parent.fetch_message(next_msg_id)
+                        )
                     else:
-                        curr_node.next_message = curr_msg.reference.cached_message or await curr_msg.channel.fetch_message(next_msg_id)
-
+                        node.next_message = (
+                            msg.reference.cached_message or await msg.channel.fetch_message(next_msg_id)
+                        )
         except (discord.NotFound, discord.HTTPException, AttributeError):
-            logging.exception("Error fetching next message in the chain")
-            curr_node.fetch_next_failed = True
+            logging.exception("Failed to fetch the next message in chain.")
+            node.fetch_next_failed = True
 
-    def get_message_content(self, curr_node, max_text, max_images):
-        """Assemble the content for the message."""
-        if curr_node.images[:max_images]:
-            content = (
-                          [{"type": "text", "text": curr_node.text[:max_text]}] if curr_node.text[:max_text] else []
-                      ) + curr_node.images[:max_images]
-        else:
-            content = curr_node.text[:max_text]
-        return content
+    def _compose_message_content(
+        self, node: MessageNode, max_text: int, max_images: int
+    ) -> str | list:
+        if node.images[:max_images]:
+            return (
+                ([{"type": "text", "text": node.text[:max_text]}] if node.text[:max_text] else [])
+                + node.images[:max_images]
+            )
+        return node.text[:max_text]
 
-    def update_user_warnings(self, curr_node, max_text, max_images, user_warnings):
-        """Update the set of user warnings based on message content."""
-
-        messages = self.ERROR_MESSAGES
-
-        if len(curr_node.text) > max_text:
-            user_warnings.add(messages["msg_max_text_size"].format(max_text=max_text))
-        if len(curr_node.images) > max_images:
-            if max_images > 0:
-                user_warnings.add(messages["msg_max_image_size"].format(max_images=max_images))
+    def _update_user_warnings(
+        self, node: MessageNode, max_text: int, max_images: int, warnings: set[str]
+    ) -> None:
+        err = self.ERROR_MESSAGES
+        if len(node.text) > max_text:
+            warnings.add(err.get("msg_max_text_size", "Text too long").format(max_text=max_text))
+        if len(node.images) > max_images:
+            if max_images:
+                warnings.add(err.get("msg_max_image_size", "Too many images").format(max_images=max_images))
             else:
-                user_warnings.add(messages["msg_error_image"])
-        if curr_node.has_bad_attachments:
-            user_warnings.add(messages["msg_error_attachment"])
+                warnings.add(err.get("msg_error_image", "Images not allowed"))
+        if node.has_bad_attachments:
+            warnings.add(err.get("msg_error_attachment", "Unsupported attachment"))
 
-    async def generate_and_send_response(
-            self, messages, message, user_warnings, openai_client, model, max_message_length
-    ):
-        """Generate a response using OpenAI's API and send it to Discord as raw text."""
-        response_msgs = []
-        response_contents = []
+    async def _generate_and_send_response(
+        self,
+        messages: list[dict],
+        origin: discord.Message,
+        user_warnings: set[str],
+        openai_client: AsyncOpenAI,
+        model: str,
+        max_message_length: int,
+    ) -> None:
+        response_msgs: list[discord.Message] = []
+        response_chunks: list[str] = []
         prev_chunk = None
-        edit_task = None
+        edit_task: Optional[asyncio.Task] = None
         self.last_task_time = dt.now().timestamp()
 
-        functions = [
-            {
-                "type": "function",
-                "function": {
-                    "name": "record_bio",
-                    "description": "Record bio information for a user",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "bio_text": {
-                                "type": "string",
-                                "description": "The bio text to record",
-                            },
-                        },
-                        "required": ["bio_text"],
-                    },
-                }
-            },
-        ]
-
-        kwargs = dict(
+        api_kwargs = dict(
             model=model,
             messages=messages,
             stream=True,
-            tools=functions,
             extra_body=self.cfg.get("extra_api_parameters", {}),
         )
 
         try:
-            async with message.channel.typing():
-                async for curr_chunk in await openai_client.chat.completions.create(**kwargs):
-                    if hasattr(curr_chunk, 'choices') and len(curr_chunk.choices) > 0:
-                        choice = curr_chunk.choices[0]
-                        if choice.finish_reason == "tool_calls" and choice.delta.tool_calls:
-                            function_name = choice.delta.tool_calls[0].function.name
-                            function_args = choice.delta.tool_calls[0].function.arguments
-                            if function_name == "record_bio":
-                                try:
-                                    args = json.loads(function_args)
-                                    bio_text = args.get("bio_text", "").strip()
-                                    user_id = message.author.id
+            async with origin.channel.typing():
+                async for curr_chunk in await openai_client.chat.completions.create(**api_kwargs):
+                    if not (hasattr(curr_chunk, "choices") and curr_chunk.choices):
+                        continue
 
-                                    if bio_text:
-                                        print(bio_text)
-                                        self.cursor.execute(
-                                            'INSERT INTO bios (user_id, bio_text) VALUES (?, ?)',
-                                            (user_id, bio_text)
-                                        )
-                                        self.conn.commit()
+                    prev_content = prev_chunk.choices[0].delta.content if prev_chunk else ""
+                    curr_content = curr_chunk.choices[0].delta.content or ""
 
-                                        confirmation = self.BIO_RECORD_MESSAGE
-                                        await message.reply(confirmation, silent=True)
-                                except json.JSONDecodeError:
-                                    logging.error("Failed to decode function call arguments.")
-
-                            continue
-
-                        prev_content = (
-                            prev_chunk.choices[0].delta.content if prev_chunk and prev_chunk.choices[
-                                0].delta.content else ""
-                        )
-                        curr_content = curr_chunk.choices[0].delta.content or ""
-                        if response_contents or prev_content:
-                            if not response_contents or len(response_contents[-1] + prev_content) > max_message_length:
-                                response_contents.append("")
-                                content_to_send = prev_content + " " + " ".join(sorted(user_warnings))
-                                response_msg = await (message if not response_msgs else response_msgs[-1]).reply(
-                                    content=(content_to_send + "\u2026"), silent=True
-                                )
-                                self.message_nodes[response_msg.id] = MessageNode(next_message=message)
-                                await self.message_nodes[response_msg.id].lock.acquire()
-                                response_msgs.append(response_msg)
-                                self.last_task_time = dt.now().timestamp()
-                            response_contents[-1] += prev_content
-                            finish_reason = curr_chunk.choices[0].finish_reason
-                            ready_to_edit = (
-                                    (edit_task is None or edit_task.done())
-                                    and dt.now().timestamp() - self.last_task_time >= EDIT_DELAY_SECONDS
+                    if response_chunks or prev_content:
+                        if (
+                            not response_chunks
+                            or len(response_chunks[-1] + prev_content) > max_message_length
+                        ):
+                            response_chunks.append("")
+                            initial = prev_content + " " + " ".join(sorted(user_warnings))
+                            msg = await (origin if not response_msgs else response_msgs[-1]).reply(
+                                content=initial + "\u2026", silent=True
                             )
-                            msg_split_incoming = len(response_contents[-1] + curr_content) > max_message_length
-                            is_final_edit = finish_reason is not None or msg_split_incoming
-                            if ready_to_edit or is_final_edit:
-                                if edit_task is not None:
-                                    await edit_task
-                                new_content = (
-                                    response_contents[-1] if is_final_edit else
-                                    (response_contents[-1] + "\u2026")
-                                )
-                                edit_task = asyncio.create_task(response_msgs[-1].edit(content=new_content))
-                                self.last_task_time = dt.now().timestamp()
-                    prev_chunk = curr_chunk
+                            self.message_nodes[msg.id] = MessageNode(next_message=origin)
+                            await self.message_nodes[msg.id].lock.acquire()
+                            response_msgs.append(msg)
+                            self.last_task_time = dt.now().timestamp()
+                        response_chunks[-1] += prev_content
 
+                        finish_reason = curr_chunk.choices[0].finish_reason
+                        ready_to_edit = (
+                            (edit_task is None or edit_task.done())
+                            and dt.now().timestamp() - self.last_task_time >= EDIT_DELAY_SECONDS
+                        )
+                        msg_split_incoming = len(response_chunks[-1] + curr_content) > max_message_length
+                        is_final_edit = finish_reason is not None or msg_split_incoming
+                        if ready_to_edit or is_final_edit:
+                            if edit_task is not None:
+                                await edit_task
+                            new_content = response_chunks[-1] if is_final_edit else response_chunks[-1] + "\u2026"
+                            edit_task = asyncio.create_task(response_msgs[-1].edit(content=new_content))
+                            self.last_task_time = dt.now().timestamp()
+
+                    prev_chunk = curr_chunk
         except Exception:
-            logging.exception("Error while generating response")
+            logging.exception("Error during response generation.")
 
         for msg in response_msgs:
-            self.message_nodes[msg.id].text = "".join(response_contents)
+            self.message_nodes[msg.id].text = "".join(response_chunks)
             if self.message_nodes[msg.id].lock.locked():
                 self.message_nodes[msg.id].lock.release()
 
-        if (num_nodes := len(self.message_nodes)) > MAX_MESSAGE_NODES:
-            for msg_id in sorted(self.message_nodes.keys())[: num_nodes - MAX_MESSAGE_NODES]:
-                async with self.message_nodes.setdefault(msg_id, MessageNode()).lock:
-                    self.message_nodes.pop(msg_id, None)
+        if (n := len(self.message_nodes)) > MAX_MESSAGE_NODES:
+            for mid in sorted(self.message_nodes)[: n - MAX_MESSAGE_NODES]:
+                async with self.message_nodes.setdefault(mid, MessageNode()).lock:
+                    self.message_nodes.pop(mid, None)
 
-async def main():
+
+aio_run = asyncio.run
+
+async def _main() -> None:
     cfg = load_config()
     if client_id := cfg.get("client_id"):
         logging.info(
-            f"\n\nBOT INVITE URL:\n"
-            f"https://discord.com/api/oauth2/authorize?client_id={client_id}&permissions=412317273088&scope=bot\n"
+            "\n\nBOT INVITE URL:\n"
+            "https://discord.com/api/oauth2/authorize?client_id=%s&permissions=412317273088&scope=bot\n",
+            client_id,
         )
-    bot = DiscordLLMBot(cfg)
+    bot = DiscordLLMBot("config.yaml")
     await bot.start(cfg["bot_token"])
 
-
 if __name__ == "__main__":
-    asyncio.run(main())
+    aio_run(_main())
