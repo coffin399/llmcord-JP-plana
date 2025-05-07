@@ -465,7 +465,7 @@ class DiscordLLMBot(discord.Client):
         full_response_text = "".join(response_chunks)
 
         # --- API応答をログ出力 ---
-        logging.info("PLANA Response: %s", full_response_text)
+        logging.info("PLANAレスポンス: %s", full_response_text)
         # --- ログ出力ここまで ---
 
         for msg in response_msgs:
