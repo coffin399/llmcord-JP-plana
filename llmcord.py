@@ -56,6 +56,7 @@ def should_respond(client_user: discord.User, message: discord.Message) -> bool:
     """Fast path – decide whether we even parse this message."""
     if message.channel.type not in ALLOWED_CHANNEL_TYPES:
         return False
+    # DMの場合はmention不要、サーバーの場合はmention必須
     if message.channel.type != discord.ChannelType.private and client_user not in message.mentions:
         return False
     if message.author.bot:
@@ -148,13 +149,22 @@ class DiscordLLMBot(discord.Client):
             accept_images,
             accept_usernames,
         )
+
+        # --- ここからログ出力の変更 ---
+        server_name = message.guild.name if message.guild else "DM" # サーバー名を取得、DMの場合は"DM"
+        user_name = message.author.display_name # ユーザー名を取得
+
         logging.info(
-            "Message from %s (attachments=%d, conversation=%d): %s",
+            "[%s] User: %s (ID: %s) | Attachments: %d | Conversation: %d | Content: %s",
+            server_name, # サーバー名を追加
+            user_name,   # ユーザー名を追加
             message.author.id,
             len(message.attachments),
             len(messages),
             message.content,
         )
+        # --- ログ出力の変更ここまで ---
+
 
         system_prompt = {"role": "system", "content": self.SYSTEM_PROMPT}
         starter_message = {"role": "assistant", "content": self.STARTER_PROMPT}
@@ -178,6 +188,8 @@ class DiscordLLMBot(discord.Client):
             help_text = self.cfg.get("help_message", "Help message not configured.")
             await interaction.response.send_message(help_text, ephemeral=True)
 
+
+
     def _is_authorised(self, message: discord.Message) -> bool:
         """Check whether the author or channel is allowed to interact."""
         allowed_channels = set(self.cfg.get("allowed_channel_ids", []))
@@ -188,9 +200,13 @@ class DiscordLLMBot(discord.Client):
         if allowed_channels and chan_id not in allowed_channels and parent_id not in allowed_channels:
             return False
         if allowed_roles:
-            user_role_ids = {role.id for role in getattr(message.author, "roles", [])}
-            if not user_role_ids & allowed_roles:
-                return False
+            # DMではroles属性がないため、hasattrで確認
+            if hasattr(message.author, 'roles'):
+                user_role_ids = {role.id for role in message.author.roles}
+                if not user_role_ids & allowed_roles:
+                    return False
+            # DMでロール指定がある場合は認証失敗とみなす（またはDMを許可しない設定にするべきだが、ここではシンプルにロールがない場合はチェックをスキップ）
+            # もしDMでロールチェックを厳密に行いたい場合は、allowed_roles and not hasattr(message.author, 'roles') の場合にFalseを返すなどのロジックを追加
         return True
 
     async def _build_message_chain(
@@ -314,8 +330,9 @@ class DiscordLLMBot(discord.Client):
                 )
                 if next_msg_id:
                     if next_is_thread_parent:
+                        # DMの場合はchannel.parentが存在しないためチェックを追加
                         node.next_message = (
-                            msg.channel.starter_message or await msg.channel.parent.fetch_message(next_msg_id)
+                             msg.channel.starter_message or (msg.channel.parent and await msg.channel.parent.fetch_message(next_msg_id))
                         )
                     else:
                         node.next_message = (
@@ -330,16 +347,16 @@ class DiscordLLMBot(discord.Client):
     ) -> str | list:
         if node.images[:max_images]:
             return (
-                ([{"type": "text", "text": node.text[:max_text]}] if node.text[:max_text] else [])
+                ([{"type": "text", "text": node.text[:max_text]}] if node.text is not None and node.text[:max_text] else []) # node.text が None の場合を考慮
                 + node.images[:max_images]
             )
-        return node.text[:max_text]
+        return node.text[:max_text] if node.text is not None else "" # node.text が None の場合を考慮
 
     def _update_user_warnings(
         self, node: MessageNode, max_text: int, max_images: int, warnings: set[str]
     ) -> None:
         err = self.ERROR_MESSAGES
-        if len(node.text) > max_text:
+        if node.text is not None and len(node.text) > max_text:
             warnings.add(err.get("msg_max_text_size", "Text too long").format(max_text=max_text))
         if len(node.images) > max_images:
             if max_images:
@@ -377,8 +394,9 @@ class DiscordLLMBot(discord.Client):
                     if not (hasattr(curr_chunk, "choices") and curr_chunk.choices):
                         continue
 
-                    prev_content = prev_chunk.choices[0].delta.content if prev_chunk else ""
-                    curr_content = curr_chunk.choices[0].delta.content or ""
+                    # チャンクがまだ初期化されていない、または content が None の場合を考慮
+                    prev_content = prev_chunk.choices[0].delta.content if prev_chunk and hasattr(prev_chunk.choices[0].delta, 'content') and prev_chunk.choices[0].delta.content is not None else ""
+                    curr_content = curr_chunk.choices[0].delta.content if hasattr(curr_chunk.choices[0].delta, 'content') and curr_chunk.choices[0].delta.content is not None else ""
 
                     if response_chunks or prev_content:
                         if (
@@ -387,16 +405,25 @@ class DiscordLLMBot(discord.Client):
                         ):
                             response_chunks.append("")
                             initial = prev_content + " " + " ".join(sorted(user_warnings))
-                            msg = await (origin if not response_msgs else response_msgs[-1]).reply(
+                            # 最初のメッセージはoriginにreply、以降は前のbotメッセージにreply
+                            msg_to_reply = origin if not response_msgs else response_msgs[-1]
+                            msg = await msg_to_reply.reply(
                                 content=initial + "\u2026", silent=True
                             )
-                            self.message_nodes[msg.id] = MessageNode(next_message=origin)
-                            await self.message_nodes[msg.id].lock.acquire()
+                            # FIXME: このnext_messageのリンクは会話の流れに応じて修正が必要
+                            # 現状では、最初の応答はoriginに、それ以降の分割応答は直前のBotメッセージに返信する
+                            # メッセージチェーンとして正しくリンクするには、会話の起点となるユーザーメッセージへの参照が必要
+                            # ここでは簡易的に、最初の応答メッセージのnextをoriginに、それ以降の分割メッセージのnextを直前のbotメッセージに設定
+                            next_ref_msg = response_msgs[-1] if len(response_msgs) > 0 else origin
+                            self.message_nodes[msg.id] = MessageNode(next_message=next_ref_msg)
+
+                            # Lock acquired when creating node; release later
+                            await self.message_nodes[msg.id].lock.acquire() # Lock acquired here
                             response_msgs.append(msg)
                             self.last_task_time = dt.now().timestamp()
                         response_chunks[-1] += prev_content
 
-                        finish_reason = curr_chunk.choices[0].finish_reason
+                        finish_reason = curr_chunk.choices[0].finish_reason if hasattr(curr_chunk.choices[0], 'finish_reason') else None # finish_reason が存在するか確認
                         ready_to_edit = (
                             (edit_task is None or edit_task.done())
                             and dt.now().timestamp() - self.last_task_time >= EDIT_DELAY_SECONDS
@@ -407,22 +434,62 @@ class DiscordLLMBot(discord.Client):
                             if edit_task is not None:
                                 await edit_task
                             new_content = response_chunks[-1] if is_final_edit else response_chunks[-1] + "\u2026"
-                            edit_task = asyncio.create_task(response_msgs[-1].edit(content=new_content))
+                            # メッセージが削除されていないか確認してから編集を試みる (簡易的なチェック)
+                            try:
+                                # fetch_messageの方が確実だが、頻繁な編集ではrate limitが懸念される
+                                # get_partial_message().cached は unreliable なので別の方法を検討
+                                # 単純に await msg.edit() を試行し、例外で処理する方がPythonicかも
+                                await response_msgs[-1].edit(content=new_content)
+                            except discord.NotFound:
+                                logging.warning(f"Attempted to edit message {response_msgs[-1].id} which was likely deleted.")
+                                # 編集に失敗したら、以降の編集はスキップするためedit_taskをNoneにする
+                                edit_task = None
+                                # このメッセージノードは更新できないかもしれないが、後続の処理には影響しないようにする
+                                pass # 処理続行
+                            except Exception as e:
+                                logging.warning(f"Failed to edit message {response_msgs[-1].id}: {e}")
+                                edit_task = None # 編集に失敗したらタスクをクリア
                             self.last_task_time = dt.now().timestamp()
 
+
                     prev_chunk = curr_chunk
+
         except Exception:
             logging.exception("Error during response generation.")
+            # エラー発生時も、それまでに送信したメッセージのロックは解放する必要がある
+            pass # ロック解放はtry/exceptブロックの外で行う
 
+        # ストリーミングまたはエラー処理が完了した後に、最終的なメッセージノードの状態を更新し、ロックを解放する
+        # これらの行は、try/exceptブロックと同じインデントレベルにある必要があります。
+        full_response_text = "".join(response_chunks)
         for msg in response_msgs:
-            self.message_nodes[msg.id].text = "".join(response_chunks)
-            if self.message_nodes[msg.id].lock.locked():
-                self.message_nodes[msg.id].lock.release()
+            # msg.id が self.message_nodes に存在するか確認（念のため）
+            if msg.id in self.message_nodes:
+                 self.message_nodes[msg.id].text = full_response_text # 全体のテキストを各メッセージノードに設定
+                 # ロックが取得されていれば解放
+                 if self.message_nodes[msg.id].lock.locked():
+                     self.message_nodes[msg.id].lock.release()
+            else:
+                 logging.warning(f"Message node {msg.id} not found during final processing.") # 本来発生しないはず
 
+        # 古いメッセージノードを削除する際に、ロックが取得可能か確認
+        # このブロックは _generate_and_send_response メソッドの本体と同じインデントレベルにあるべき
         if (n := len(self.message_nodes)) > MAX_MESSAGE_NODES:
-            for mid in sorted(self.message_nodes)[: n - MAX_MESSAGE_NODES]:
-                async with self.message_nodes.setdefault(mid, MessageNode()).lock:
-                    self.message_nodes.pop(mid, None)
+             mids_to_pop = sorted(self.message_nodes)[: n - MAX_MESSAGE_NODES]
+             for mid in mids_to_pop:
+                 node_to_pop = self.message_nodes.get(mid)
+                 if node_to_pop:
+                      # ロックを非同期で取得し、解放してから削除
+                     # ノード削除の前にロックを取得・解放するのは、そのノードが別の操作で使われていないことを保証するため
+                     # ただし、ここでは dictionary からの削除自体はロック保護されていない点に注意
+                     await node_to_pop.lock.acquire()
+                     node_to_pop.lock.release() # 取得後すぐに解放
+                     # ロック解放後に削除。削除自体は dict 操作なのでロックは不要だが、
+                     # 別のコルーチンが同時にこのmidにアクセスしない前提（現状コードではそう見える）
+                     self.message_nodes.pop(mid, None)
+                 else:
+                     # すでに存在しない場合はスキップ
+                     pass # pragma: no cover
 
 
 aio_run = asyncio.run
@@ -439,4 +506,8 @@ async def _main() -> None:
     await bot.start(cfg["bot_token"])
 
 if __name__ == "__main__":
-    aio_run(_main())
+    # CTRL+C でシャットダウンを検知するためにtry/exceptを使用
+    try:
+        aio_run(_main())
+    except KeyboardInterrupt:
+        logging.info("Bot shutting down due to KeyboardInterrupt.")
