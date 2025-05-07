@@ -150,7 +150,7 @@ class DiscordLLMBot(discord.Client):
             accept_usernames,
         )
 
-        # --- ここからログ出力の変更 ---
+        # --- メッセージ受信ログ ---
         server_name = message.guild.name if message.guild else "DM" # サーバー名を取得、DMの場合は"DM"
         user_name = message.author.display_name # ユーザー名を取得
 
@@ -163,7 +163,7 @@ class DiscordLLMBot(discord.Client):
             len(messages),
             message.content,
         )
-        # --- ログ出力の変更ここまで ---
+        # --- メッセージ受信ログここまで ---
 
 
         system_prompt = {"role": "system", "content": self.SYSTEM_PROMPT}
@@ -459,9 +459,15 @@ class DiscordLLMBot(discord.Client):
             # エラー発生時も、それまでに送信したメッセージのロックは解放する必要がある
             pass # ロック解放はtry/exceptブロックの外で行う
 
+
         # ストリーミングまたはエラー処理が完了した後に、最終的なメッセージノードの状態を更新し、ロックを解放する
         # これらの行は、try/exceptブロックと同じインデントレベルにある必要があります。
         full_response_text = "".join(response_chunks)
+
+        # --- API応答をログ出力 ---
+        logging.info("PLANA Response: %s", full_response_text)
+        # --- ログ出力ここまで ---
+
         for msg in response_msgs:
             # msg.id が self.message_nodes に存在するか確認（念のため）
             if msg.id in self.message_nodes:
@@ -471,6 +477,7 @@ class DiscordLLMBot(discord.Client):
                      self.message_nodes[msg.id].lock.release()
             else:
                  logging.warning(f"Message node {msg.id} not found during final processing.") # 本来発生しないはず
+
 
         # 古いメッセージノードを削除する際に、ロックが取得可能か確認
         # このブロックは _generate_and_send_response メソッドの本体と同じインデントレベルにあるべき
