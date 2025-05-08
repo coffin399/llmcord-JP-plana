@@ -71,10 +71,17 @@ help_message: "このボットは、Discord上でLLMと対話するためのボ�
 
 
 error_msg:
-  msg_max_text_size: ":warning: 最大文字数は {max_text:,} です ><"
-  msg_max_image_size: ":warning: 最大画像数は {max_images} です ><"
-  msg_error_image: ":warning: 画像が見えません ><"
-  msg_error_attachment: ":warning: サポートされていないファイル形式です ><"
+  msg_max_text_size: "⚠️ 最大文字数は {max_text:,} です ><"
+  msg_max_image_size: "⚠️ 最大画像数は {max_images} です ><"
+  msg_error_image: "⚠️ 画像が見えません ><"
+  msg_error_attachment: "⚠️ サポートされていないファイル形式です ><"
+
+  # OpenAI が 429 Rate Limit Error を返した場合のエラーメッセージ
+  ratelimit_error: "⚠️ AI が現在非常に混雑しています。しばらくしてからもう一度試してください！"
+  # その他の API または処理エラーに対する一般的なエラーメッセージ
+  general_error: "⚠️ レスポンスの生成中に予期しない内部エラーが発生しました。もう一度試してください！"
+
+
 
 
 
