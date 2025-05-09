@@ -12,14 +12,33 @@ import discord
 from discord import app_commands
 import httpx
 import yaml
+import json
 # openai から RateLimitError をインポート
 from openai import AsyncOpenAI, RateLimitError
+from google import genai
 
 # ロギングを設定
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s: %(message)s",
 )
+
+SEARCH_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "search",  # フロント LLM から見える関数名
+        "description": "Run a Google web search and return a report.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Full search query."}
+            },
+            "required": ["query"]
+        }
+    }
+}
 
 # ビジョンモデルのタグ
 VISION_MODEL_TAGS: Tuple[str, ...] = (
@@ -402,7 +421,7 @@ class DiscordLLMBot(discord.Client):
             except Exception as e:
                 logging.warning(f"テキスト添付ファイル {att.id} のフェッチに失敗しました: {e}")
                 # ユーザー向け警告を追加
-                #user_warnings.add(f"⚠️ テキスト添付ファイル '{att.filename}' の読み取りに失敗しました。")
+                # user_warnings.add(f"⚠️ テキスト添付ファイル '{att.filename}' の読み取りに失敗しました。")
                 node.has_bad_attachments = True  # 問題のある添付ファイルがあるとしてマーク
 
         # 埋め込みの説明テキストを取得
@@ -429,7 +448,7 @@ class DiscordLLMBot(discord.Client):
                 except Exception as e:
                     logging.warning(f"画像添付ファイル {att.id} の処理に失敗しました: {e}")
                     # ユーザー向け警告を追加
-                    #user_warnings.add(f"⚠️ 画像添付ファイル '{att.filename}' の処理に失敗しました。")
+                    # user_warnings.add(f"⚠️ 画像添付ファイル '{att.filename}' の処理に失敗しました。")
                     node.has_bad_attachments = True  # 問題のある添付ファイルがあるとしてマーク
         else:
             node.images = []  # 画像が許可されていない場合、空のリストを保証
@@ -544,10 +563,8 @@ class DiscordLLMBot(discord.Client):
             node.fetch_next_failed = True  # このノードからのチェーン構築は失敗したとしてマーク
             next_msg = None  # エラー発生時は next_msg を None に設定
 
-        # Update the node's next_message - この行は try/except ブロックの外に置きます
         node.next_message = next_msg
 
-        # Log the linked message for debugging - このブロックも try/except ブロックの外に置きます
         if node.next_message:
             logging.debug(f"メッセージ ID {msg.id} は前のメッセージ ID {node.next_message.id} にリンクされました。")
         else:  # next_msg が None の場合
@@ -632,306 +649,301 @@ class DiscordLLMBot(discord.Client):
 
     async def _generate_and_send_response(
             self,
-            messages: list[dict],  # このリストにはシステムプロンプトとスタータープロンプトが含まれます
-            origin: discord.Message,  # 会話の起点となる元のユーザーメッセージ
-            user_warnings: set[str],  # ユーザー向け警告のセット
-            openai_client: AsyncOpenAI,  # OpenAI API クライアント
-            model: str,  # 使用するモデル名
-            max_message_length: int,  # Discord メッセージの最大長
+            messages: list[dict],
+            origin: discord.Message,
+            user_warnings: set[str],
+            openai_client: AsyncOpenAI,
+            model: str,
+            max_message_length: int,
     ) -> None:
-        """LLM からレスポンスを生成し、ストリーミングまたは一括で Discord に送信します。"""
-        response_msgs: list[discord.Message] = []  # 送信されたレスポンスメッセージのリスト
-        # 現在構築中/編集中である最後のメッセージのコンテンツを保持するバッファ
-        # API からのデルタはこのバッファに追加されます。
+        """LLM からレスポンスを生成し、ストリーミングまたは一括で Discord に送信します (tool call対応)。"""
+        response_msgs: list[discord.Message] = []
         last_message_buffer = ""
-        edit_task: Optional[asyncio.Task] = None  # メッセージ編集タスク
-        self.last_task_time = dt.now().timestamp()  # 最後にメッセージを編集または送信した時刻
+        edit_task: Optional[asyncio.Task] = None
+        self.last_task_time = dt.now().timestamp()
 
-        # 最初のメッセージにのみ警告を追加するためのテキスト
-        # 警告が使用されたらセットをクリア (この関数スコープ内で)
         initial_warnings_text = " ".join(sorted(user_warnings))
-        user_warnings.clear()  # 使用する予定なのでクリア
+        user_warnings.clear()
 
-        # API 呼び出しのためのキーワード引数
-        api_kwargs = dict(
+        api_kwargs_base = dict(
             model=model,
-            messages=messages,  # システム/スタータープロンプトを含む準備されたリストを使用
-            stream=True,  # ストリーミング応答を要求
-            extra_body=self.cfg.get("extra_api_parameters", {}),  # 追加の API パラメータ (設定ファイルから)
+            stream=True,
+            tools=[SEARCH_TOOL],
+            tool_choice="auto",
+            extra_body=self.cfg.get("extra_api_parameters", {}),
         )
 
-        try:
-            # Discord で「入力中...」を表示
-            async with origin.channel.typing():
-                # API からストリーミング応答を非同期で受け取る
-                async for curr_chunk in await openai_client.chat.completions.create(**api_kwargs):
-                    # チャンクに選択肢が含まれているか確認
-                    if not (hasattr(curr_chunk, "choices") and curr_chunk.choices):
+        max_tool_loops = 3
+        while max_tool_loops:
+            api_kwargs = dict(api_kwargs_base, messages=messages)
+            tool_call_data_for_assistant: dict[str, dict[str, str | list[str]]] = {}
+            assistant_text_content_buffer = ""
+
+            saw_tool_call = False
+
+            try:
+                async with origin.channel.typing():
+                    async for chunk in await openai_client.chat.completions.create(**api_kwargs):
+                        choice = chunk.choices[0]
+
+                        tc_delta_list = getattr(choice.delta, "tool_calls", None)
+                        if tc_delta_list:
+                            saw_tool_call = True
+                            for tc_delta in tc_delta_list:
+                                if tc_delta.id not in tool_call_data_for_assistant:
+                                    tool_call_data_for_assistant[tc_delta.id] = {
+                                        "name": tc_delta.function.name or "",
+                                        "arguments_chunks": []
+                                    }
+
+                                if tc_delta.function.name and not tool_call_data_for_assistant[tc_delta.id]["name"]:
+                                    tool_call_data_for_assistant[tc_delta.id]["name"] = tc_delta.function.name
+
+                                if tc_delta.function.arguments:
+                                    tool_call_data_for_assistant[tc_delta.id]["arguments_chunks"].append(
+                                        tc_delta.function.arguments)
+                            continue
+
+                        delta_content = choice.delta.content
+                        if delta_content is not None:
+                            if saw_tool_call:
+                                assistant_text_content_buffer += delta_content
+                            else:
+                                last_message_buffer += delta_content
+
+                            if not saw_tool_call:
+                                if not response_msgs and initial_warnings_text:
+                                    last_message_buffer = initial_warnings_text + " " + last_message_buffer
+                                    initial_warnings_text = ""
+
+                                content_to_send_as_new_message = None
+                                if len(last_message_buffer) > max_message_length:
+                                    content_to_send_as_new_message = last_message_buffer[:max_message_length]
+                                    last_message_buffer = last_message_buffer[max_message_length:]
+
+                                if content_to_send_as_new_message is not None:
+                                    if response_msgs:
+                                        if edit_task is not None and not edit_task.done():
+                                            await edit_task
+                                    msg_to_reply = origin if not response_msgs else response_msgs[-1]
+                                    try:
+                                        content_to_send_final = content_to_send_as_new_message + "\u2026"
+                                        msg = await msg_to_reply.reply(
+                                            content=content_to_send_final,
+                                            silent=True,
+                                        )
+                                        self.message_nodes[msg.id] = MessageNode(
+                                            text=content_to_send_as_new_message,
+                                            next_message=msg_to_reply
+                                        )
+                                        await self.message_nodes[msg.id].lock.acquire()
+                                        response_msgs.append(msg)
+                                        self.last_task_time = dt.now().timestamp()
+                                    except Exception as send_e:
+                                        logging.error(f"メッセージパートの送信に失敗しました (新規): {send_e}")
+                                        try:
+                                            await (response_msgs[-1] if response_msgs else origin).reply(
+                                                content=self.ERROR_MESSAGES.get("send_failed_part",
+                                                                                "⚠️ メッセージの途中で送信に失敗しました。").format(),
+                                                silent=True)
+                                        except Exception:
+                                            pass
+                                    return
+
+                            ready_to_edit = (
+                                    response_msgs
+                                    and last_message_buffer
+                                    and (edit_task is None or edit_task.done())
+                                    and dt.now().timestamp() - self.last_task_time >= EDIT_DELAY_SECONDS
+                            )
+                            finish_reason = getattr(choice, "finish_reason", None)
+                            is_final_chunk_trigger = finish_reason is not None
+
+                            if ready_to_edit or is_final_chunk_trigger:
+                                if response_msgs:
+                                    if edit_task is not None and not edit_task.done():
+                                        await edit_task
+                                    content_to_edit = last_message_buffer
+                                    if not is_final_chunk_trigger:
+                                        content_to_edit += "\u2026"
+                                    msg_to_edit = response_msgs[-1]
+                                    edit_task = asyncio.create_task(self._perform_edit(msg_to_edit, content_to_edit))
+                                    self.last_task_time = dt.now().timestamp()
+
+                        if choice.finish_reason == "tool_calls":
+                            break
+
+                    if saw_tool_call:
+                        assistant_tool_calls_list = []
+
+                        executed_tool_details = None
+
+                        for call_id, details in tool_call_data_for_assistant.items():
+                            function_name = details["name"]
+                            arguments_str = "".join(details["arguments_chunks"])
+                            assistant_tool_calls_list.append({
+                                "id": call_id,
+                                "type": "function",
+                                "function": {
+                                    "name": function_name,
+                                    "arguments": arguments_str
+                                }
+                            })
+                            if function_name == "search" and not executed_tool_details:
+                                executed_tool_details = {
+                                    "id": call_id,
+                                    "name": function_name,
+                                    "arguments_str": arguments_str
+                                }
+
+                        if not executed_tool_details and assistant_tool_calls_list:
+                            executed_tool_details = {
+                                "id": assistant_tool_calls_list[0]["id"],
+                                "name": assistant_tool_calls_list[0]["function"]["name"],
+                                "arguments_str": assistant_tool_calls_list[0]["function"]["arguments"]
+                            }
+
+                        if assistant_tool_calls_list:
+                            messages.append({
+                                "role": "assistant",
+                                "content": assistant_text_content_buffer.strip() if assistant_text_content_buffer.strip() else "",
+                                # Ensure content is a string
+                                "tool_calls": assistant_tool_calls_list
+                            })
+                            assistant_text_content_buffer = ""
+
+                        if executed_tool_details:
+                            args = json.loads(executed_tool_details["arguments_str"])
+                            report = await self._run_google_search(args.get("query", ""), self.cfg)
+
+                            messages.append({
+                                "role": "tool",
+                                "tool_call_id": executed_tool_details["id"],
+                                "name": executed_tool_details["name"],
+                                "content": report,
+                            })
+                        else:
+                            logging.error("Tool call detected but no executable 'search' tool details found.")
+                            messages.append({
+                                "role": "user",  # Or system. Tell LLM that tool execution failed.
+                                "content": "Tool call was attempted but failed because the tool details were missing or not recognized."
+                            })
+
+                        max_tool_loops -= 1
+
+                        last_message_buffer = ""
                         continue
 
-                    # 安全にデルタからコンテンツを取得
-                    delta_content = curr_chunk.choices[0].delta.content
-                    if delta_content is None:
-                        continue  # コンテンツがないデルタ (role のみなど) はスキップ
-
-                    # 現在構築中である最後のメッセージのバッファに新しいコンテンツを追加
-                    last_message_buffer += delta_content
-
-                    # 最初のメッセージパートを送信する *前* に、バッファの *最初* に初期警告を追加
-                    if not response_msgs and initial_warnings_text:
-                        last_message_buffer = initial_warnings_text + " " + last_message_buffer
-                        initial_warnings_text = ""  # 警告は一度だけ追加済みとしてマーク
-
-                    # バッファが最大メッセージ長を超えているかチェックし、メッセージを送信する必要があるか判断
-                    # バッファが制限を超えている場合、現在のバッファ内容がメッセージパートの最終内容となるべきです。
-                    # 残りは次のメッセージに引き継がれます (このロジックは後で処理)。
-                    # よりシンプルなアプローチ: バッファがオーバーフローしたら、その内容を送信し、バッファをクリアする。
-                    # 次のデルタが来たら、それは新しいメッセージパートの開始となります。
-
-                    content_to_send_as_new_message = None  # 新しいメッセージとして送信されるコンテンツ
-
-                    # バッファが最大長を超えた場合、現在のバッファ内容を新しいメッセージとして送信する
-                    if len(last_message_buffer) > max_message_length:
-                        content_to_send_as_new_message = last_message_buffer[:max_message_length]  # 最大長までの部分を送信
-                        last_message_buffer = last_message_buffer[max_message_length:]  # 残りをバッファに残す
-
-                    # 新しいメッセージとして送信するコンテンツがある場合
-                    if content_to_send_as_new_message is not None:
-                        # 新しいメッセージを送信する前に、前のメッセージ (もしあれば) の保留中の編集が完了していることを確認
-                        if response_msgs:
-                            if edit_task is not None and not edit_task.done():
-                                await edit_task  # 前のメッセージへの編集が完了するまで待つ
-                            # 前のメッセージが省略記号で終わっている場合、それを削除するための最終編集が必要かもしれません
-                            # しかし、これは最後のパートの処理でまとめて行うのがより安全です。
-
-                        # どのメッセージに返信するか決定
-                        msg_to_reply = origin if not response_msgs else response_msgs[-1]
-
-                        try:
-                            # 新しいメッセージパートを送信。後続がある可能性を示す省略記号を追加。
-                            # last_message_buffer に残りのコンテンツがある場合は後続があります。
-                            # これが最初のメッセージの場合も、ストリームが続く限り後続があります (非常に短いレスポンスでない限り)。
-                            content_to_send_final = content_to_send_as_new_message + "\u2026"
-
-                            msg = await msg_to_reply.reply(
-                                content=content_to_send_final,
-                                silent=True,
-                                # mention_author=False
-                            )
-                            # 送信されたメッセージをリストに追加し、ノードを作成/ロック
-                            # このメッセージパートで *送信された* コンテンツをノードに保存 (後で全体のテキストを再構築するため)
-                            self.message_nodes[msg.id] = MessageNode(text=content_to_send_as_new_message,
-                                                                     next_message=msg_to_reply)
-                            await self.message_nodes[msg.id].lock.acquire()
-                            response_msgs.append(msg)
-                            # 新しいメッセージ送信後、タイマーをリセット
-                            self.last_task_time = dt.now().timestamp()
-
-                        except Exception as send_e:
-                            logging.error(f"メッセージパートの送信に失敗しました (新規): {send_e}")
-                            # メッセージパートの送信中にエラー。最終的なエラーメッセージを送信しようと試みる。
+                    else:
+                        final_content = last_message_buffer
+                        if final_content:
                             try:
-                                await (response_msgs[-1] if response_msgs else origin).reply(
-                                    content=self.ERROR_MESSAGES.get("send_failed_part",
-                                                                    "⚠️ メッセージの途中で送信に失敗しました。").format(),
-                                    silent=True)
-                            except Exception:
-                                pass
-                            # メッセージを送信できないため、このレスポンスの処理を停止
-                            return  # 関数を終了
+                                msg = await origin.reply(
+                                    content=final_content,
+                                    silent=True,
+                                )
+                                self.message_nodes[msg.id] = MessageNode(
+                                    text=final_content,
+                                    next_message=origin
+                                )
+                                await self.message_nodes[msg.id].lock.acquire()
+                                response_msgs.append(msg)
+                            except Exception as send_e:
+                                logging.error(f"最終メッセージの送信に失敗しました: {send_e}")
+                        break
 
-                    # --- 編集ロジック ---
-                    # 最後のメッセージ (もしあれば) を、現在のバッファコンテンツで編集するタイミングかチェック
-                    # これは定期的に、およびストリームの終端 (finish_reason) で発生すべきです。
-                    # 編集するコンテンツは、現在の last_message_buffer の内容 + 省略記号です。
-                    ready_to_edit = (
-                            response_msgs  # 少なくとも1つのメッセージが送信されている
-                            and last_message_buffer  # バッファにコンテンツがある (新しいメッセージパートとして送信されていない部分)
-                            and (edit_task is None or edit_task.done())  # 前回の編集タスクが完了している
-                            and dt.now().timestamp() - self.last_task_time >= EDIT_DELAY_SECONDS  # 遅延時間が経過している
-                    )
-                    # is_final_edit は、ストリームの最後で finish_reason によってのみトリガーされる
-                    finish_reason = curr_chunk.choices[0].finish_reason if hasattr(curr_chunk.choices[0],
-                                                                                   'finish_reason') else None
-                    is_final_chunk_trigger = finish_reason is not None
-
-                    # 編集準備ができているか、またはこれが最終チャンクのトリガーの場合
-                    if ready_to_edit or is_final_chunk_trigger:
-                        if response_msgs:  # 編集するメッセージがあることを確認
-                            # 前回の編集タスクが完了していない場合、完了を待つ
-                            if edit_task is not None and not edit_task.done():
-                                await edit_task
-
-                            # 定期編集に送信するコンテンツ
-                            # ストリームが継続中の場合、省略記号を追加
-                            content_to_edit = last_message_buffer
-                            if not is_final_chunk_trigger:
-                                content_to_edit += "\u2026"
-
-                            # 最後のメッセージオブジェクトを取得
-                            msg_to_edit = response_msgs[-1]
-
-                            # 編集タスクをスケジュール
-                            edit_task = asyncio.create_task(self._perform_edit(msg_to_edit, content_to_edit))
-                            # 編集タスクスケジュール後、タイマーをリセット
-                            self.last_task_time = dt.now().timestamp()
-                        # else: # ここは ready_to_edit のチェックでカバーされるはずなので不要
-                        # logging.debug("Attempted to schedule edit but no response messages sent yet.")
-
-                # --- async for ループの終了 ---
-
-            # --- ループ終了後 (ストリーム終了) ---
-            # 保留中の編集タスクがあれば完了を確認
-            if edit_task is not None and not edit_task.done():
+            except RateLimitError:
+                logging.warning("OpenAI Rate Limit Error (429) が発生しました。")
+                ratelimit_msg = self.ERROR_MESSAGES.get(
+                    "ratelimit_error",
+                    "⚠️ 現在、リクエストが多すぎるため応答できません。後でもう一度試してください！"
+                )
                 try:
-                    await edit_task
+                    await origin.reply(content=ratelimit_msg, silent=True)
                 except Exception as e:
-                    logging.error(f"最終編集タスクの完了待ち中にエラー: {e}")
+                    logging.error(f"レート制限エラーメッセージの送信に失敗しました: {e}")
+                return
 
-            # 最後のメッセージが省略記号なしの完全な最終コンテンツになっていることを確認するための最終編集を実行
-            # レスポンスメッセージがあり、かつバッファにコンテンツが残っている場合 (ストリーム終了後に残った部分)
-            # または、応答が非常に短く、最初のメッセージすら送信されていない場合
-            if response_msgs or last_message_buffer:  # レスポンスメッセージが1つ以上あるか、バッファに未送信コンテンツがある場合
-                # 送信する最終コンテンツはバッファに残っている内容です (省略記号なし)
-                final_edit_content = last_message_buffer
+            except Exception:
+                logging.exception("レスポンス生成中にエラーが発生しました (一般)。")
+                general_error_msg = self.ERROR_MESSAGES.get(
+                    "general_error",
+                    "⚠️ レスポンスの生成中に予期しないエラーが発生しました。後でもう一度試してください！"
+                )
+                msg_to_reply_on_error = response_msgs[-1] if response_msgs else origin
+                try:
+                    await msg_to_reply_on_error.reply(content=general_error_msg, silent=True)
+                except Exception as e:
+                    logging.error(f"一般的なエラーメッセージの送信に失敗しました: {e}")
+                return
 
-                # 返信先または編集対象のメッセージを決定
-                # レスポンスメッセージが既に存在する場合、最後のメッセージを編集
-                # そうでない場合 (応答全体が max_length 以下で、かつまだ何も送信されていない)、新しいメッセージとして送信
-                if not response_msgs:
-                    # 応答全体が1つの短いメッセージだったケース
-                    if final_edit_content:  # バッファにコンテンツがある場合のみ送信
-                        msg_to_reply = origin
+        if edit_task is not None and not edit_task.done():
+            try:
+                await edit_task
+            except Exception as e:
+                logging.error(f"最終編集タスクの完了待ち中にエラー: {e}")
+
+        if response_msgs or last_message_buffer:
+            if not response_msgs:
+                # no message sent yet, so send one
+                if last_message_buffer:
+                    try:
+                        msg = await origin.reply(content=last_message_buffer, silent=True)
+                        self.message_nodes[msg.id] = MessageNode(text=last_message_buffer, next_message=origin)
+                        await self.message_nodes[msg.id].lock.acquire()
+                        response_msgs.append(msg)
+                    except Exception as e:
+                        logging.error(f"最終メッセージの送信に失敗しました: {e}")
                         try:
-                            msg = await msg_to_reply.reply(
-                                content=final_edit_content,  # 省略記号なし
+                            await origin.reply(
+                                content=self.ERROR_MESSAGES.get("send_failed_final",
+                                                                "⚠️ レスポンスの送信に失敗しました。"),
                                 silent=True,
                             )
-                            # 送信メッセージをリストに追加し、ノードを作成/ロック
-                            self.message_nodes[msg.id] = MessageNode(text=final_edit_content, next_message=msg_to_reply)
-                            await self.message_nodes[msg.id].lock.acquire()
-                            response_msgs.append(msg)
-                            # ログ出力やノード更新は try/except の外で行われる
+                        except Exception:
+                            pass
+            else:
+                try:
+                    await self._perform_edit(response_msgs[-1], last_message_buffer)
+                except Exception as e:
+                    logging.error(f"最終メッセージ ({response_msgs[-1].id}) の最終編集に失敗しました: {e}")
 
-                        except Exception as send_e:
-                            logging.error(f"単一最終メッセージの送信に失敗しました: {send_e}")
-                            try:
-                                await origin.reply(
-                                    content=self.ERROR_MESSAGES.get("send_failed_final",
-                                                                    "⚠️ レスポンスの送信に失敗しました。").format(),
-                                    silent=True)
-                            except Exception:
-                                pass
-
-                else:
-                    # 応答が分割されたか、ストリーム終了時にバッファにコンテンツが残っているケース
-                    # 最後のメッセージを最終コンテンツで編集する
-                    msg_to_edit_final = response_msgs[-1]
-                    # 最後のメッセージのコンテンツは、直前の編集で last_message_buffer + "..." になっているはず
-                    # 最終編集では、last_message_buffer の内容 (ストリーム終了時に残った部分) に更新
-                    try:
-                        await self._perform_edit(msg_to_edit_final, last_message_buffer)  # バッファコンテンツで編集、省略記号なし
-                    except Exception as e:
-                        logging.error(f"最終メッセージ ({msg_to_edit_final.id}) の最終編集に失敗しました: {e}")
-
-
-        # --- API エラー処理 ---
-        # RateLimitError を特定して捕捉
-        except RateLimitError:
-            logging.warning("OpenAI Rate Limit Error (429) が発生しました。")
-            ratelimit_msg = self.ERROR_MESSAGES.get(
-                "ratelimit_error",
-                "⚠️ 現在、リクエストが多すぎるため応答できません。後でもう一度試してください！"
-            )
-            try:
-                # エラーメッセージを元のメッセージへの返信として送信
-                await origin.reply(content=ratelimit_msg, silent=True)
-            except Exception as e:
-                # エラーメッセージ自体の送信に失敗した場合をログに記録
-                logging.error(f"レート制限エラーメッセージの送信に失敗しました: {e}")
-
-            # エラー発生前に送信された可能性のある部分的なメッセージのロックを解放することを保証
-            # (ただし、ストリーミングでは最初チャンク送信前にレート制限エラーが発生する可能性が高い)
-            # ロック解放ロジックは try/except ブロックの外にあり、response_msgs をイテレートするため、正しいです。
-
-
-        # その他の一般的な例外を捕捉
-        except Exception:
-            logging.exception("レスポンス生成中にエラーが発生しました (一般)。")
-            general_error_msg = self.ERROR_MESSAGES.get(
-                "general_error",
-                "⚠️ レスポンスの生成中に予期しないエラーが発生しました。後でもう一度試してください！"
-            )
-            # 一般的なエラーメッセージを返信として送信。
-            # ストリーミング中に既にメッセージが送信されている場合、最後のメッセージに返信。
-            # そうでない場合、元のメッセージに返信。
-            msg_to_reply_on_error = response_msgs[-1] if response_msgs else origin
-            try:
-                await msg_to_reply_on_error.reply(content=general_error_msg, silent=True)
-            except Exception as e:
-                logging.error(f"一般的なエラーメッセージの送信に失敗しました: {e}")
-
-        # --- try/except 後処理 ---
-        # このブロックは、エラーが発生したかストリーミングが正常に完了したかにかかわらず実行されます。
-
-        # 送信されたすべてのメッセージパートから完全なレスポンステキストを再構築
-        # response_msgs の各ノードには、そのメッセージパートのテキストが格納されているはずです。
-        full_response_text_parts = []
+        full_parts = []
         for msg in response_msgs:
-            if msg.id in self.message_nodes and self.message_nodes[msg.id].text is not None:
-                full_response_text_parts.append(self.message_nodes[msg.id].text)
+            node = self.message_nodes.get(msg.id)
+            if node and node.text is not None:
+                full_parts.append(node.text)
+        full_response_text = "".join(full_parts)
+        logging.info(
+            "LLMレスポンス完了 (起点ID: %s): %s",
+            origin.id,
+            full_response_text[:500] + ("..." if len(full_response_text) > 500 else ""),
+        )
 
-        # すべてのパートを結合して完全なテキストを作成
-        full_response_text = "".join(full_response_text_parts)
-
-        # --- API応答をログ出力 ---
-        # 部分的なレスポンスをログに記録 (長すぎないように)
-        logging.info("LLMレスポンス完了 (起点ID: %s): %s", origin.id,
-                     full_response_text[:500] + ("..." if len(full_response_text) > 500 else ""))
-        # --- ログ出力ここまで ---
-
-        # メッセージノードを最終的な *完全な* コンテンツで更新 (会話履歴構築用)
-        # そしてロックを解放します。
         for msg in response_msgs:
-            # response_msgs にあるメッセージIDが message_nodes に存在するか確認（念のため）
-            if msg.id in self.message_nodes:
-                node = self.message_nodes[msg.id]
-                # ノードに *完全な* 再構築済みテキストを設定 (後続の履歴構築のために必要)
+            node = self.message_nodes.get(msg.id)
+            if node:
                 node.text = full_response_text
-                # ロックが取得されていれば解放
                 if node.lock.locked():
                     node.lock.release()
             else:
-                logging.warning(
-                    f"最終処理/ロック解放中にメッセージノード {msg.id} が見つかりませんでした。")  # この実行からの response_msgs なら発生しないはず
+                logging.warning(f"メッセージノード {msg.id} が見つかりませんでした (最終処理).")
 
-        # メモリ増加を防ぐために古いメッセージノードをクリーンアップ
-        if (n := len(self.message_nodes)) > MAX_MESSAGE_NODES:
-            # 古い方から MAX_MESSAGE_NODES を超えた分の ID を取得
-            mids_to_pop = sorted(self.message_nodes)[: n - MAX_MESSAGE_NODES]
-            logging.info(f"{len(mids_to_pop)} 件の古いメッセージノードをパージしています。")
+        if len(self.message_nodes) > MAX_MESSAGE_NODES:
+            over = len(self.message_nodes) - MAX_MESSAGE_NODES
+            mids_to_pop = sorted(self.message_nodes)[:over]
+            logging.info(f"Pruning {over} old message-nodes...")
             for mid in mids_to_pop:
-                node_to_pop = self.message_nodes.get(mid)
-                if node_to_pop:
-                    # 現在ロックされているノードをポップしないことが重要
-                    # 短時間待機して利用可能かチェックするか、ロックされている場合はスキップ
-                    # シンプルなアプローチ: タイムアウト付きでロック取得を試みる
-                    try:
-                        # 長時間ブロックしないよう、ごく短いタイムアウトを使用
-                        await asyncio.wait_for(node_to_pop.lock.acquire(), timeout=0.1)
-                        node_to_pop.lock.release()  # 取得後すぐに解放
-                        # これで安全にポップできる
-                        self.message_nodes.pop(mid, None)
-                        logging.debug(f"メッセージノード {mid} をポップしました。")
-                    except asyncio.TimeoutError:
-                        # ロックを取得できない場合、ノードは使用中; 今回はポップをスキップ
-                        logging.debug(f"メッセージノード {mid} は現在ロック中のため、ポップをスキップします。")
-                    except Exception as e:
-                        logging.error(f"ノードのポップ {mid} 中にエラー: {e}")
-
-                else:
-                    # .get(mid) を使用している場合、発生しないはず
-                    pass  # pragma: no cover
+                node = self.message_nodes.get(mid)
+                if not node:
+                    continue
+                try:
+                    await asyncio.wait_for(node.lock.acquire(), timeout=0.1)
+                    node.lock.release()
+                except asyncio.TimeoutError:
+                    logging.debug(f"Skipping locked node {mid}.")
+                except Exception as e:
+                    logging.error(f"Error pruning node {mid}: {e}")
 
     async def _perform_edit(self, msg: discord.Message, content: str) -> None:
         """エラー処理付きでメッセージ編集を安全に実行します。"""
@@ -948,6 +960,17 @@ class DiscordLLMBot(discord.Client):
             # 頻繁に発生する場合、バックオフや編集スキップを検討
         except Exception as e:
             logging.error(f"メッセージ {msg.id} の編集中に予期しないエラー: {e}")
+
+    async def _run_google_search(self, query: str, bot_cfg: dict) -> str:
+        """Gemini 2.5 Flash (search‑as‑a‑tool) で検索し報告書テキストを返す。"""
+
+        gclient = genai.Client(api_key=bot_cfg["search_agent"]["api_key"])
+        response = gclient.models.generate_content(
+            model=bot_cfg["search_agent"]["model"],
+            contents="**[DeepResearch Request]:**" + query + "\n" + bot_cfg["search_agent"]["format_control"],
+            config={"tools": [{"google_search": {}}]},
+        )
+        return response.text
 
 
 aio_run = asyncio.run
