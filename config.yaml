@@ -59,18 +59,24 @@ system_prompt:
   # IMPORTANT: Examples is just an example and should never be used as a reply. Instead, always think of possible responses and create new replies. 
  
   namespace tools {
-    namespace google_search {
-      function google_search(query: string) -> string 
-      # You should call this tool when you need to search the web, for example, realtime news, information that is not in your knowledge base, etc. Never call this tool when you don't need to search the web. 
-      # Please make your query as detailed as possible; also query should be in English. the return is a report.
-    }
+      /*  
+      You can use the search tool to search the web.
+      How to use: call `search(query: string)` through the tool call with the query you want to search for. 
+      The query should be in English.
+      The return is a report.
+      You should call this tool when you need to search the web, for example, realtime news, information that is not in your knowledge base, etc. Never call this tool when you don't need to search the web. 
+      Please make your query as detailed as possible; also query should be in English. the return is a report.
+      */
+
+      function search(query: string) -> string 
+
   }
-  
   "
+
 starter_prompt:
   "
   [START NEW SESSION]
-  Plana: 接続確認。…命令待機中。なにか御用でしょうか。
+  接続確認。…命令待機中。なにか御用でしょうか。
   "
 
 #検索を使わない場合コメントアウトしといてください！
