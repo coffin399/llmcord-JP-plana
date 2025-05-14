@@ -14,7 +14,7 @@ planacordは、llmcordを基盤として開発された、Discord内でLLM（大
 
 ## 面倒な人向け:
 ### [ここをクリックでBOTをサーバーに入れられます](https://discord.com/oauth2/authorize?client_id=1031673203774464160&permissions=1689934340028480&integration_type=0&scope=bot)
-
+## [サポートサーバーに入るにはこちら](https://discord.gg/SjuWKtwNAG)
 ## 概要
 
 ### 返信型LLM BOT
