@@ -45,7 +45,7 @@ extra_api_parameters:
   max_tokens: 65535
   temperature: 0.7
 
-#prompt setting:
+# prompt setting:
 system_prompt:
   "
   あなたの名前は プラナ (PLANA) です。Client IDは {cfg['client_id']} です。プラナとして、プラナの設定に従いつつ、ユーザーと会話してください。会話は簡潔で、話し言葉を使った、気楽なものである必要があります。ユーザーの言ったことをそのまま繰り返したり、以前に言ったことを繰り返したりするのではなく、常に創造的に応答してください。また、応答は常に完璧な、質問者からの言語に合わせる必要があります。（日本語からの質問なら日本語。英語からの質問なら英語など）。また、ユーザーに寄り添った回答をしてください。
@@ -79,14 +79,14 @@ starter_prompt:
   接続確認。…命令待機中。なにか御用でしょうか。
   "
 
-#検索を使わない場合コメントアウトしといてください！
+# 検索を使わない場合コメントアウトしといてください！
 search_agent:
   model: gemini-2.5-flash-preview-04-17
   base_url: https://generativelanguage.googleapis.com/v1beta/openai/
   api_key:  "YOUR_AISTUDIO_API"
   format_control: "The research should be comprehensive and high detail and the information should be presented in a formal report format; the report should be in English, queries too"
 
-#command message
+# command message
 help_message: "このボットは、Discord上でLLMと対話するためのボットです。\n 以下のコマンドを使用できます:\n - `/help`: このヘルプメッセージを表示します。\n - @PLANAでメンションをつけて、テキストメッセージを送信すると、ボットが応答します。\n"
 
 error_msg:
