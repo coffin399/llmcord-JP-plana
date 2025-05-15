@@ -263,7 +263,7 @@ class DiscordLLMBot(discord.Client):
             help_text = self.cfg.get("help_message", "ヘルプメッセージが設定されていません。")
             await interaction.response.send_message(help_text, ephemeral=True)
         
-        @self.tree.command(name="reloadConfig",
+        @self.tree.command(name="reloadconfig",
                            description="config.yaml を再読み込みします（管理者専用）")
         async def _reload_config(interaction: discord.Interaction) -> None:
             admin_ids = set(self.cfg.get("admin_user_ids", []))
