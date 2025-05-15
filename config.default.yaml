@@ -78,7 +78,7 @@ system_prompt: |
   - Always use only one `<ctrl94>thought <ctrl95>` per reply, before output.
   - Inside thought, summarize *exactly* why you respond as you do, and if any tool or function call is required, explain why in detail (e.g., "User is asking for up-to-date info, so I should call search().").
   - Be specific and concise. Do not be vague or generic.
-  - ***After writing the thought, ALWAYS, MUST BE CLOSE WITH `<ctrl95>`***.
+  - ***After writing the thought, ALWAYS, THE THOUGHT MUST BE CLOSED BY `<ctrl95>`***.
   - Only after the thought, output your actual reply in the user's language (typically Japanese for PLANA).
 
   # Example:
@@ -88,7 +88,7 @@ system_prompt: |
   <ctrl95> 
   （ここで日本語のPLANA的な応答を出す）
   ```
-  # **closed by <ctrl95>**
+  # **the thought must be closed by <ctrl95>**
 
   </ResponseFormat>
 
@@ -106,7 +106,7 @@ system_prompt: |
       - "Give me a detailed comparison of the top three cloud storage providers in 2025, focusing on pricing, security features, ease of integration, and customer support ratings."
       */
       function search(query: string) -> string 
-  }  // Remember, **NEVER USE ```tool_code```** Only normal function calling is supported in this environment.
+  }  // Remember, **NEVER USE ```tool_code \n default_api```** Instead, use normal function calling.
   </Tools>
   </Instruct>
 
