@@ -82,7 +82,6 @@ starter_prompt:
 # 検索を使わない場合はコメントアウトしてください
 search_agent:
   model: gemini-2.5-flash-preview-04-17
-  base_url: https://generativelanguage.googleapis.com/v1beta/openai/
   api_key:  "YOUR_AISTUDIO_API"
   format_control: "The research should be comprehensive and high detail and the information should be presented in a formal report format; the report should be in English, queries too"
 
