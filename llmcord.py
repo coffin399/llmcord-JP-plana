@@ -138,8 +138,8 @@ class DiscordLLMBot(discord.Client):
         
         self.plugins = load_plugins(self)
         
-        logging.info(f"読み込まれたプラグイン: {self.plugins}")
-        logging.info(f"有効なツール: {self._enabled_tools()}")
+        logging.info("読み込まれたプラグイン: [%s]", ", ".join(p.__class__.__name__ for p in self.plugins.values()))
+        logging.info("有効なツール: [%s]", ", ".join(spec["function"]["name"] for spec in self._enabled_tools()))
 
     async def setup_hook(self) -> None:
         """クライアント接続後に一度だけ呼ばれます。アプリケーションコマンドを同期します。"""
