@@ -165,16 +165,6 @@ class DiscordLLMBot(discord.Client):
         if not self._is_authorised(message):
             return
 
-        # メッセージごとに設定を再読み込みして変更を反映
-        try:
-            self.cfg = load_config(self.cfg_path)
-            self.SYSTEM_PROMPT = self.cfg.get("system_prompt")
-            self.STARTER_PROMPT = self.cfg.get("starter_prompt")
-            self.ERROR_MESSAGES = self.cfg.get("error_msg", {}) or {}
-        except Exception as e:
-            logging.error(f"設定の再読み込みに失敗しました: {e}")
-            # 再読み込み失敗時は既存の設定を使用
-
         provider_model = self.cfg.get("model", "")
         if not provider_model:
             logging.error("config.yaml に 'model' キーが見つかりません – 中止します。")
@@ -272,6 +262,32 @@ class DiscordLLMBot(discord.Client):
         async def _help(interaction: discord.Interaction) -> None:  # noqa: WPS430
             help_text = self.cfg.get("help_message", "ヘルプメッセージが設定されていません。")
             await interaction.response.send_message(help_text, ephemeral=True)
+        
+        @self.tree.command(name="reloadConfig",
+                           description="config.yaml を再読み込みします（管理者専用）")
+        async def _reload_config(interaction: discord.Interaction) -> None:
+            admin_ids = set(self.cfg.get("admin_user_ids", []))
+            if interaction.user.id not in admin_ids:
+                await interaction.response.send_message(
+                    "❌ このコマンドを実行する権限がありません。",
+                    ephemeral=True)
+                return
+
+            try:
+                self.cfg = load_config(self.cfg_path)
+
+                # 読み直した内容をキャッシュにも反映
+                self.SYSTEM_PROMPT  = self.cfg.get("system_prompt")
+                self.STARTER_PROMPT = self.cfg.get("starter_prompt")
+                self.ERROR_MESSAGES = self.cfg.get("error_msg", {}) or {}
+
+                await interaction.response.send_message(
+                    "✅ 設定を再読み込みしました。", ephemeral=True)
+                logging.info("config.yaml を手動再読み込みしました。")
+            except Exception as e:
+                logging.exception("設定の手動再読み込みに失敗")
+                await interaction.response.send_message(
+                    f"⚠️ 再読み込みに失敗しました: {e}", ephemeral=True)
 
     def _is_authorised(self, message: discord.Message) -> bool:
         """投稿者またはチャンネルが対話することを許可されているか確認します。"""
