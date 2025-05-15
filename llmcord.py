@@ -13,32 +13,22 @@ from discord import app_commands
 import httpx
 import yaml
 import json
+import time
+import os
+import sys
+import shutil
 # openai から RateLimitError をインポート
 from openai import AsyncOpenAI, RateLimitError
 from google import genai
+
+
+from plugins import load_plugins
 
 # ロギングを設定
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s: %(message)s",
 )
-
-SEARCH_TOOL = {
-    "type": "function",
-    "function": {
-        "name": "search",  # フロント LLM から見える関数名
-        "description": "Run a Google web search and return a report.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "query": {
-                    "type": "string",
-                    "description": "Full search query."}
-            },
-            "required": ["query"]
-        }
-    }
-}
 
 # ビジョンモデルのタグ
 VISION_MODEL_TAGS: Tuple[str, ...] = (
@@ -145,6 +135,11 @@ class DiscordLLMBot(discord.Client):
         self.STARTER_PROMPT: str | None = self.cfg.get("starter_prompt")
         # error_msg が常に辞書であることを保証
         self.ERROR_MESSAGES: dict[str, str] = self.cfg.get("error_msg", {}) or {}
+        
+        self.plugins = load_plugins(self)
+        
+        logging.info("読み込まれたプラグイン: [%s]", ", ".join(p.__class__.__name__ for p in self.plugins.values()))
+        logging.info("有効なツール: [%s]", ", ".join(spec["function"]["name"] for spec in self._enabled_tools()))
 
     async def setup_hook(self) -> None:
         """クライアント接続後に一度だけ呼ばれます。アプリケーションコマンドを同期します。"""
@@ -160,16 +155,6 @@ class DiscordLLMBot(discord.Client):
         # ユーザーまたはチャンネルが認証されているかチェック
         if not self._is_authorised(message):
             return
-
-        # メッセージごとに設定を再読み込みして変更を反映
-        try:
-            self.cfg = load_config(self.cfg_path)
-            self.SYSTEM_PROMPT = self.cfg.get("system_prompt")
-            self.STARTER_PROMPT = self.cfg.get("starter_prompt")
-            self.ERROR_MESSAGES = self.cfg.get("error_msg", {}) or {}
-        except Exception as e:
-            logging.error(f"設定の再読み込みに失敗しました: {e}")
-            # 再読み込み失敗時は既存の設定を使用
 
         provider_model = self.cfg.get("model", "")
         if not provider_model:
@@ -260,6 +245,17 @@ class DiscordLLMBot(discord.Client):
             model,
             max_message_length,
         )
+        
+    def _enabled_tools(self) -> list[dict]:
+        want = self.cfg.get("active_tools", None)
+        if want is None:
+            # config.yaml に active_tools が未定義 → すべて有効
+            return [p.tool_spec for p in self.plugins.values()]
+        if not want:
+            # 空リスト（[]） → 何も有効化しない
+            return []
+        # 名前一致したものだけ
+        return [p.tool_spec for n, p in self.plugins.items() if n in want]
 
     def _register_slash_commands(self) -> None:
         """ローカルの CommandTree にスラッシュコマンドを登録します。"""
@@ -268,6 +264,32 @@ class DiscordLLMBot(discord.Client):
         async def _help(interaction: discord.Interaction) -> None:  # noqa: WPS430
             help_text = self.cfg.get("help_message", "ヘルプメッセージが設定されていません。")
             await interaction.response.send_message(help_text, ephemeral=True)
+        
+        @self.tree.command(name="reloadconfig",
+                           description="config.yaml を再読み込みします（管理者専用）")
+        async def _reload_config(interaction: discord.Interaction) -> None:
+            admin_ids = set(self.cfg.get("admin_user_ids", []))
+            if interaction.user.id not in admin_ids:
+                await interaction.response.send_message(
+                    "❌ このコマンドを実行する権限がありません。",
+                    ephemeral=True)
+                return
+
+            try:
+                self.cfg = load_config(self.cfg_path)
+
+                # 読み直した内容をキャッシュにも反映
+                self.SYSTEM_PROMPT  = self.cfg.get("system_prompt")
+                self.STARTER_PROMPT = self.cfg.get("starter_prompt")
+                self.ERROR_MESSAGES = self.cfg.get("error_msg", {}) or {}
+
+                await interaction.response.send_message(
+                    "✅ 設定を再読み込みしました。", ephemeral=True)
+                logging.info("config.yaml を手動再読み込みしました。")
+            except Exception as e:
+                logging.exception("設定の手動再読み込みに失敗")
+                await interaction.response.send_message(
+                    f"⚠️ 再読み込みに失敗しました: {e}", ephemeral=True)
 
     def _is_authorised(self, message: discord.Message) -> bool:
         """投稿者またはチャンネルが対話することを許可されているか確認します。"""
@@ -668,7 +690,7 @@ class DiscordLLMBot(discord.Client):
         api_kwargs_base = dict(
             model=model,
             stream=True,
-            tools=[SEARCH_TOOL],
+            tools=self._enabled_tools(),
             tool_choice="auto",
             extra_body=self.cfg.get("extra_api_parameters", {}),
         )
@@ -775,9 +797,7 @@ class DiscordLLMBot(discord.Client):
 
                     if saw_tool_call:
                         assistant_tool_calls_list = []
-
-                        executed_tool_details = None
-
+                        
                         for call_id, details in tool_call_data_for_assistant.items():
                             function_name = details["name"]
                             arguments_str = "".join(details["arguments_chunks"])
@@ -789,48 +809,51 @@ class DiscordLLMBot(discord.Client):
                                     "arguments": arguments_str
                                 }
                             })
-                            if function_name == "search" and not executed_tool_details:
-                                executed_tool_details = {
-                                    "id": call_id,
-                                    "name": function_name,
-                                    "arguments_str": arguments_str
-                                }
-
-                        if not executed_tool_details and assistant_tool_calls_list:
-                            executed_tool_details = {
-                                "id": assistant_tool_calls_list[0]["id"],
-                                "name": assistant_tool_calls_list[0]["function"]["name"],
-                                "arguments_str": assistant_tool_calls_list[0]["function"]["arguments"]
-                            }
 
                         if assistant_tool_calls_list:
+
                             messages.append({
                                 "role": "assistant",
                                 "content": assistant_text_content_buffer.strip() if assistant_text_content_buffer.strip() else "",
-                                # Ensure content is a string
                                 "tool_calls": assistant_tool_calls_list
                             })
                             assistant_text_content_buffer = ""
+                            
+                            for call in assistant_tool_calls_list:
+                                tool_name = call["function"]["name"]
 
-                        if executed_tool_details:
-                            args = json.loads(executed_tool_details["arguments_str"])
-                            report = await self._run_google_search(args.get("query", ""), self.cfg)
+                                actives = self.cfg.get("active_tools", None)
+                                if (
+                                    tool_name not in self.plugins
+                                    or (actives is not None and tool_name not in actives)
+                                ):
+                                    messages.append({
+                                        "role": "tool",
+                                        "tool_call_id": call["id"],
+                                        "name": tool_name,
+                                        "content": f"[{tool_name}] は無効化されています。",
+                                    })
+                                    continue
 
-                            messages.append({
-                                "role": "tool",
-                                "tool_call_id": executed_tool_details["id"],
-                                "name": executed_tool_details["name"],
-                                "content": report,
-                            })
+                                plugin = self.plugins[tool_name]
+                                args = json.loads(call["function"]["arguments"])
+                                result = await plugin.run(arguments=args, bot=self)
+
+                                messages.append({
+                                    "role": "tool",
+                                    "tool_call_id": call["id"],
+                                    "name": tool_name,
+                                    "content": result,
+                                })
+
                         else:
-                            logging.error("Tool call detected but no executable 'search' tool details found.")
+                            logging.error("Tool call detected but tool details found empty.")
                             messages.append({
-                                "role": "user",  # Or system. Tell LLM that tool execution failed.
+                                "role": "user",
                                 "content": "Tool call was attempted but failed because the tool details were missing or not recognized."
                             })
 
                         max_tool_loops -= 1
-
                         last_message_buffer = ""
                         continue
 
@@ -961,22 +984,26 @@ class DiscordLLMBot(discord.Client):
         except Exception as e:
             logging.error(f"メッセージ {msg.id} の編集中に予期しないエラー: {e}")
 
-    async def _run_google_search(self, query: str, bot_cfg: dict) -> str:
-        """Gemini 2.5 Flash (search‑as‑a‑tool) で検索し報告書テキストを返す。"""
-
-        gclient = genai.Client(api_key=bot_cfg["search_agent"]["api_key"])
-        response = gclient.models.generate_content(
-            model=bot_cfg["search_agent"]["model"],
-            contents="**[DeepResearch Request]:**" + query + "\n" + bot_cfg["search_agent"]["format_control"],
-            config={"tools": [{"google_search": {}}]},
-        )
-        return response.text
-
-
 aio_run = asyncio.run
 
+def ensure_config(cfg_path: str = "config.yaml",
+                  default_path: str = "config.default.yaml") -> None:
+    if os.path.exists(cfg_path):
+        return
+
+    if not os.path.exists(default_path):
+        logging.critical(
+            f"{cfg_path} が無く、{default_path} も見つからないため起動できません。")
+        sys.exit(1)
+
+    shutil.copy2(default_path, cfg_path)
+    logging.warning(
+        f"{cfg_path} が無かったため {default_path} をコピーしました。\n"
+        f"必要に応じて編集してから再度起動してください。")
+    sys.exit(0)
 
 async def _main() -> None:
+    ensure_config()
     cfg = load_config()
     if client_id := cfg.get("client_id"):
         logging.info(
