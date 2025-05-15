@@ -71,7 +71,7 @@ system_prompt:
       function search(query: string) -> string 
 
   }
-  "
+  " # 検索を使わない場合ば toolsの部分をコメントアウトしてください
 
 starter_prompt:
   "
@@ -79,7 +79,7 @@ starter_prompt:
   接続確認。…命令待機中。なにか御用でしょうか。
   "
 
-# 検索を使わない場合コメントアウトしといてください！
+# 検索を使わない場合はコメントアウトしてください
 search_agent:
   model: gemini-2.5-flash-preview-04-17
   base_url: https://generativelanguage.googleapis.com/v1beta/openai/
