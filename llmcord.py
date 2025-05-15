@@ -14,6 +14,9 @@ import httpx
 import yaml
 import json
 import time
+import os
+import sys
+import shutil
 # openai から RateLimitError をインポート
 from openai import AsyncOpenAI, RateLimitError
 from google import genai
@@ -1000,8 +1003,24 @@ class DiscordLLMBot(discord.Client):
 
 aio_run = asyncio.run
 
+def ensure_config(cfg_path: str = "config.yaml",
+                  default_path: str = "config.default.yaml") -> None:
+    if os.path.exists(cfg_path):
+        return
+
+    if not os.path.exists(default_path):
+        logging.critical(
+            f"{cfg_path} が無く、{default_path} も見つからないため起動できません。")
+        sys.exit(1)
+
+    shutil.copy2(default_path, cfg_path)
+    logging.warning(
+        f"{cfg_path} が無かったため {default_path} をコピーしました。\n"
+        f"必要に応じて編集してから再度起動してください。")
+    sys.exit(0)
 
 async def _main() -> None:
+    ensure_config()
     cfg = load_config()
     if client_id := cfg.get("client_id"):
         logging.info(
