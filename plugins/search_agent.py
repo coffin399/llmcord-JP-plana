@@ -2,7 +2,7 @@ from __future__ import annotations
 import json, asyncio, logging
 from google import genai
 
-class SearchAgent():  # 名前は何でも良い
+class SearchAgent():
     name = "search"
     tool_spec = {
         "type": "function",
@@ -19,7 +19,6 @@ class SearchAgent():  # 名前は何でも良い
 
     def __init__(self, bot) -> None:
         self.bot = bot
-        # OpenAI “function calling” 用の定義
 
     async def _google_search(self, query: str) -> str:
         gcfg = self.bot.cfg["search_agent"]
