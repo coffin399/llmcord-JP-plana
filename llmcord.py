@@ -21,28 +21,14 @@ import shutil
 from openai import AsyncOpenAI, RateLimitError
 from google import genai
 
+
+from plugins import load_plugins
+
 # ロギングを設定
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s: %(message)s",
 )
-
-SEARCH_TOOL = {
-    "type": "function",
-    "function": {
-        "name": "search",  # フロント LLM から見える関数名
-        "description": "Run a Google web search and return a report.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "query": {
-                    "type": "string",
-                    "description": "Full search query."}
-            },
-            "required": ["query"]
-        }
-    }
-}
 
 # ビジョンモデルのタグ
 VISION_MODEL_TAGS: Tuple[str, ...] = (
@@ -149,6 +135,11 @@ class DiscordLLMBot(discord.Client):
         self.STARTER_PROMPT: str | None = self.cfg.get("starter_prompt")
         # error_msg が常に辞書であることを保証
         self.ERROR_MESSAGES: dict[str, str] = self.cfg.get("error_msg", {}) or {}
+        
+        self.plugins = load_plugins(self)
+        
+        logging.info(f"読み込まれたプラグイン: {self.plugins}")
+        logging.info(f"有効なツール: {self._enabled_tools()}")
 
     async def setup_hook(self) -> None:
         """クライアント接続後に一度だけ呼ばれます。アプリケーションコマンドを同期します。"""
@@ -254,6 +245,17 @@ class DiscordLLMBot(discord.Client):
             model,
             max_message_length,
         )
+        
+    def _enabled_tools(self) -> list[dict]:
+        want = self.cfg.get("active_tools", None)
+        if want is None:
+            # config.yaml に active_tools が未定義 → すべて有効
+            return [p.tool_spec for p in self.plugins.values()]
+        if not want:
+            # 空リスト（[]） → 何も有効化しない
+            return []
+        # 名前一致したものだけ
+        return [p.tool_spec for n, p in self.plugins.items() if n in want]
 
     def _register_slash_commands(self) -> None:
         """ローカルの CommandTree にスラッシュコマンドを登録します。"""
@@ -688,7 +690,7 @@ class DiscordLLMBot(discord.Client):
         api_kwargs_base = dict(
             model=model,
             stream=True,
-            tools=[SEARCH_TOOL],
+            tools=self._enabled_tools(),
             tool_choice="auto",
             extra_body=self.cfg.get("extra_api_parameters", {}),
         )
@@ -795,9 +797,7 @@ class DiscordLLMBot(discord.Client):
 
                     if saw_tool_call:
                         assistant_tool_calls_list = []
-
-                        executed_tool_details = None
-
+                        
                         for call_id, details in tool_call_data_for_assistant.items():
                             function_name = details["name"]
                             arguments_str = "".join(details["arguments_chunks"])
@@ -809,48 +809,51 @@ class DiscordLLMBot(discord.Client):
                                     "arguments": arguments_str
                                 }
                             })
-                            if function_name == "search" and not executed_tool_details:
-                                executed_tool_details = {
-                                    "id": call_id,
-                                    "name": function_name,
-                                    "arguments_str": arguments_str
-                                }
-
-                        if not executed_tool_details and assistant_tool_calls_list:
-                            executed_tool_details = {
-                                "id": assistant_tool_calls_list[0]["id"],
-                                "name": assistant_tool_calls_list[0]["function"]["name"],
-                                "arguments_str": assistant_tool_calls_list[0]["function"]["arguments"]
-                            }
 
                         if assistant_tool_calls_list:
+
                             messages.append({
                                 "role": "assistant",
                                 "content": assistant_text_content_buffer.strip() if assistant_text_content_buffer.strip() else "",
-                                # Ensure content is a string
                                 "tool_calls": assistant_tool_calls_list
                             })
                             assistant_text_content_buffer = ""
+                            
+                            for call in assistant_tool_calls_list:
+                                tool_name = call["function"]["name"]
 
-                        if executed_tool_details:
-                            args = json.loads(executed_tool_details["arguments_str"])
-                            report = await self._run_google_search(args.get("query", ""), self.cfg)
+                                actives = self.cfg.get("active_tools", None)
+                                if (
+                                    tool_name not in self.plugins
+                                    or (actives is not None and tool_name not in actives)
+                                ):
+                                    messages.append({
+                                        "role": "tool",
+                                        "tool_call_id": call["id"],
+                                        "name": tool_name,
+                                        "content": f"[{tool_name}] は無効化されています。",
+                                    })
+                                    continue
 
-                            messages.append({
-                                "role": "tool",
-                                "tool_call_id": executed_tool_details["id"],
-                                "name": executed_tool_details["name"],
-                                "content": report,
-                            })
+                                plugin = self.plugins[tool_name]
+                                args = json.loads(call["function"]["arguments"])
+                                result = await plugin.run(arguments=args, bot=self)
+
+                                messages.append({
+                                    "role": "tool",
+                                    "tool_call_id": call["id"],
+                                    "name": tool_name,
+                                    "content": result,
+                                })
+
                         else:
-                            logging.error("Tool call detected but no executable 'search' tool details found.")
+                            logging.error("Tool call detected but tool details found empty.")
                             messages.append({
-                                "role": "user",  # Or system. Tell LLM that tool execution failed.
+                                "role": "user",
                                 "content": "Tool call was attempted but failed because the tool details were missing or not recognized."
                             })
 
                         max_tool_loops -= 1
-
                         last_message_buffer = ""
                         continue
 
