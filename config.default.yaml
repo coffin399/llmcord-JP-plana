@@ -6,6 +6,7 @@ status_message:
 
 allowed_channel_ids: []
 allowed_role_ids: []
+admin_user_ids: []
 
 max_text: 100000
 max_images: 5
