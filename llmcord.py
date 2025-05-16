@@ -134,6 +134,7 @@ class DiscordLLMBot(discord.Client):
         # 設定からプロンプトとエラーメッセージを読み込み
         self.SYSTEM_PROMPT: str | None = self.cfg.get("system_prompt")
         self.STARTER_PROMPT: str | None = self.cfg.get("starter_prompt")
+        self.PREFILL_PROMPT: str | None = self.cfg.get("starter_prompt")
         # error_msg が常に辞書であることを保証
         self.ERROR_MESSAGES: dict[str, str] = self.cfg.get("error_msg", {}) or {}
         
@@ -236,6 +237,9 @@ class DiscordLLMBot(discord.Client):
             api_messages.append({"role": "assistant", "content": self.STARTER_PROMPT})
 
         api_messages.extend(messages)  # 構築したメッセージチェーンを追加
+        
+        if self.PREFILL_PROMPT:
+            api_messages.append({"role": "assistant", "content": self.PREFILL_PROMPT})
 
         # LLM レスポンスを生成して Discord に送信
         await self._generate_and_send_response(
