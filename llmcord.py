@@ -44,6 +44,7 @@ PROVIDERS_SUPPORTING_USERNAMES: Tuple[str, ...] = ("openai", "x-ai")
 
 # 許可される添付ファイルの種類
 ALLOWED_FILE_TYPES: Tuple[str, ...] = ("image", "text")
+INVITE_URL = "https://discord.com/api/oauth2/authorize?client_id=1031673203774464160&permissions=412317273088&scope=bot"
 
 # 許可されるチャンネルの種類
 ALLOWED_CHANNEL_TYPES: Tuple[discord.ChannelType, ...] = (
@@ -263,8 +264,55 @@ class DiscordLLMBot(discord.Client):
         @self.tree.command(name="help", description="ヘルプメッセージを表示します")
         async def _help(interaction: discord.Interaction) -> None:  # noqa: WPS430
             help_text = self.cfg.get("help_message", "ヘルプメッセージが設定されていません。")
-            await interaction.response.send_message(help_text, ephemeral=True)
-        
+            await interaction.response.send_message(help_text, ephemeral=False)
+
+        @self.tree.command(name="invite", description="BOTの招待コードを表示します")
+        async def _invite(interaction: discord.Interaction) -> None:  # noqa: WPS430
+            """ボットの招待リンクを表示します。"""
+            try:
+                if not INVITE_URL or INVITE_URL == "YOUR_INVITE_URL_HERE":
+                    # URLが設定されていない場合のエラーメッセージ (実行者のみ)
+                    await interaction.response.send_message(
+                        "エラー: 招待URLが設定されていません。開発者(Discord:coffin299)にご連絡ください。",
+                        ephemeral=True
+                    )
+                    print("Error: INVITE_URL is not set in the code.")  # ログにも出力
+                    return
+
+                # Embedメッセージを作成して招待リンクを表示
+                embed = discord.Embed(
+                    title="🔗 ボット招待",
+                    description=(
+                        f"PLANAをあなたのサーバーに招待しませんか？\n"
+                        "以下のリンクから招待できます。"
+                    ),
+                    color=discord.Color.brand_green()  # または discord.Color.blue() などお好みの色
+                )
+                embed.add_field(
+                    name="招待リンク",
+                    value=f"[ここをクリックして招待する]({INVITE_URL})",  # 用意されたURLを使用
+                    inline=False
+                )
+                # ボットのアイコンをサムネイルとして設定
+                if interaction.client.user and interaction.client.user.avatar:
+                    embed.set_thumbnail(url=interaction.client.user.avatar.url)
+                elif self.bot.user and self.bot.user.avatar:  # Cog の場合など、botインスタンスからアクセスする場合
+                    embed.set_thumbnail(url=self.bot.user.avatar.url)
+
+                embed.set_footer(text=f"コマンド実行者: {interaction.user.display_name}")
+
+                # チャンネルの全員が見えるようにメッセージを送信
+                await interaction.response.send_message(embed=embed)
+
+            except Exception as e:
+                # エラー発生時のフォールバックメッセージ (これは実行者のみに見えるようにする方が良いでしょう)
+                print(f"Error in invite command: {e}")  # ログにエラーを出力
+                await interaction.response.send_message(
+                    "申し訳ありません、招待リンクの表示中にエラーが発生しました。\n"
+                    "しばらくしてからもう一度お試しいただくか、開発者(Discord:coffin299)にご連絡ください。",
+                    ephemeral=True  # エラーメッセージは実行者のみが良い場合が多い
+                )
+
         @self.tree.command(name="reloadconfig",
                            description="config.yaml を再読み込みします（管理者専用）")
         async def _reload_config(interaction: discord.Interaction) -> None:

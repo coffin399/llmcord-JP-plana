@@ -124,7 +124,8 @@ search_agent:
   format_control: "The research should be comprehensive and high detail and the information should be presented in a formal report format; the report should be in English, queries too"
 
 # command message
-help_message: "このボットは、Discord上でLLMと対話するためのボットです。\n 以下のコマンドを使用できます:\n - `/help`: このヘルプメッセージを表示します。\n - @PLANAでメンションをつけて、テキストメッセージを送信すると、ボットが応答します。\n"
+help_message: "このボットは、Discord上でLLMと対話するためのボットです。\n 以下のコマンドを使用できます:\n - `/help`: このヘルプメッセージを表示します。\n - @PLANAでメンションをつけて、テキストメッセージを送信すると、ボットが応答します。\n https://imgur.com/p6jHitD"
+
 
 error_msg:
   msg_max_text_size: "⚠️ 最大文字数は {max_text:,} です ><"
@@ -133,7 +134,7 @@ error_msg:
   msg_error_attachment: "⚠️ サポートされていないファイル形式です ><"
 
   # OpenAI が 429 Rate Limit Error を返した場合のエラーメッセージ
-  ratelimit_error: "⚠️ AI が現在非常に混雑しています。しばらくしてからもう一度試してください！"
+  ratelimit_error: "⚠️ 生成AIが現在非常に混雑しています。しばらくしてからもう一度試してください！"
   # その他の API または処理エラーに対する一般的なエラーメッセージ
   general_error: "⚠️ レスポンスの生成中に予期しない内部エラーが発生しました。もう一度試してください！"
 
