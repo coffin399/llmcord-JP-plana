@@ -470,9 +470,9 @@ class DiscordLLMBot(discord.Client):
 
         # ボット自身でない場合、表示名をテキストに追加
         if msg.author != self.user:
-            display_name = msg.author.display_name
+            account_name = msg.author.name
             # メンション置換後の実際のテキストコンテンツがある場合にのみ、表示名を前に付加
-            message_content = f"{display_name}: {replaced_content}" if replaced_content else display_name
+            message_content = f"`User({account_name})`: {replaced_content}" if replaced_content else account_name
         else:
             # ボット自身のメッセージの場合、メンション置換後のコンテンツをそのまま使用
             message_content = replaced_content
