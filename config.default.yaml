@@ -116,6 +116,8 @@ starter_prompt:
   接続確認。…命令待機中。なにか御用でしょうか。
   "
 
+prefil_prompt: "<thinking>"
+
 active_tools: [search]
 
 search_agent:
