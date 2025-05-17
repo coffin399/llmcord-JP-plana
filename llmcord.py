@@ -21,7 +21,6 @@ import shutil
 from openai import AsyncOpenAI, RateLimitError
 from google import genai
 
-
 from plugins import load_plugins
 
 # ロギングを設定
@@ -134,12 +133,11 @@ class DiscordLLMBot(discord.Client):
         # 設定からプロンプトとエラーメッセージを読み込み
         self.SYSTEM_PROMPT: str | None = self.cfg.get("system_prompt")
         self.STARTER_PROMPT: str | None = self.cfg.get("starter_prompt")
-        self.PREFILL_PROMPT: str | None = self.cfg.get("starter_prompt")
         # error_msg が常に辞書であることを保証
         self.ERROR_MESSAGES: dict[str, str] = self.cfg.get("error_msg", {}) or {}
-        
+
         self.plugins = load_plugins(self)
-        
+
         logging.info("読み込まれたプラグイン: [%s]", ", ".join(p.__class__.__name__ for p in self.plugins.values()))
         logging.info("有効なツール: [%s]", ", ".join(spec["function"]["name"] for spec in self._enabled_tools()))
 
@@ -237,9 +235,6 @@ class DiscordLLMBot(discord.Client):
             api_messages.append({"role": "assistant", "content": self.STARTER_PROMPT})
 
         api_messages.extend(messages)  # 構築したメッセージチェーンを追加
-        
-        if self.PREFILL_PROMPT:
-            api_messages.append({"role": "assistant", "content": self.PREFILL_PROMPT})
 
         # LLM レスポンスを生成して Discord に送信
         await self._generate_and_send_response(
@@ -250,7 +245,7 @@ class DiscordLLMBot(discord.Client):
             model,
             max_message_length,
         )
-        
+
     def _enabled_tools(self) -> list[dict]:
         want = self.cfg.get("active_tools", None)
         if want is None:
@@ -270,7 +265,7 @@ class DiscordLLMBot(discord.Client):
             help_text = self.cfg.get("help_message", "ヘルプメッセージが設定されていません。")
             await interaction.response.send_message(help_text, ephemeral=False)
 
-        @self.tree.command(name="invite", description="BOTの招待コードを表示します")
+        @self.tree.command(name="invite", description="Botをサーバーに招待します")
         async def _invite(interaction: discord.Interaction) -> None:  # noqa: WPS430
             """ボットの招待リンクを表示します。"""
             try:
@@ -331,7 +326,7 @@ class DiscordLLMBot(discord.Client):
                 self.cfg = load_config(self.cfg_path)
 
                 # 読み直した内容をキャッシュにも反映
-                self.SYSTEM_PROMPT  = self.cfg.get("system_prompt")
+                self.SYSTEM_PROMPT = self.cfg.get("system_prompt")
                 self.STARTER_PROMPT = self.cfg.get("starter_prompt")
                 self.ERROR_MESSAGES = self.cfg.get("error_msg", {}) or {}
 
@@ -474,9 +469,9 @@ class DiscordLLMBot(discord.Client):
 
         # ボット自身でない場合、表示名をテキストに追加
         if msg.author != self.user:
-            account_name = msg.author.name
+            display_name = msg.author.display_name
             # メンション置換後の実際のテキストコンテンツがある場合にのみ、表示名を前に付加
-            message_content = f"`User({account_name})`: {replaced_content}" if replaced_content else account_name
+            message_content = f"{display_name}: {replaced_content}" if replaced_content else display_name
         else:
             # ボット自身のメッセージの場合、メンション置換後のコンテンツをそのまま使用
             message_content = replaced_content
@@ -849,7 +844,7 @@ class DiscordLLMBot(discord.Client):
 
                     if saw_tool_call:
                         assistant_tool_calls_list = []
-                        
+
                         for call_id, details in tool_call_data_for_assistant.items():
                             function_name = details["name"]
                             arguments_str = "".join(details["arguments_chunks"])
@@ -870,14 +865,14 @@ class DiscordLLMBot(discord.Client):
                                 "tool_calls": assistant_tool_calls_list
                             })
                             assistant_text_content_buffer = ""
-                            
+
                             for call in assistant_tool_calls_list:
                                 tool_name = call["function"]["name"]
 
                                 actives = self.cfg.get("active_tools", None)
                                 if (
-                                    tool_name not in self.plugins
-                                    or (actives is not None and tool_name not in actives)
+                                        tool_name not in self.plugins
+                                        or (actives is not None and tool_name not in actives)
                                 ):
                                     messages.append({
                                         "role": "tool",
@@ -1036,7 +1031,9 @@ class DiscordLLMBot(discord.Client):
         except Exception as e:
             logging.error(f"メッセージ {msg.id} の編集中に予期しないエラー: {e}")
 
+
 aio_run = asyncio.run
+
 
 def ensure_config(cfg_path: str = "config.yaml",
                   default_path: str = "config.default.yaml") -> None:
@@ -1053,6 +1050,7 @@ def ensure_config(cfg_path: str = "config.yaml",
         f"{cfg_path} が無かったため {default_path} をコピーしました。\n"
         f"必要に応じて編集してから再度起動してください。")
     sys.exit(0)
+
 
 async def _main() -> None:
     ensure_config()
