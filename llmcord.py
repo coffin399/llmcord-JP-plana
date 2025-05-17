@@ -270,7 +270,7 @@ class DiscordLLMBot(discord.Client):
         async def _support(interaction: discord.Interaction) -> None:
             """サポートサーバーの招待コード(リンク)を表示します。"""
             # self.SUPPORT_SERVER_INVITE_LINK を参照
-            invite_link_to_use = self.SUPPORT_SERVER_INVITE_LINK
+            invite_link_to_use = SUPPORT_SERVER_INVITE_LINK
 
             if invite_link_to_use and invite_link_to_use != "https://discord.gg/HogeFugaPiyo":  # Placeholderでないことを確認
                 message = f"サポートサーバーへの招待リンクはこちらです！\n{invite_link_to_use}"
