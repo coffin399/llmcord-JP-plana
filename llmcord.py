@@ -266,7 +266,7 @@ class DiscordLLMBot(discord.Client):
             help_text = self.cfg.get("help_message", "ヘルプメッセージが設定されていません。")
             await interaction.response.send_message(help_text, ephemeral=False)
 
-        @app_commands.command(name="support", description="サポートサーバーの招待コードを表示します")
+        @self.tree.command(name="support", description="サポートサーバーの招待コードを表示します")
         async def _support(interaction: discord.Interaction) -> None:
             """サポートサーバーの招待コード(リンク)を表示します。"""
             # self.SUPPORT_SERVER_INVITE_LINK を参照
