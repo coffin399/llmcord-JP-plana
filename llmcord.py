@@ -44,6 +44,7 @@ PROVIDERS_SUPPORTING_USERNAMES: Tuple[str, ...] = ("openai", "x-ai")
 # 許可される添付ファイルの種類
 ALLOWED_FILE_TYPES: Tuple[str, ...] = ("image", "text")
 INVITE_URL = "https://discord.com/api/oauth2/authorize?client_id=1031673203774464160&permissions=412317273088&scope=bot"
+SUPPORT_SERVER_INVITE_LINK = "https://discord.gg/SjuWKtwNAG"
 
 # 許可されるチャンネルの種類
 ALLOWED_CHANNEL_TYPES: Tuple[discord.ChannelType, ...] = (
@@ -261,9 +262,24 @@ class DiscordLLMBot(discord.Client):
         """ローカルの CommandTree にスラッシュコマンドを登録します。"""
 
         @self.tree.command(name="help", description="ヘルプメッセージを表示します")
-        async def _help(interaction: discord.Interaction) -> None:  # noqa: WPS430
+        async def _help(interaction: discord.Interaction) -> None:
             help_text = self.cfg.get("help_message", "ヘルプメッセージが設定されていません。")
             await interaction.response.send_message(help_text, ephemeral=False)
+
+        @app_commands.command(name="support", description="サポートサーバーの招待コードを表示します")
+        async def _support(interaction: discord.Interaction) -> None:
+            """サポートサーバーの招待コード(リンク)を表示します。"""
+            # self.SUPPORT_SERVER_INVITE_LINK を参照
+            invite_link_to_use = self.SUPPORT_SERVER_INVITE_LINK
+
+            if invite_link_to_use and invite_link_to_use != "https://discord.gg/HogeFugaPiyo":  # Placeholderでないことを確認
+                message = f"サポートサーバーへの招待リンクはこちらです！\n{invite_link_to_use}"
+                await interaction.response.send_message(message, ephemeral=False)
+            else:
+                await interaction.response.send_message(
+                    "申し訳ありませんが、現在サポートサーバーの招待リンクが設定されていません。\n管理者にお問い合わせください。",
+                    ephemeral=False
+                )
 
         @self.tree.command(name="invite", description="Botをサーバーに招待します")
         async def _invite(interaction: discord.Interaction) -> None:  # noqa: WPS430
