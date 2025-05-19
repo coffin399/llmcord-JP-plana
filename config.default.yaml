@@ -120,8 +120,8 @@ help_message: "このボットは、Discord上でLLMと対話するためのボ�
               \n - @PLANAでメンションをつけて、テキストメッセージを送信すると、ボットが応答します。
               \n - Mention @PLANA and send a text message, and the bot will respond.
               \n - If you want a reply in a language other than Japanese, you must enter @PLANA [conversation content here] Please reply in [any language]. 
-              \n - https://imgur.com/p6jHitD"
-
+              \n - https://imgur.com/p6jHitD
+              \n - https://github.com/coffin399/llmcord-JP-plana"
 
 error_msg:
   msg_max_text_size: "⚠️ 最大文字数は {max_text:,} です ><"
