@@ -31,9 +31,10 @@ class SearchAgent():
 
         for attempt in range(retries + 1):
             try:
-                response = client.models.generate_content(
-                    model=self.bot.cfg["search_agent"]["model"],
-                    contents="**[DeepResearch Request]:**" + query + "\n" + self.bot.cfg["search_agent"]["format_control"],
+                response = await asyncio.to_thread(
+                    client.models.generate_content,
+                    model=gcfg["model"],
+                    contents="**[DeepResearch Request]:** " + query + "\n" + gcfg["format_control"],
                     config={"tools": [{"google_search": {}}]},
                 )
                 return response.text
