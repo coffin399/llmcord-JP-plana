@@ -45,6 +45,7 @@ PROVIDERS_SUPPORTING_USERNAMES: Tuple[str, ...] = ("openai", "x-ai")
 ALLOWED_FILE_TYPES: Tuple[str, ...] = ("image", "text")
 INVITE_URL = "https://discord.com/api/oauth2/authorize?client_id=1031673203774464160&permissions=412317273088&scope=bot"
 SUPPORT_SERVER_INVITE_LINK = "https://discord.gg/SjuWKtwNAG"
+ARONA_REPOSITORY = "https://github.com/coffin399/music-bot-arona"
 
 # 許可されるチャンネルの種類
 ALLOWED_CHANNEL_TYPES: Tuple[discord.ChannelType, ...] = (
@@ -266,6 +267,12 @@ class DiscordLLMBot(discord.Client):
             help_text = self.cfg.get("help_message", "ヘルプメッセージが設定されていません。")
             await interaction.response.send_message(help_text, ephemeral=False)
 
+        @self.tree.command(name="arona", description="arona music botのリポジトリを表示します")
+        async def _arona(interaction: discord.Interaction) -> None:
+            if ARONA_REPOSITORY and ARONA_REPOSITORY != "":
+                message = f"アロナのリポジトリはこちらです！\n{ARONA_REPOSITORY}"
+                await interaction.response.send_message(message, ephemeral=False)
+
         @self.tree.command(name="support", description="サポートサーバーの招待コードを表示します")
         async def _support(interaction: discord.Interaction) -> None:
             """サポートサーバーの招待コード(リンク)を表示します。"""
@@ -328,8 +335,7 @@ class DiscordLLMBot(discord.Client):
                     ephemeral=True  # エラーメッセージは実行者のみが良い場合が多い
                 )
 
-        @self.tree.command(name="reloadconfig",
-                           description="config.yaml を再読み込みします（管理者専用）")
+        @self.tree.command(name="reloadconfig",description="config.yaml を再読み込みします（管理者専用）")
         async def _reload_config(interaction: discord.Interaction) -> None:
             admin_ids = set(self.cfg.get("admin_user_ids", []))
             if interaction.user.id not in admin_ids:
