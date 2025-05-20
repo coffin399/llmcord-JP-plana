@@ -273,7 +273,7 @@ class DiscordLLMBot(discord.Client):
                 message = f"アロナのリポジトリはこちらです！\n{ARONA_REPOSITORY}"
                 await interaction.response.send_message(message, ephemeral=False)
 
-        @self.tree.command(name="prana", description="llmcord-JP-planaのリポジトリを表示します")
+        @self.tree.command(name="plana", description="llmcord-JP-planaのリポジトリを表示します")
         async def _plana(interaction: discord.Interaction) -> None:
             if PLANA_REPOSITORY and PLANA_REPOSITORY != "":
                 message = f"プラナのリポジトリはこちらです！\n{PLANA_REPOSITORY}"
