@@ -5,14 +5,14 @@
 <h3 align="center"><i>
   プラナちゃんとおしゃべりしよう！
 </i></h3>
-## 面倒な人向け(BOT invite):
+
+## 面倒な人向け(BOT招待):
 ### [ここをクリックでBOTをサーバーに入れられます / Click here to invite the BOT ](https://discord.com/api/oauth2/authorize?client_id=1031673203774464160&permissions=412317273088&scope=bot)
+
 <p align="center">
   <img src="https://i.imgur.com/p6jHitD.gif" alt="">
 </p>
-
 planacordは、llmcordを基盤として開発された、Discord内でLLM（大規模言語モデル）と直接会話が可能になるツールです。リモートホスト型やローカルホスト型など、ほぼすべてのLLMに対応しています。
-
 
 ## サポートサーバーはこちら:
 ### [サポートサーバーに入るにはこちら](https://discord.gg/SjuWKtwNAG)
