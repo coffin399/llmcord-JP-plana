@@ -136,7 +136,8 @@ help_message: "このボットは、Discord上でLLMと対話するためのボ�
               \n 以下のコマンドを使用できます:
               \n - `/help`: このヘルプメッセージを表示します。Displays this help message.
               \n - `/invite`: BOTの招待URLを送信します。Send the bot's invite URL.
-              \n - `/arona` : ARONA MUSIC BOTのリポジトリを表示します。
+              \n - `/plana` : llmcord-JP-plana のリポジトリを表示します。 show plana's repository.
+              \n - `/arona` : ARONA MUSIC BOT のリポジトリを表示します。 show arona's repository.
               \n - @PLANAでメンションをつけて、テキストメッセージを送信すると、ボットが応答します。
               \n - Mention @PLANA and send a text message, and the bot will respond.
               \n - If you want a reply in a language other than Japanese, you must enter @PLANA [conversation content here] Please reply in [any language]. 
