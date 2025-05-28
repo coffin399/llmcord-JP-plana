@@ -103,7 +103,7 @@ prefil_prompt: "<thinking>"
 active_tools: [search]
 
 search_agent:
-  model: gemini-2.5-flash-preview-04-17
+  model: gemini-2.5-flash-preview-05-20
   api_key:  "YOUR_AISTUDIO_API"
   format_control: "The research should be comprehensive and high detail and the information should be presented in a formal report format; the report should be in English, queries too"
 
