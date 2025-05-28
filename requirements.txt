@@ -1,5 +1,7 @@
 discord.py
+discord.py[voice]
 httpx
 openai
 pyyaml
 google-genai
+yt-dlp
