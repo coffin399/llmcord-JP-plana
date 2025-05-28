@@ -2,7 +2,7 @@
   plana-cord-JP
 </h1>
 
-## 面倒な人向け(BOT招待):
+## 面倒な人向け(BOT招待,24/7稼働):
 ### [ここをクリックでBOTをサーバーに入れられます！ / Click here to invite the BOT ](https://discord.com/api/oauth2/authorize?client_id=1031673203774464160&permissions=412317273088&scope=bot)
 
 <h3 align="center"><i>
