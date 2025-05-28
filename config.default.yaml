@@ -169,7 +169,7 @@ help_message: "このボットは、Discord上でLLMと対話するためのボ�
               \n - If you want a reply in a language other than Japanese, you must enter @PLANA [conversation content here] Please reply in [any language]. 
               \n - https://i.imgur.com/4muvYWH.gif
               \n - https://github.com/coffin399/llmcord-JP-plana"
-              \n - "© Yostar,Inc. and NEXON Games co.,Ltd for headers and icons."
+              \n - "© NEXON Games Co.,Ltd & Yostar,Inc. for headers and icons."
 
 error_msg:
   msg_max_text_size: "⚠️ 最大文字数は {max_text:,} です ><"
