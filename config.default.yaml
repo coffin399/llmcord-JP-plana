@@ -127,8 +127,78 @@ error_msg:
   # その他の API または処理エラーに対する一般的なエラーメッセージ
   general_error: "⚠️ レスポンスの生成中に予期しない内部エラーが発生しました。もう一度試してください！"
 
+music_cog_settings:
+  messages:
+    # 一般的なメッセージ
+    server_only_command: "このコマンドはサーバー内でのみ使用できます。"
+    voice_channel_required: "まずボイスチャンネルに参加してください。"
+    bot_not_in_voice: "ボットはボイスチャンネルに接続していません。"
+    failed_to_join_voice: "ボイスチャンネルへの接続に失敗しました: `{error}`"
+    join_timeout: "ボイスチャンネルへの接続がタイムアウトしました。"
+    join_success: "{channel_mention} に参加しました。"
+    leave_success: "{channel_name} から退出しました。"
+    user_info_error: "ユーザー情報が取得できませんでした。"
 
+    # 再生関連
+    play_thinking: "曲情報を検索・準備中です..." # defer時のメッセージ (現在はコード内で直接指定が多い)
+    play_no_match: "「{query}」に一致する曲が見つかりませんでした。"
+    play_ytdl_error: "曲情報の取得エラー: {error}"
+    play_ytdl_unexpected_error: "曲情報の取得中に予期せぬエラーが発生しました: `{error}`"
+    play_added_to_queue_single: "キューに追加しました"
+    play_added_to_queue_multiple: "{count}曲をキューに追加しました"
+    play_added_to_queue_description_single: "{song_title_artist}"
+    play_added_to_queue_description_multiple: "先頭: {song_title_artist}\n他 {other_count} 曲"
+    play_footer_requested_by: "リクエスト者: {user_name}"
+    play_footer_playlist_requested_by: "プレイリスト/複数曲をリクエスト: {user_name}"
 
+    # キュー・再生制御関連
+    now_playing_title_playing: "再生中: "
+    now_playing_title_paused: "⏸️ 一時停止中: "
+    now_playing_none: "現在再生中の曲はありません。"
+    queue_title: "再生キュー"
+    queue_now_playing_field: "再生中"
+    queue_now_playing_none: "なし"
+    queue_waiting_field: "待機中 ({count}曲)"
+    queue_waiting_empty: "キューは空です。"
+    queue_waiting_more: "\n他 {count} 曲..."
+    queue_loop_mode_footer: "ループモード: {loop_mode}"
+    skip_success: "「{song_title}」をスキップしました。"
+    skip_no_song: "現在再生中の曲がありません。"
+    stop_success: "再生を停止し、キューをクリアしました。"
+    pause_success: "再生を一時停止しました。"
+    pause_not_playing_or_paused: "再生中ではありません、または既に一時停止しています。"
+    resume_success: "再生を再開しました。"
+    resume_not_paused: "一時停止中ではありません。"
+    volume_success: "音量を {level}% に設定しました。"
+    loop_success: "ループモードを「{mode}」に設定しました。"
+    shuffle_success: "キューをシャッフルしました。"
+    shuffle_empty: "キューは空です。"
+    remove_success: "「{song_title}」をキューから削除しました。"
+    remove_invalid_index: "無効な番号です。1から{max_index}の間で指定してください。"
+    remove_fail: "曲の削除に失敗しました。"
+    clearqueue_success: "{count} 曲をキューから削除しました。"
+    clearqueue_empty: "キューは既に空です。"
+
+    # ボタンUI関連 (もし動的にラベルを変えるなら)
+    button_pause: "⏸️ 一時停止"
+    button_resume: "▶️ 再開"
+    button_skip: "⏭️ スキップ"
+    button_stop: "⏹️ 停止"
+    button_loop_off: "🔁 ループOFF"
+    button_loop_song: "🔂 曲ループ"
+    button_loop_queue: "🔁 キュー ループ"
+    button_shuffle: "🔀 シャッフル"
+
+    # イベント関連
+    voice_channel_error: "エラーが発生したため、次の曲の再生に失敗しました: `{error}`"
+    voice_alone_disconnecting_log: "Guild {guild_id}: ボットがチャンネル {channel_name} で一人になりました。遅延後に切断します。"
+    voice_disconnect_inactivity_log: "Guild {guild_id}: 非アクティブのため切断します。"
+    voice_bot_disconnected_log: "Guild {guild_id}: ボットがボイスチャンネルから切断されました。"
+
+  # Cog固有の設定値
+  auto_leave_delay_seconds: 60  # ボイスチャンネルに一人になった後、退出するまでの秒数
+  yt_dlp_playlist_items: "1-20" # 一度にプレイリストから読み込むアイテム数
+  default_volume: 50 # 0-200の範囲
 
 
 

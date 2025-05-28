@@ -12,6 +12,7 @@ import discord
 from discord import app_commands
 import httpx
 import yaml
+import glob
 import json
 import time
 import os
@@ -110,42 +111,56 @@ class DiscordLLMBot(discord.Client):
         self.cfg_path = cfg_path
         self.cfg = load_config(cfg_path)
 
-        # メッセージの内容を読むためのIntentsを有効化
         intents = discord.Intents.default()
         intents.message_content = True
+        intents.voice_states = True  # ボイスチャンネルの状態変化を検知するために追加
 
-        # ボットのアクティビティを設定
         activity = discord.CustomActivity(
             name=(self.cfg.get("status_message") or "github.com/jakobdylanc/llmcord")[:128]
         )
         super().__init__(intents=intents, activity=activity)
 
-        # アプリケーションコマンドツリーを設定
         self.tree = app_commands.CommandTree(self)
-        self._register_slash_commands()
+        self._register_slash_commands()  # 既存のスラッシュコマンド登録
 
-        # メッセージノードを格納する辞書 (メッセージID -> MessageNode)
         self.message_nodes: dict[int, MessageNode] = {}
-        # 最後のタスク実行時間 (メッセージ編集用)
         self.last_task_time: Optional[float] = None
-        # HTTP クライアント
         self.httpx_client = httpx.AsyncClient()
 
-        # 設定からプロンプトとエラーメッセージを読み込み
         self.SYSTEM_PROMPT: str | None = self.cfg.get("system_prompt")
         self.STARTER_PROMPT: str | None = self.cfg.get("starter_prompt")
-        self.PREFILL_PROMPT: str | None = self.cfg.get("starter_prompt")
-        # error_msg が常に辞書であることを保証
+        self.PREFILL_PROMPT: str | None = self.cfg.get("prefill_prompt")  # starter_promptではなくprefill_promptを使用
         self.ERROR_MESSAGES: dict[str, str] = self.cfg.get("error_msg", {}) or {}
-        
+
         self.plugins = load_plugins(self)
-        
+
         logging.info("読み込まれたプラグイン: [%s]", ", ".join(p.__class__.__name__ for p in self.plugins.values()))
         logging.info("有効なツール: [%s]", ", ".join(spec["function"]["name"] for spec in self._enabled_tools()))
 
+        # Cogのパスを格納するリスト (cogsフォルダ内の .py ファイルを自動検出)
+        self.initial_extensions = [
+            f"cogs.{os.path.splitext(os.path.basename(f))[0]}" for f in glob.glob(os.path.join("cogs", "*.py"))
+        ]
+
     async def setup_hook(self) -> None:
-        """クライアント接続後に一度だけ呼ばれます。アプリケーションコマンドを同期します。"""
+        """クライアント接続後に一度だけ呼ばれます。アプリケーションコマンドを同期し、Cogをロードします。"""
         # グローバルコマンドとして同期 (ギルド指定なし)
+        # 既存のスラッシュコマンドがここで同期される
+        # await self.tree.sync() # Cog内のコマンドも同期されるため、ここでまとめて同期するか、Cogロード後に行う
+        # logging.info("スラッシュコマンドを登録しました。") # メッセージはCogロード後に移動
+
+        # Cogをロード
+        for extension in self.initial_extensions:
+            try:
+                await self.load_extension(extension)
+                logging.info(f"Cog '{extension}' を正常にロードしました。")
+            except discord.ext.commands.ExtensionAlreadyLoaded:
+                logging.warning(f"Cog '{extension}' は既にロードされています。")
+            except Exception as e:
+                logging.error(f"Cog '{extension}' のロードに失敗しました。", exc_info=e)
+
+        # すべてのコマンド (本体 + Cog) を同期
+        # 特定のギルドにコマンドを登録したい場合は guild=discord.Object(id=YOUR_GUILD_ID) を追加
         await self.tree.sync()
         logging.info("スラッシュコマンドを登録しました。")
 
