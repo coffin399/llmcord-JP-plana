@@ -106,5 +106,5 @@ llmcordが対応しているAPIプラットフォームは以下の通りです:
    ```
    
 <p align="center">
-© Yostar,Inc. and NEXON Games co.,Ltd for headers and icons.
+© NEXON Games Co.,Ltd & Yostar,Inc. for headers and icons.
 </p>
