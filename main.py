@@ -256,7 +256,7 @@ class DiscordLLMBot(commands.Bot):
                     if hasattr(cog_instance, "reload_config_from_bot") and callable(
                             getattr(cog_instance, "reload_config_from_bot")):
                         try:
-                            await cog_instance.reload_config_from_bot(self.cfg)
+                            await cog_instance.reload_config_from_bot(self.cfg)  # type: ignore
                             logger.info(f"メインボット: Cog '{cog_name}' に設定再読み込みを正常に通知しました。")
                         except Exception as e_cog_reload_notify:
                             logger.error(

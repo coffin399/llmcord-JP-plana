@@ -2,7 +2,7 @@
 
 bot_token: 
 client_id:
-status_message_format:
+status_message_format: "命令待機中 | {guild_count}サーバーで稼働中"
 fallback_command_prefix: "!!"
 allowed_channel_ids: []
 allowed_role_ids: []

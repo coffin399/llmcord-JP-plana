@@ -20,7 +20,7 @@ class SearchAgent():
     def __init__(self, bot) -> None:
         self.bot = bot
 
-    async def _google_search(self, query: str) -> str:
+    async def _google_search(self, query: str,source_message=None) -> str:
         gcfg = self.bot.cfg["search_agent"]
         
         
