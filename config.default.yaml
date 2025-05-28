@@ -1,9 +1,9 @@
 # Discord settings:
 
 bot_token: 
-client_id: 
-status_message: 
-
+client_id:
+status_message_format:
+fallback_command_prefix: "!!"
 allowed_channel_ids: []
 allowed_role_ids: []
 admin_user_ids: []
@@ -73,11 +73,6 @@ system_prompt: |
   # Examples are **examples only**. Never reuse them. Always generate new, creative replies based on user input.
   </Plana>
 
-  <ResponseFormat>
-  Before every reply, write your reasoning process inside `<ctrl94>thought>` in **English**.
-  - Always `<thinking>` before output.
-  - Only after the thought, output your actual reply in the user's language (typically Japanese for PLANA).
-  </ResponseFormat>
 
   <Tools>
   namespace tools {

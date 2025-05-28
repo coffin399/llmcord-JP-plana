@@ -98,7 +98,7 @@ llmcordが対応しているAPIプラットフォームは以下の通りです:
    **Dockerなし(またはstartPLANA.batをダブルクリック):**
    ```bash
    python -m pip install -U -r requirements.txt
-   python llmcord.py
+   python main.py
    ```
    
    **Dockerあり:**
