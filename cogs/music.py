@@ -12,7 +12,7 @@ from services import ytdlp_wrapper as ytdl
 from services.guild_player import GuildPlayer
 from config import config
 
-logger = logging.getLogger("arona.music")
+logger = logging.getLogger("plana.music")
 
 
 class Music(commands.Cog):

@@ -20,20 +20,21 @@ class SearchAgent():
     def __init__(self, bot) -> None:
         self.bot = bot
 
-    async def _google_search(self, query: str,source_message=None) -> str:
+    async def _google_search(self, query: str) -> str:
         gcfg = self.bot.cfg["search_agent"]
-        
-        
+
+
         client = genai.Client(api_key=gcfg["api_key"])
         retries = 2
-        delay = 1.5 
+        delay = 1.5
         last_exception = None
 
         for attempt in range(retries + 1):
             try:
-                response = client.models.generate_content(
-                    model=self.bot.cfg["search_agent"]["model"],
-                    contents="**[DeepResearch Request]:**" + query + "\n" + self.bot.cfg["search_agent"]["format_control"],
+                response = await asyncio.to_thread(
+                    client.models.generate_content,
+                    model=gcfg["model"],
+                    contents="**[DeepResearch Request]:** " + query + "\n" + gcfg["format_control"],
                     config={"tools": [{"google_search": {}}]},
                 )
                 return response.text
