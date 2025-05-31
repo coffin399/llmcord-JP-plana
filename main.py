@@ -21,7 +21,7 @@ logging.getLogger('httpx').setLevel(logging.WARNING)  # openaiが内部で使用
 COGS_DIRECTORY_NAME = "cogs"
 
 
-class MyBot(commands.Bot):
+class Shittim(commands.Bot):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.config = None  # Botインスタンスにconfigを持たせる
@@ -199,7 +199,7 @@ if __name__ == "__main__":
     # --- Botインスタンスの作成 ---
     # command_prefix には callable, str, list[str], tuple[str] などが指定可能
     allowed_mentions = discord.AllowedMentions(everyone=False, users=True, roles=False, replied_user=True)
-    bot_instance = MyBot(
+    bot_instance = Shittim(
         command_prefix=commands.when_mentioned_or(bot_prefix_val),
         intents=intents,
         help_command=None,  # デフォルトのヘルプコマンドを無効化 (Cogで独自に実装するため)
