@@ -105,7 +105,7 @@ class MyBot(commands.Bot):
             guild_count=len(self.guilds)  # 参加サーバー数を動的に取得
         )
 
-        activity_type_str = self.config.get('status_activity_type', 'listening').lower()
+        activity_type_str = self.config.get('status_activity_type', 'streaming').lower()
         activity_type_map = {
             'playing': discord.ActivityType.playing,
             'streaming': discord.ActivityType.streaming,

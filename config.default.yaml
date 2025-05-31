@@ -112,6 +112,7 @@ llm:
 enabled_cogs:
   - llm_cog # cogs/llm_cog.py
   - music_cog # cogs/music_cog.py
+  - slash_command_cog #cogs/slash_command_cog.py
 
 # Music Cog Settings
 music:
