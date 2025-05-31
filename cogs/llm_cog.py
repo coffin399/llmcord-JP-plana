@@ -155,30 +155,26 @@ class LLMCog(commands.Cog, name="LLM"):
 
         for attachment in message.attachments:
             if processed_image_count >= max_images:
-                await message.channel.send(
-                    self.llm_config.get('error_msg', {}).get('msg_max_image_size',
-                                                             f"⚠️ 最大画像数は {max_images} 枚です。超過分は無視されます。")
-                )
-                break  # 最大枚数に達したらループを抜ける
+                # ログ出力は既に行われているので、ユーザーへの通知のみ (必要であれば)
+                # await message.channel.send(
+                #     self.llm_config.get('error_msg', {}).get('msg_max_image_size',
+                #                                              f"⚠️ 最大画像数は {max_images} 枚です。超過分は無視されます。")
+                # )
+                break
 
             if attachment.filename.lower().endswith(SUPPORTED_IMAGE_EXTENSIONS):
-                # OpenAI API (gpt-4oなど) は画像のURLを直接渡すことができる
-                # contentにリストでtype: textとtype: image_urlのオブジェクトを入れる
                 image_inputs.append({
                     "type": "image_url",
                     "image_url": {
                         "url": attachment.url,
-                        # "detail": "auto" # または "low", "high"。モデルによりサポート状況が異なる
                     }
                 })
                 processed_image_count += 1
-                logger.info(f"添付画像を処理中: {attachment.filename} (URL: {attachment.url})")
-            else:
-                logger.info(f"サポート外の添付ファイル形式: {attachment.filename}")
-                # await message.channel.send(
-                #     self.llm_config.get('error_msg', {}).get('msg_error_attachment', "⚠️ サポートされていないファイル形式です。")
-                # ) # 頻繁に表示されるのを避けるためコメントアウト
-
+                # 添付画像の個別処理ログは、呼び出し元のログと重複するため、ここでは省略またはDEBUGレベルにしても良い
+                # logger.debug(f"添付画像をLLM入力に追加: {attachment.filename} (URL: {attachment.url})")
+            # else:
+            # サポート外の添付ファイルログも呼び出し元で出力済み
+            # logger.debug(f"サポート外の添付ファイル形式 (スキップ): {attachment.filename}")
         return image_inputs
 
     @commands.Cog.listener()
@@ -186,31 +182,57 @@ class LLMCog(commands.Cog, name="LLM"):
         if message.author.bot: return
         if not self.bot.user.mentioned_in(message): return
 
+        # --- アクセス制御 ---
         allowed_channel_ids = self.config.get('allowed_channel_ids', [])
-        if allowed_channel_ids and message.channel.id not in allowed_channel_ids: return
+        if allowed_channel_ids and message.channel.id not in allowed_channel_ids:
+            logger.debug(f"メッセージ無視: 許可されていないチャンネル {message.channel.id} (User: {message.author.id})")
+            return
         allowed_role_ids = self.config.get('allowed_role_ids', [])
         if allowed_role_ids and isinstance(message.author, discord.Member):
-            if not any(role.id in allowed_role_ids for role in message.author.roles): return
+            if not any(role.id in allowed_role_ids for role in message.author.roles):
+                logger.debug(f"メッセージ無視: 許可されていないロール (User: {message.author.id})")
+                return
 
+        # --- ユーザー入力のログ出力 ---
+        log_message_parts = [
+            f"ユーザー入力受信: User='{message.author.name}({message.author.id})'",
+            f"Channel='{message.channel.name}({message.channel.id})'",
+            f"Guild='{message.guild.name}({message.guild.id if message.guild else 'DM'})'"
+        ]
+
+        user_text_content_for_llm = message.content  # メンション除去後のテキストを保持する変数
+        for mention_pattern in [f'<@!{self.bot.user.id}>', f'<@{self.bot.user.id}>']:
+            user_text_content_for_llm = user_text_content_for_llm.replace(mention_pattern, '').strip()
+
+        if user_text_content_for_llm:
+            log_message_parts.append(f"テキスト: '{user_text_content_for_llm}'")
+
+        if message.attachments:
+            attachment_logs = []
+            for att_idx, att in enumerate(message.attachments):
+                is_supported_image = att.filename.lower().endswith(SUPPORTED_IMAGE_EXTENSIONS)
+                attachment_logs.append(
+                    f"  添付[{att_idx + 1}]: {att.filename} (Type: {att.content_type}, URL: {att.url}, SupportedImage: {is_supported_image})"
+                )
+            if attachment_logs:
+                log_message_parts.append("添付ファイル:\n" + "\n".join(attachment_logs))
+
+        logger.info("\n".join(log_message_parts))
+
+        # --- メッセージ処理 ---
         history_key = message.channel.id
         if history_key not in self.chat_histories:
             self.chat_histories[history_key] = []
 
-        user_text_content = message.content
-        for mention_pattern in [f'<@!{self.bot.user.id}>', f'<@{self.bot.user.id}>']:
-            user_text_content = user_text_content.replace(mention_pattern, '').strip()
-
-        # 画像添付の処理
         image_contents_for_llm = await self._process_attachments(message)
 
-        # テキストと画像の両方がない場合は処理しない (メンションのみなど)
-        if not user_text_content and not image_contents_for_llm:
+        if not user_text_content_for_llm and not image_contents_for_llm:
             reply_text = self.llm_config.get('error_msg', {}).get('empty_mention_reply', "はい、ご用件は何でしょうか？")
             await message.channel.send(reply_text)
             return
 
         max_text_len = self.llm_config.get('max_text', 100000)
-        if len(user_text_content) > max_text_len:
+        if len(user_text_content_for_llm) > max_text_len:
             error_template = self.llm_config.get('error_msg', {}).get('msg_max_text_size',
                                                                       "メッセージ長すぎ。最大 {max_text:,} 字。")
             await message.channel.send(error_template.format(max_text=max_text_len))
@@ -222,26 +244,22 @@ class LLMCog(commands.Cog, name="LLM"):
             return
 
         # --- LLMへの入力メッセージ構築 ---
-        # ユーザーの入力 (テキスト + 画像)
         user_input_content_parts = []
-        if user_text_content:
-            user_input_content_parts.append({"type": "text", "text": user_text_content})
+        if user_text_content_for_llm:
+            user_input_content_parts.append({"type": "text", "text": user_text_content_for_llm})
         if image_contents_for_llm:
             user_input_content_parts.extend(image_contents_for_llm)
 
-        # ユーザーメッセージオブジェクトを作成
-        # contentはテキストか、テキストと画像のパートリスト
         user_message_for_api = {"role": "user",
-                                "content": user_input_content_parts if image_contents_for_llm else user_text_content}
+                                "content": user_input_content_parts if image_contents_for_llm else user_text_content_for_llm}
 
         system_prompt_content = self.llm_config.get('system_prompt', "あなたはアシスタント。")
         messages_for_llm_api = [{"role": "system", "content": system_prompt_content}]
 
         current_channel_history = list(self.chat_histories[history_key])
-        # 履歴に今回のユーザーメッセージ (API形式) を追加
         current_channel_history.append(user_message_for_api)
 
-        max_hist_pairs = self.llm_config.get('max_messages', 10)  # ペア数
+        max_hist_pairs = self.llm_config.get('max_messages', 10)
         max_hist_entries = max_hist_pairs * 2
         if len(current_channel_history) > max_hist_entries:
             num_to_remove = len(current_channel_history) - max_hist_entries
@@ -249,7 +267,7 @@ class LLMCog(commands.Cog, name="LLM"):
 
         messages_for_llm_api.extend(current_channel_history)
 
-        # --- LLM呼び出しとツール処理 (変更なし) ---
+        # --- LLM呼び出しとツール処理 ---
         try:
             async with message.channel.typing():
                 current_llm_call_messages_api_format = messages_for_llm_api
@@ -257,7 +275,7 @@ class LLMCog(commands.Cog, name="LLM"):
 
                 for i in range(self.llm_config.get('max_tool_iterations', 3)):
                     logger.debug(
-                        f"LLM呼び出し (反復 {i + 1}): messages = {json.dumps(current_llm_call_messages_api_format, indent=2, ensure_ascii=False)}")
+                        f"LLM呼び出し (反復 {i + 1}): messages = {json.dumps(current_llm_call_messages_api_format, indent=2, ensure_ascii=False, default=str)}")  # default=str を追加 (datetimeなど非対応型対策)
 
                     tools_def = self.get_tools_definition()
                     tool_choice_val = "auto" if tools_def else None
@@ -265,7 +283,7 @@ class LLMCog(commands.Cog, name="LLM"):
 
                     response = await self.main_llm_client.chat.completions.create(
                         model=self.main_llm_client.model_name_for_api_calls,
-                        messages=current_llm_call_messages_api_format,  # API形式のメッセージリスト
+                        messages=current_llm_call_messages_api_format,
                         tools=tools_def,
                         tool_choice=tool_choice_val,
                         temperature=extra_params.get('temperature', 0.7),
@@ -273,7 +291,6 @@ class LLMCog(commands.Cog, name="LLM"):
                     )
                     response_message = response.choices[0].message
 
-                    # LLMの応答 (ツール呼び出し含む) を現在の呼び出しメッセージリストに追加
                     current_llm_call_messages_api_format.append(response_message.model_dump(exclude_none=True))
 
                     if response_message.tool_calls:
@@ -308,7 +325,7 @@ class LLMCog(commands.Cog, name="LLM"):
                             })
                         continue
                     else:
-                        llm_reply_text_content = response_message.content  # テキスト応答のみ取得
+                        llm_reply_text_content = response_message.content
                         break
 
                 if not llm_reply_text_content:
@@ -317,12 +334,11 @@ class LLMCog(commands.Cog, name="LLM"):
 
             # --- 応答送信と履歴保存 ---
             if llm_reply_text_content:
-                logger.info(f"LLM最終応答 (User: {message.author.id}): {llm_reply_text_content[:200]}...")
+                logger.info(
+                    f"LLM最終応答 (User: {message.author.id}, Channel: {message.channel.id}): {llm_reply_text_content[:200]}...")
 
-                # 永続履歴には、API形式のユーザー入力と、アシスタントのテキスト応答を保存
-                self.chat_histories[history_key].append(user_message_for_api)  # API形式のユーザー入力
-                self.chat_histories[history_key].append(
-                    {"role": "assistant", "content": llm_reply_text_content})  # アシスタントの応答
+                self.chat_histories[history_key].append(user_message_for_api)
+                self.chat_histories[history_key].append({"role": "assistant", "content": llm_reply_text_content})
 
                 if len(self.chat_histories[history_key]) > max_hist_entries:
                     num_to_remove = len(self.chat_histories[history_key]) - max_hist_entries
@@ -333,7 +349,7 @@ class LLMCog(commands.Cog, name="LLM"):
             else:
                 logger.warning("LLMが空の最終応答。")
                 await message.channel.send(self.llm_config.get('error_msg', {}).get('general_error', "AI空応答。"))
-        # --- エラーハンドリング (変更なし) ---
+        # --- エラーハンドリング ---
         except openai.APIConnectionError as e:
             logger.error(f"LLM API接続エラー: {e}")
             await message.channel.send(self.llm_config.get('error_msg', {}).get('general_error', "AI接続不可。"))
@@ -341,26 +357,31 @@ class LLMCog(commands.Cog, name="LLM"):
             logger.warning(f"LLM APIレート制限超過。")
             await message.channel.send(self.llm_config.get('error_msg', {}).get('ratelimit_error', "AI混雑中。"))
         except openai.APIStatusError as e:
-            logger.error(f"LLM APIステータスエラー: {e.status_code} - {e.response.text if e.response else 'N/A'}")
+            response_text = e.response.text if e.response else 'N/A'
+            logger.error(f"LLM APIステータスエラー: {e.status_code} - {response_text}")
             error_key = 'ratelimit_error' if e.status_code == 429 else 'general_error'
             error_template = self.llm_config.get('error_msg', {}).get(error_key, "APIエラー({status_code})。")
             detail_msg = ""
             try:
-                if e.response and e.response.text: error_body = json.loads(e.response.text)
-                if 'error' in error_body and isinstance(error_body['error'], dict) and 'message' in error_body['error']:
-                    detail_msg = f" 詳細: {error_body['error']['message']}"
-                elif 'error' in error_body and isinstance(error_body['error'], str):
-                    detail_msg = f" 詳細: {error_body['error']}"
-                elif 'message' in error_body:
-                    detail_msg = f" 詳細: {error_body['message']}"
-            except:
+                if e.response and e.response.text:
+                    error_body = json.loads(e.response.text)
+                    if 'error' in error_body:
+                        if isinstance(error_body['error'], dict) and 'message' in error_body['error']:
+                            detail_msg = f" 詳細: {error_body['error']['message']}"
+                        elif isinstance(error_body['error'], str):
+                            detail_msg = f" 詳細: {error_body['error']}"
+                    elif 'message' in error_body:  # エラーがトップレベルのmessageキーにある場合
+                        detail_msg = f" 詳細: {error_body['message']}"
+
+            except json.JSONDecodeError:
+                detail_msg = f" (未解析エラーレスポンス: {response_text[:100]}...)"
+            except Exception:
                 pass
             await message.channel.send(error_template.format(status_code=e.status_code) + detail_msg)
         except Exception as e:
             logger.error(f"on_messageで予期しないエラー: {e}", exc_info=True)
             await message.channel.send(self.llm_config.get('error_msg', {}).get('general_error', "予期せぬエラー。"))
 
-    # _split_message, planahelp, setup メソッドは変更なし
     def _split_message(self, text_content: str, max_length: int = 1990):
         if not text_content: return [""]
         lines = text_content.splitlines(keepends=True)
@@ -376,6 +397,21 @@ class LLMCog(commands.Cog, name="LLM"):
                 current_chunk += line
         if current_chunk: chunks.append(current_chunk)
         return chunks if chunks else [""]
+
+    @commands.command(name="planahelp", help="PLANAボットのヘルプ情報を表示します。")
+    async def plana_help_command(self, ctx: commands.Context):
+        help_msg = self.llm_config.get('help_message', "ヘルプ未設定。")
+        embed = discord.Embed(title="PLANA ボットヘルプ (LLM)", description=help_msg, color=discord.Color.blue())
+        admin_ids = ", ".join(map(str, self.config.get('admin_user_ids', [])))
+        embed.add_field(name="LLM設定",
+                        value=f"モデル: {self.llm_config.get('model', 'N/A')}\n最大履歴: {self.llm_config.get('max_messages', 'N/A')}ペア",
+                        inline=False)
+        if admin_ids: embed.set_footer(text=f"管理者ID: {admin_ids}")
+        try:
+            await ctx.send(embed=embed)
+        except discord.errors.Forbidden:
+            await ctx.send(help_msg)
+
 
 async def setup(bot: commands.Bot):
     try:
