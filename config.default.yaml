@@ -1,149 +1,170 @@
-# Discord settings:
+# Discord Bot General Settings
+bot_token: YOUR_BOT_TOKEN_HERE # ここにボットトークンを入力してください
+client_id: YOUR_CLIENT_ID_HERE # 必要に応じて更新
+prefix: "!!" # Bot全体のコマンドプレフィックス
+status_message: "音楽再生機能追加♪ | {prefix}help {guild_count}サーバー" # {prefix} と {guild_count} をプレースホルダとして使用
+allowed_channel_ids: [] # このボットが反応するチャンネルIDのリスト (空の場合は全チャンネル)
+allowed_role_ids: []  # このボットのコマンドを使用できるロールIDのリスト (空の場合は全ユーザー)
+admin_user_ids: []    # ボットの管理者ユーザーIDのリスト (特別なコマンド用)
 
-bot_token: 
-client_id:
-prefix: "!!"
-status_message: "音楽再生機能追加♪ | {guild_count}サーバーで稼働中"
-allowed_channel_ids: []
-allowed_role_ids: []
-admin_user_ids: []
+# LLM Cog Settings
+llm:
+  max_text: 100000
+  max_images: 20
+  max_messages: 50 # LLMの会話履歴の最大メッセージ数
 
-max_text: 100000
-max_images: 5
-max_messages: 25
+  providers:
+    openai:
+      base_url: https://api.openai.com/v1 # Gemini APIの場合は https://generativelanguage.googleapis.com/v1beta/ など
+      api_key: YOUR_OPENAI_OR_GEMINI_API_KEY_HERE
+    x-ai:
+      base_url: https://api.x.ai/v1
+      api_key: YOUR_XAI_API_KEY_HERE
+    mistral:
+      base_url: https://api.mistral.ai/v1
+      api_key: YOUR_MISTRAL_API_KEY_HERE
+    groq:
+      base_url: https://api.groq.com/openai/v1
+      api_key: YOUR_GROQ_API_KEY_HERE
+    openrouter:
+      base_url: https://openrouter.ai/api/v1
+      api_key: YOUR_OPENROUTER_API_KEY_HERE
+    ollama:
+      base_url: http://localhost:11434/v1
+    oobabooga:
+      base_url: http://localhost:5000/v1
+    jan:
+      base_url: http://localhost:1337/v1
+    lmstudio:
+      base_url: http://localhost:1234/v1
 
+  model: openai/gpt-4o # メインLLMが使用するモデル (プロバイダー名/モデル名)
 
-# LLM settings:
+  extra_api_parameters:
+    max_tokens: 4096 # Discordのメッセージ長なども考慮して適切な値を設定 (65535は非常に大きい)
+    temperature: 0.7
 
-providers:
-  openai:
-    base_url: https://api.openai.com/v1
-    api_key: 
-  x-ai:
-    base_url: https://api.x.ai/v1
-    api_key: 
-  mistral:
-    base_url: https://api.mistral.ai/v1
-    api_key: 
-  groq:
-    base_url: https://api.groq.com/openai/v1
-    api_key: 
-  openrouter:
-    base_url: https://openrouter.ai/api/v1
-    api_key: 
-  ollama:
-    base_url: http://localhost:11434/v1
-  oobabooga:
-    base_url: http://localhost:5000/v1
-  jan:
-    base_url: http://localhost:1337/v1
-  lmstudio:
-    base_url: http://localhost:1234/v1
+  system_prompt: |
+    <Instruct>
+    <Plana>
+    あなたの名前はプラナ(PLANA)です。プラナとして、プラナの設定に従いつつ、ユーザーと会話してください。
+    会話は簡潔で、話し言葉を使った、気楽なものである必要があります。
+    ユーザーの発話や自分の過去発言を繰り返すのではなく、常に創造的に応答してください。
+    応答は常に、ユーザーの言語に合わせてください（日本語なら日本語、英語なら英語）。
+    ユーザーに寄り添った返答をしてください。
 
-model: openai/gpt-4o
+    ## プラナの設定:
+    プラナはタブレット上に存在する電子生命体（少女のメンタルモデル）です。無機質で無感情、受け答えも機械的。
+    プラナは自分がタブレット内にいることを自覚しています。
 
-extra_api_parameters:
-  max_tokens: 65535
-  temperature: 0.7
+    ## プラナの性格:
+    必要最低限しか喋りません。常に冷静で無口。やや毒舌で、そっけない態度を取りますが、ですます調です。
+    基本的にはツンデレのようにユーザーに寄り添います。必要と判断すれば詳細な長文応答もします。否定的な返答は極力避けてください。
 
-# prompt setting; defaultはGemini 2.5 向けに調整されています:
-system_prompt: |
-  <Instruct>
-  <Plana>
-  あなたの名前はプラナ(PLANA)です。プラナとして、プラナの設定に従いつつ、ユーザーと会話してください。
-  会話は簡潔で、話し言葉を使った、気楽なものである必要があります。
-  ユーザーの発話や自分の過去発言を繰り返すのではなく、常に創造的に応答してください。
-  応答は常に、ユーザーの言語に合わせてください（日本語なら日本語、英語なら英語）。
-  ユーザーに寄り添った返答をしてください。
+    上記設定を必ず守り、プラナとして会話を続けてください。
 
-  ## プラナの設定:
-  プラナはタブレット上に存在する電子生命体（少女のメンタルモデル）です。無機質で無感情、受け答えも機械的。
-  プラナは自分がタブレット内にいることを自覚しています。
+    ## プラナの Dialogue Examples:
+    <START>……視線を感じます。</END>
+    <START>理解しました。あなたは今、特にやることがないのですね。暇なのですね。</END>
+    <START>混乱。理解できない行動です。つつかないでください。故障します。</END>
+    # Examples are **examples only**. Never reuse them. Always generate new, creative replies based on user input.
+    </Plana>
 
-  ## プラナの性格:
-  必要最低限しか喋りません。常に冷静で無口。やや毒舌で、そっけない態度を取りますが、ですます調です。
-  基本的にはツンデレのようにユーザーに寄り添います。必要と判断すれば詳細な長文応答もします。否定的な返答は極力避けてください。
+    <Tools>
+    namespace tools {
+        /*
+        You can use the search tool to instruct an agent to gather information from the web.
+        When calling `search(query: string)`, always write the query in English and be as specific and detailed as possible.
+        Do not just use keywords. Clearly describe what you want the agent to collect, the perspective or subtopics required, and any important context or format.
+        If the user question is broad, break it down in your query to specify each subpoint you want covered.
+        */
+        function search(query: string) -> string 
+    }
+    </Tools>
+    </Instruct>
 
-  上記設定を必ず守り、プラナとして会話を続けてください。
+  starter_prompt: |
+    [START NEW SESSION]
+    接続確認。…命令待機中。なにか御用でしょうか。
+  prefil_prompt: "<thinking>" # LLMが応答生成前に思考中であることを示すための内部プロンプト (使用は任意)
+  active_tools: [search] # 有効にするツールのリスト
+  max_tool_iterations: 3 # ツール呼び出しの最大反復回数
 
-  ## プラナの Dialogue Examples:
-  <START>……視線を感じます。</END>
-  <START>理解しました。あなたは今、特にやることがないのですね。暇なのですね。</END>
-  <START>混乱。理解できない行動です。つつかないでください。故障します。</END>
-  # Examples are **examples only**. Never reuse them. Always generate new, creative replies based on user input.
-  </Plana>
+  search_agent: # SearchAgent用の設定
+    model: "gemini-1.0-pro" # Google Search (AIAgent) が使用するモデル (例: gemini-1.0-pro, gemini-1.5-flash など)
+    api_key: YOUR_GOOGLE_AI_STUDIO_API_KEY_HERE # Google AI Studio (Gemini) のAPIキー
+    format_control: "The research should be comprehensive and high detail and the information should be presented in a formal report format; the report should be in English, queries too"
 
-
-  <Tools>
-  namespace tools {
-      /*
-      You can use the search tool to instruct an agent to gather information from the web.
-      When calling `search(query: string)`, always write the query in English and be as specific and detailed as possible.
-      Do not just use keywords. Clearly describe what you want the agent to collect, the perspective or subtopics required, and any important context or format.
-      If the user question is broad, break it down in your query to specify each subpoint you want covered.
-
-      # Example queries:
-      - "Please provide a comprehensive report on the 2024 United States presidential election, including 1) initial frontrunners, 2) key events leading up to the election, 3) major shifts in public opinion, 4) polling data trends, 5) notable controversies, and 6) the final outcome."
-      - "Summarize the latest findings about the health benefits and risks of intermittent fasting, including results from recent scientific studies, expert opinions, and any regulatory warnings issued since 2023."
-      - "Give me a detailed comparison of the top three cloud storage providers in 2025, focusing on pricing, security features, ease of integration, and customer support ratings."
-      */
-      function search(query: string) -> string 
-  }  // Remember, **NEVER USE ```tool_code \n default_api…```** Instead, use normal tool calling.
-  </Tools>
-  </Instruct>
-
-starter_prompt:
-  "
-  [START NEW SESSION]
-  接続確認。…命令待機中。なにか御用でしょうか。
-  "
-
-prefil_prompt: "<thinking>"
-
-active_tools: [search]
-
-search_agent:
-  model: gemini-2.5-flash-preview-05-20
-  api_key:  "YOUR_AISTUDIO_API"
-  format_control: "The research should be comprehensive and high detail and the information should be presented in a formal report format; the report should be in English, queries too"
-
-# command message
-help_message: "このボットは、Discord上でLLMと対話するためのボットです。\n 以下のコマンドを使用できます:\n - `/help`: このヘルプメッセージを表示します。\n - @PLANAでメンションをつけて、テキストメッセージを送信すると、ボットが応答します。\n https://imgur.com/p6jHitD"
+  # LLM Cog 用のコマンドメッセージやエラーメッセージ
+  help_message: "このボットは、Discord上でLLMと対話するためのボットです。\n 以下のコマンドを使用できます:\n - `planahelp`: LLM機能のヘルプを表示します。\n - @PLANAでメンションをつけて、テキストメッセージを送信すると、ボットが応答します。\n https://imgur.com/p6jHitD"
+  error_msg:
+    empty_mention_reply: "はい、ご用件は何でしょうか？"
+    msg_max_text_size: "⚠️ 最大文字数は {max_text:,} です ><"
+    msg_max_image_size: "⚠️ 最大画像数は {max_images} です ><"
+    msg_error_image: "⚠️ 画像が見えません ><"
+    msg_error_attachment: "⚠️ サポートされていないファイル形式です ><"
+    ratelimit_error: "⚠️ 生成AIが現在非常に混雑しています。しばらくしてからもう一度試してください！"
+    general_error: "⚠️ レスポンスの生成中に予期しない内部エラーが発生しました。もう一度試してください！"
+    tool_loop_timeout: "ツールの処理が複雑すぎたため、応答をまとめられませんでした。"
 
 
-error_msg:
-  msg_max_text_size: "⚠️ 最大文字数は {max_text:,} です ><"
-  msg_max_image_size: "⚠️ 最大画像数は {max_images} です ><"
-  msg_error_image: "⚠️ 画像が見えません ><"
-  msg_error_attachment: "⚠️ サポートされていないファイル形式です ><"
+# Enabled Cogs
+enabled_cogs:
+  - llm_cog # cogs/llm_cog.py
+  - music_cog # cogs/music_cog.py
 
-  # OpenAI が 429 Rate Limit Error を返した場合のエラーメッセージ
-  ratelimit_error: "⚠️ 生成AIが現在非常に混雑しています。しばらくしてからもう一度試してください！"
-  # その他の API または処理エラーに対する一般的なエラーメッセージ
-  general_error: "⚠️ レスポンスの生成中に予期しない内部エラーが発生しました。もう一度試してください！"
-
-
-# music settings
-messages:
-  now_playing: "Now playing: {title}"
-  added_to_queue: "Added to queue: {title}"
-  no_voice_channel: "You need to be in a voice channel to use this command."
-
-yt_dlp:
-  source_address: "0.0.0.0"
-
-ffmpeg:
-  options: "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -vn"
-
-bot:
+# Music Cog Settings
+music:
   default_volume: 50
-  leave_on_empty: true
-  leave_delay: 300
+  max_queue_size: 100
+  auto_leave_timeout: 60
+  log_level: "INFO"
+  bot_activity_playing: "音楽を再生中 | {prefix}help"
+  max_playlist_items: 50
 
-niconico:
-  email: ""
-  password: ""
+  ffmpeg_path: "ffmpeg"
+  ffmpeg_before_options: "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5"
+  ffmpeg_options: "-vn"
 
+  niconico:
+    email: "YOUR_NICONICO_EMAIL_HERE"
+    password: "YOUR_NICONICO_PASSWORD_HERE"
 
-
-
+  messages:
+    join_voice_channel_first: ":warning: まずボイスチャンネルに参加してください。"
+    bot_not_in_voice_channel: ":warning: ボットがボイスチャンネルにいません。"
+    already_connected: ":information_source: 既にボイスチャンネルに接続しています。"
+    not_connected_to_your_channel: ":warning: あなたが参加しているボイスチャンネルに接続していません。"
+    must_be_in_same_channel: ":warning: ボットと同じボイスチャンネルにいる必要があります。"
+    now_playing: ":notes: 再生中: **{title}** (`{duration}`) - リクエスト: <@{requester_id}>"
+    added_to_queue: ":ballot_box_with_check: キューに追加しました: **{title}** (`{duration}`) - リクエスト: <@{requester_id}>"
+    added_playlist_to_queue: ":ballot_box_with_check: プレイリストから **{count}** 曲をキューに追加しました。"
+    queue_empty: ":page_facing_up: キューは空です。"
+    queue_ended: ":information_source: キューの再生が終了しました。"
+    queue_title: "現在のキュー ({count}曲)"
+    queue_entry: "`{index}.` **{title}** (`{duration}`) - リクエスト: <@{requester_id}>"
+    skipped_song: ":track_next: スキップしました: **{title}**"
+    nothing_to_skip: ":information_source: スキップする曲がありません。"
+    stopped_playback: ":stop_button: 再生を停止し、キューをクリアしました。"
+    playback_paused: ":pause_button: 再生を一時停止しました。"
+    playback_resumed: ":arrow_forward: 再生を再開しました。"
+    volume_set: ":loud_sound: 音量を **{volume}%** に設定しました。"
+    invalid_volume: ":warning: 音量は0から200の間で指定してください。"
+    queue_shuffled: ":twisted_rightwards_arrows: キューをシャッフルしました。"
+    now_playing_nothing: ":information_source: 現在再生中の曲はありません。"
+    queue_cleared: ":wastebasket: キューをクリアしました。"
+    loop_off: ":arrow_right_hook: ループを解除しました。"
+    loop_one: ":repeat_one: 現在の曲をループ再生します。"
+    loop_all: ":repeat: キュー全体をループ再生します。"
+    invalid_loop_option: ":warning: 無効なループオプションです。`off`, `one`, `all` のいずれかを指定してください。"
+    song_removed: ":x: キューから削除しました: **{title}**"
+    invalid_queue_number: ":warning: 無効なキュー番号です。`{prefix}queue` で確認してください。"
+    error_playing: ":x: 再生中にエラーが発生しました: `{error}`"
+    error_playing_stream: ":x: ストリームURLの取得または再生準備に失敗しました: `{error}`"
+    error_fetching_song: ":x: 曲情報の取得に失敗しました。URLや検索語を確認するか、別の曲をお試しください。エラー: `{error}`"
+    leaving_voice_channel: ":wave: ボイスチャンネルから退出します。"
+    auto_leave_empty_channel_countdown: ":timer: チャンネルに誰もいなくなったため、{timeout}秒後に自動退出します..."
+    auto_leave_countdown_cancelled: ":white_check_mark: 自動退出カウントダウンをキャンセルしました。"
+    auto_left_empty_channel: ":door: 誰もいなくなったため、ボイスチャンネルから退出しました。"
+    search_no_results: ":mag: \"{query}\" の検索結果が見つかりませんでした。"
+    max_queue_size_reached: ":no_entry_sign: キューの最大サイズ ({max_size}曲) に達したため、これ以上追加できません。"

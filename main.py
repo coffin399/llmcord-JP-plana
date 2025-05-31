@@ -1,189 +1,220 @@
-from __future__ import annotations
-
-import asyncio
-import logging
-import os
-import shutil
-import sys
-from typing import Optional, Dict, List # Dict, List を追加
-
 import discord
 from discord.ext import commands
-import httpx
 import yaml
+import logging
+import asyncio  # setup_hook で async 関数を使う場合
+import os  # Cogのパス指定用 (今回は固定文字列を使用)
 
-from plugins import load_plugins
+# --- ロギング設定 ---
+# ログレベルは INFO 以上に設定 (デバッグ時は DEBUG に変更)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - [%(funcName)s] %(message)s')
+# discord.py の内部ログを抑制したい場合は WARNING などに設定
+logging.getLogger('discord').setLevel(logging.WARNING)
+# openaiライブラリのINFOログも多いため、必要に応じてWARNINGに設定
+logging.getLogger('openai').setLevel(logging.WARNING)
+# google.generativeai のログも同様
+logging.getLogger('google.generativeai').setLevel(logging.WARNING)
+logging.getLogger('google.ai').setLevel(logging.WARNING)  # google.api_core.retryなど
+logging.getLogger('httpx').setLevel(logging.WARNING)  # openaiが内部で使用
 
-# ロギングを設定
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s: %(message)s",
-)
-
-# メッセージノードの最大数 (会話履歴の最大長に関わる) - DiscordLLMBotクラスで使うのでここに移動
-MAX_MESSAGE_NODES = 100
-
-
-def load_config(filename: str = "config.yaml") -> dict:
-    """YAML 設定ファイルを読み込み (または再読み込み) ます。"""
-    with open(filename, "r", encoding="utf-8") as fh:
-        return yaml.safe_load(fh)
-
-
-class DiscordLLMBot(commands.Bot):
-    """会話を LLM に転送する Discord ボットです。"""
-
-    cfg_path: str
-    cfg: dict # cfgの型ヒントを追加
-    message_nodes: Dict[int, 'MessageNode'] # MessageNodeはcogs.llm_cogで定義されるためフォワード参照
-    last_task_time: Optional[float]
-    httpx_client: httpx.AsyncClient
-    SYSTEM_PROMPT: Optional[str]
-    STARTER_PROMPT: Optional[str]
-    ERROR_MESSAGES: Dict[str, str]
-    plugins: Dict[str, any] # pluginの型はload_pluginsの実装による
-
-    def __init__(self, cfg_path: str = "config.yaml") -> None:
-        self.cfg_path = cfg_path
-        self.cfg = load_config(cfg_path)
-
-        intents = discord.Intents.default()
-        intents.message_content = True
-        intents.voice_states = True
-
-        activity = discord.CustomActivity(
-            name=(self.cfg.get("status_message") or "github.com/jakobdylanc/llmcord")[:128]
-        )
-
-        super().__init__(
-            command_prefix=commands.when_mentioned_or(self.cfg.get("command_prefix", "!!")),
-            intents=intents,
-            activity=activity
-        )
-
-        self.message_nodes = {}
-        self.last_task_time = None
-        self.httpx_client = httpx.AsyncClient()
-
-        self.SYSTEM_PROMPT = self.cfg.get("system_prompt")
-        self.STARTER_PROMPT = self.cfg.get("starter_prompt")
-        self.ERROR_MESSAGES = self.cfg.get("error_msg", {}) or {}
-
-        self.plugins = load_plugins(self)
-
-        logging.info("読み込まれたプラグイン: [%s]", ", ".join(p.__class__.__name__ for p in self.plugins.values()))
-        logging.info("有効なツール: [%s]", ", ".join(spec["function"]["name"] for spec in self._enabled_tools()))
+# Cogが配置されているディレクトリ名 (プロジェクトルートからの相対パス)
+COGS_DIRECTORY_NAME = "cogs"
 
 
-    async def setup_hook(self) -> None:
-        """クライアント接続後に一度だけ呼ばれます。Cogをロードし、アプリケーションコマンドを同期します。"""
-        await self._load_all_cogs()
-        # グローバルコマンドとして同期 (ギルド指定なし)
-        await self.tree.sync()
-        logging.info("スラッシュコマンドを同期しました。")
+class MyBot(commands.Bot):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.config = None  # Botインスタンスにconfigを持たせる
+        # self.loop.set_debug(True) # asyncioのデバッグモード (開発時)
 
+    async def setup_hook(self):
+        """Botの初期セットアップ（ログイン後、接続準備完了前）"""
+        # 1. config.yaml を読み込む
+        try:
+            with open('config.yaml', 'r', encoding='utf-8') as f:
+                self.config = yaml.safe_load(f)
+                if not self.config:
+                    logging.critical("config.yaml が空または無効です。ボットを起動できません。")
+                    raise RuntimeError("config.yaml が空または無効です。")
+            logging.info("config.yaml を正常に読み込みました。")
+            # デバッグ用に読み込んだconfigの内容（一部）を表示
+            logging.debug(f"Loaded config keys: {list(self.config.keys())}")
+            if 'llm' in self.config:
+                logging.debug(f"LLM config keys: {list(self.config['llm'].keys())}")
 
-    async def _load_all_cogs(self):
-        """'cogs' ディレクトリ内の全てのCogをロードします。"""
-        cogs_dir = "cogs"
-        if not os.path.exists(cogs_dir):
-            logging.info(f"'{cogs_dir}' ディレクトリが見つかりません。Cogのロードをスキップします。")
-            return
+        except FileNotFoundError:
+            logging.critical("config.yaml が見つかりません。ボットを起動できません。")
+            raise FileNotFoundError("config.yaml が見つかりません。")
+        except yaml.YAMLError as e:
+            logging.critical(f"config.yaml の解析エラー: {e}。ボットを起動できません。")
+            raise yaml.YAMLError(f"config.yaml の解析エラー: {e}")
+        except Exception as e:
+            logging.critical(f"config.yaml の読み込み中に予期せぬエラー: {e}", exc_info=True)
+            raise RuntimeError(f"config.yaml の読み込み中に予期せぬエラー: {e}")
 
-        loaded_cogs_count = 0
-        for filename in os.listdir(cogs_dir):
-            if filename.endswith(".py") and not filename.startswith("_"):
-                extension_name = f"{cogs_dir}.{filename[:-3]}"
+        # 2. Cogのロード (config.yaml の enabled_cogs に基づいて)
+        if self.config and 'enabled_cogs' in self.config and isinstance(self.config['enabled_cogs'], list):
+            for cog_name in self.config['enabled_cogs']:
+                if not isinstance(cog_name, str):
+                    logging.warning(
+                        f"enabled_cogs 内に不正なCog名が含まれています: {cog_name} (型: {type(cog_name)})。スキップします。")
+                    continue
+
+                cog_module_path = f"{COGS_DIRECTORY_NAME}.{cog_name.strip()}"  # 前後の空白を除去
                 try:
-                    await self.load_extension(extension_name)
-                    logging.info(f"Cog '{filename}' をロードしました。")
-                    loaded_cogs_count += 1
+                    await self.load_extension(cog_module_path)
+                    logging.info(f"Cog '{cog_module_path}' のロードに成功しました。")
+                except commands.ExtensionNotFound:
+                    logging.error(
+                        f"Cog '{cog_module_path}' が見つかりません。ファイルが存在し、正しい名前か確認してください。")
                 except commands.ExtensionAlreadyLoaded:
-                    try:
-                        await self.reload_extension(extension_name)
-                        logging.info(f"Cog '{filename}' を再ロードしました。")
-                    except Exception as e_reload:
-                        logging.error(f"Cog '{filename}' の再ロードに失敗しました。", exc_info=e_reload)
+                    logging.warning(f"Cog '{cog_module_path}' は既にロードされています。")
                 except commands.NoEntryPointError:
-                    logging.error(f"Cog '{filename}' に setup 関数が見つかりません。ロードできません。")
-                except commands.ExtensionFailed as ef:
-                    logging.error(f"Cog '{filename}' のロードに失敗しました (ExtensionFailed): {ef.name}",
-                                  exc_info=ef.original)
+                    logging.error(f"Cog '{cog_module_path}' に setup 関数が見つかりません。")
+                except commands.ExtensionFailed as e:
+                    logging.error(
+                        f"Cog '{cog_module_path}' のセットアップ中にエラーが発生しました: {e.name} - {e.original}",
+                        exc_info=e.original)
                 except Exception as e:
-                    logging.error(f"Cog '{filename}' のロード中に予期しないエラーが発生しました。", exc_info=e)
-
-        if loaded_cogs_count > 0:
-            logging.info(f"{loaded_cogs_count}個のCogをロードしました。")
+                    logging.error(f"Cog '{cog_module_path}' のロード中に予期しないエラーが発生しました: {e}",
+                                  exc_info=True)
         else:
-            if os.path.exists(cogs_dir) and not any(
-                    f.endswith(".py") and not f.startswith("_") for f in os.listdir(cogs_dir)):
-                logging.info(f"'{cogs_dir}' ディレクトリにロード可能なCogファイルが見つかりませんでした。")
-            elif os.path.exists(cogs_dir):
-                logging.warning("Cogのロードに成功しませんでした。ログを確認してください。")
+            logging.warning(
+                "config.yamlに 'enabled_cogs' が設定されていないか、リスト形式ではありません。Cogはロードされません。")
 
     async def on_ready(self):
-        logging.info(f"{self.user} としてログインしました (ID: {self.user.id})")
-        logging.info(f"接続ギルド数: {len(self.guilds)}")
+        """Botが完全に準備完了したときに呼び出される"""
+        if not self.user:  # まれにuserがNoneのことがある
+            logging.error("on_ready: self.user が None です。処理をスキップします。")
+            return
 
-    def _enabled_tools(self) -> list[dict]:
-        """有効なツール仕様のリストを返します。"""
-        want = self.cfg.get("active_tools", None)
-        if want is None:
-            return [p.tool_spec for p in self.plugins.values()]
-        if not want:
-            return []
-        return [p.tool_spec for n, p in self.plugins.items() if n in want]
+        logging.info(f'{self.user.name} ({self.user.id}) としてDiscordにログインし、準備が完了しました！')
+        logging.info(f"現在 {len(self.guilds)} サーバーに参加しています。")
 
+        if not self.config:
+            logging.error("on_ready: Botのconfigがロードされていません。ステータスを設定できません。")
+            return
 
-aio_run = asyncio.run
+        # Botのステータスメッセージ設定
+        status_template = self.config.get('status_message', "オンライン | {prefix}help")  # configから取得
+        bot_prefix_for_status = self.config.get('prefix', '!!')  # configからプレフィックス取得
 
-
-def ensure_config(cfg_path: str = "config.yaml",
-                  default_path: str = "config.default.yaml") -> None:
-    if os.path.exists(cfg_path):
-        return
-
-    if not os.path.exists(default_path):
-        logging.critical(
-            f"{cfg_path} が無く、{default_path} も見つからないため起動できません。")
-        sys.exit(1)
-
-    shutil.copy2(default_path, cfg_path)
-    logging.warning(
-        f"{cfg_path} が無かったため {default_path} をコピーしました。\n"
-        f"必要に応じて編集してから再度起動してください。")
-    sys.exit(0)
-
-
-async def _main() -> None:
-    ensure_config()
-    cfg = load_config() # load_configはグローバル関数として呼び出し
-
-    # client_id は config.yaml から取得する想定
-    # discord.py v2.0以降、bot招待URLにはApplication ID (client_idと同じ場合が多い) を使います
-    if application_id := cfg.get("application_id", cfg.get("client_id")):
-        logging.info(
-            "\n\nボット招待 URL:\n"
-            "https://discord.com/api/oauth2/authorize?client_id=%s&permissions=412317273088&scope=bot\n",
-            application_id,
+        # status_message 内のプレースホルダを置換
+        status_text = status_template.format(
+            prefix=bot_prefix_for_status,
+            guild_count=len(self.guilds)  # 参加サーバー数を動的に取得
         )
 
-    bot_token = cfg.get("bot_token")
-    if not bot_token:
-        logging.critical("config.yaml に 'bot_token' が見つかりません。ボットを起動できません。")
-        sys.exit(1)
+        activity_type_str = self.config.get('status_activity_type', 'listening').lower()
+        activity_type_map = {
+            'playing': discord.ActivityType.playing,
+            'streaming': discord.ActivityType.streaming,
+            'listening': discord.ActivityType.listening,
+            'watching': discord.ActivityType.watching,
+            'competing': discord.ActivityType.competing,
+        }
+        selected_activity_type = activity_type_map.get(activity_type_str, discord.ActivityType.listening)
 
-    # DiscordLLMBotのインスタンス作成時にcfg_pathを渡す
-    bot = DiscordLLMBot(cfg_path="config.yaml")
-    await bot.start(bot_token)
+        activity = discord.Activity(type=selected_activity_type, name=status_text)
+
+        # ストリーミングの場合のURL (オプション)
+        if selected_activity_type == discord.ActivityType.streaming:
+            stream_url = self.config.get('status_stream_url', 'https://www.twitch.tv/discord')  # 例
+            activity = discord.Streaming(name=status_text, url=stream_url)
+
+        try:
+            await self.change_presence(activity=activity, status=discord.Status.online)
+            logging.info(f"ボットのステータスを「{activity.type.name}: {status_text}」に設定しました。")
+        except Exception as e:
+            logging.error(f"ステータスの設定中にエラーが発生しました: {e}", exc_info=True)
+
+    async def on_command_error(self, ctx: commands.Context, error: commands.CommandError):
+        """コマンド処理中にエラーが発生した際のグローバルエラーハンドラ"""
+        if isinstance(error, commands.CommandNotFound):
+            # logger.debug(f"コマンドが見つかりません: {ctx.invoked_with}") # 頻繁なのでデバッグレベル
+            return  # 不明なコマンドは無視するか、ユーザーに通知
+        elif isinstance(error, commands.MissingRequiredArgument):
+            await ctx.send(
+                f"引数が不足しています: `{error.param.name}`\n`{ctx.prefix}{ctx.command.qualified_name} {ctx.command.signature}`")
+        elif isinstance(error, commands.BadArgument):
+            await ctx.send(
+                f"引数の型が正しくありません。\n`{ctx.prefix}{ctx.command.qualified_name} {ctx.command.signature}`")
+        elif isinstance(error, commands.CheckFailure):  # has_permissions などのチェック失敗
+            await ctx.send("このコマンドを実行する権限がありません。")
+        elif isinstance(error, commands.CommandOnCooldown):
+            await ctx.send(f"このコマンドはクールダウン中です。あと {error.retry_after:.2f} 秒お待ちください。")
+        elif isinstance(error, commands.ExtensionError):  # Cog関連のエラー
+            logger.error(
+                f"Cog関連のエラーが発生しました ({ctx.command.cog_name if ctx.command else 'UnknownCog'}): {error}",
+                exc_info=error)
+            await ctx.send("コマンドの処理中にCogエラーが発生しました。管理者に報告してください。")
+        else:
+            # その他の予期しないエラー
+            logger.error(
+                f"コマンド '{ctx.command.qualified_name if ctx.command else ctx.invoked_with}' の実行中に予期しないエラーが発生しました:",
+                exc_info=error)
+            try:
+                await ctx.send("コマンドの実行中に予期しないエラーが発生しました。しばらくしてから再試行してください。")
+            except discord.errors.Forbidden:  # メッセージ送信権限がない場合
+                logger.warning(f"エラーメッセージを送信できませんでした ({ctx.channel.id}): 権限不足")
 
 
 if __name__ == "__main__":
+    # --- 起動前の準備 ---
+    temp_config = {}
     try:
-        aio_run(_main())
-    except KeyboardInterrupt:
-        logging.info("KeyboardInterrupt によりボットがシャットダウンしています。")
-    except SystemExit:
-        logging.info("SystemExit によりボットがシャットダウンしています。")
-    except Exception as e:
-        logging.exception(f"ボットの起動/実行中にハンドルされていないエラーが発生しました: {e}")
+        with open('config.yaml', 'r', encoding='utf-8') as f_main:
+            temp_config = yaml.safe_load(f_main)
+            if not temp_config or not isinstance(temp_config, dict):
+                logging.critical("メイン実行: config.yaml が空または無効な形式です。ボットを起動できません。")
+                exit(1)
+    except FileNotFoundError:
+        logging.critical("メイン実行: config.yaml が見つかりません。ボットを起動できません。")
+        exit(1)
+    except yaml.YAMLError as e_main:
+        logging.critical(f"メイン実行: config.yaml の解析エラー: {e_main}。ボットを起動できません。")
+        exit(1)
+    except Exception as e_main_generic:
+        logging.critical(f"メイン実行: config.yaml の読み込み中に予期せぬエラー: {e_main_generic}。")
+        exit(1)
+
+    # Botのプレフィックスとトークンを取得
+    bot_prefix_val = temp_config.get('prefix')  # getの第2引数でデフォルト値を指定できる
+    if not bot_prefix_val or not isinstance(bot_prefix_val, str):
+        logging.warning(f"config.yamlの 'prefix' が無効です。デフォルト値 '!!' を使用します。")
+        bot_prefix_val = '!!'
+
+    bot_token_val = temp_config.get('bot_token')
+    if not bot_token_val or not isinstance(bot_token_val, str):
+        logging.critical("config.yamlにbot_tokenが設定されていないか、無効な形式です。ボットを起動できません。")
+        exit(1)
+
+    # --- Intentsの設定 ---
+    intents = discord.Intents.default()
+    intents.message_content = True
+    intents.voice_states = True
+    # intents.members = True # 必要に応じて
+    # intents.presences = True # 必要に応じて
+
+    # --- Botインスタンスの作成 ---
+    # command_prefix には callable, str, list[str], tuple[str] などが指定可能
+    allowed_mentions = discord.AllowedMentions(everyone=False, users=True, roles=False, replied_user=True)
+    bot_instance = MyBot(
+        command_prefix=commands.when_mentioned_or(bot_prefix_val),
+        intents=intents,
+        help_command=None,  # デフォルトのヘルプコマンドを無効化 (Cogで独自に実装するため)
+        allowed_mentions=allowed_mentions  # 全体メンションを抑制
+    )
+
+    # --- Botの実行 ---
+    try:
+        bot_instance.run(bot_token_val)
+    except RuntimeError as e_run:
+        logging.critical(f"ボットの起動に失敗しました (RuntimeError): {e_run}")
+    except discord.errors.LoginFailure:
+        logging.critical("Discordへのログインに失敗しました。トークンが正しいか確認してください。")
+    except discord.errors.PrivilegedIntentsRequired as e_priv_intent:
+        logging.critical(
+            f"必要な特権インテントが無効です: {e_priv_intent}。Discord Developer Portalで有効化してください。")
+    except Exception as e_run_generic:
+        logging.critical(f"ボット実行中に予期せぬエラーが発生し終了しました: {e_run_generic}", exc_info=True)
