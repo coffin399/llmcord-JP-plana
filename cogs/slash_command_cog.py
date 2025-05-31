@@ -3,7 +3,7 @@ from discord import app_commands
 from discord.ext import commands
 import logging
 import datetime
-from typing import Optional  # Optionalをインポート
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -11,258 +11,374 @@ logger = logging.getLogger(__name__)
 class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
+        # configから必要な値を取得 (Botインスタンスにconfigがロードされている前提)
         self.arona_repository = self.bot.config.get("arona_repository_url", "")
         self.plana_repository = self.bot.config.get("plana_repository_url", "")
         self.support_server_invite = self.bot.config.get("support_server_invite_url", "")
+
         self.bot_invite_url = self.bot.config.get("bot_invite_url")
         if not self.bot_invite_url:
-            logger.error("CRITICAL: config.yaml に 'bot_invite_url' が設定されていません。")
-        elif self.bot_invite_url in ["YOUR_BOT_INVITE_LINK_HERE", "HOGE_FUGA_PIYO"]:
-            logger.error("CRITICAL: 'bot_invite_url' がプレースホルダのままです。")
-        self.generic_help_message_text = self.bot.config.get("generic_help_message",
-                                                             "ヘルプメッセージが設定されていません。")
+            logger.error(
+                "CRITICAL: config.yaml に 'bot_invite_url' が設定されていません。/invite コマンドは機能しません。")
+        elif self.bot_invite_url in ["YOUR_BOT_INVITE_LINK_HERE", "HOGE_FUGA_PIYO"]:  # プレースホルダのチェック
+            logger.error(
+                "CRITICAL: 'bot_invite_url' がプレースホルダのままです。/invite コマンドは正しく機能しません。config.yamlを確認してください。")
+
+        # config.yaml から日本語と英語の汎用ヘルプメッセージを取得
+        self.generic_help_message_text_ja = self.bot.config.get("generic_help_message_ja",
+                                                                "ヘルプメッセージが設定されていません。")
+        self.generic_help_message_text_en = self.bot.config.get("generic_help_message_en",
+                                                                "Help message is not configured.")
 
     async def get_prefix_from_config(self) -> str:
-        prefix = "!!"
+        """設定からプレフィックスを取得するヘルパー"""
+        prefix = "!!"  # デフォルト
         if hasattr(self.bot, 'config') and self.bot.config:
             cfg_prefix = self.bot.config.get('prefix')
             if isinstance(cfg_prefix, str) and cfg_prefix:
                 prefix = cfg_prefix
         return prefix
 
-    # --- 既存コマンド (ping, serverinfo, userinfo, avatar_command, arona, plana, support は変更なし) ---
-    @app_commands.command(name="ping", description="Botの現在のレイテンシを表示します。")
+    @app_commands.command(name="ping",
+                          description="Botの現在のレイテンシを表示します。/ Shows the bot's current latency.")
     async def ping(self, interaction: discord.Interaction):
         latency_ms = round(self.bot.latency * 1000)
         embed = discord.Embed(
             title="Pong! 🏓",
-            description=f"現在のレイテンシ: `{latency_ms}ms`",
+            description=f"現在のレイテンシ / Current Latency: `{latency_ms}ms`",
             color=discord.Color.green() if latency_ms < 150 else (
                 discord.Color.orange() if latency_ms < 300 else discord.Color.red())
         )
         await interaction.response.send_message(embed=embed, ephemeral=False)
         logger.info(f"/ping が実行されました。レイテンシ: {latency_ms}ms (User: {interaction.user.id})")
 
-    @app_commands.command(name="serverinfo", description="現在のサーバーに関する情報を表示します。")
+    @app_commands.command(name="serverinfo",
+                          description="現在のサーバーに関する情報を表示します。/ Displays information about the current server.")
     async def serverinfo(self, interaction: discord.Interaction):
         if not interaction.guild:
-            await interaction.response.send_message("このコマンドはサーバー内でのみ使用できます。", ephemeral=False)
+            await interaction.response.send_message(
+                "このコマンドはサーバー内でのみ使用できます。\nThis command can only be used within a server.",
+                ephemeral=False)
             return
         guild = interaction.guild
-        embed = discord.Embed(title=f"{guild.name} のサーバー情報", color=discord.Color.blue())
+
+        embed = discord.Embed(title=f"{guild.name} のサーバー情報 / Server Information", color=discord.Color.blue())
         if guild.icon: embed.set_thumbnail(url=guild.icon.url)
-        embed.add_field(name="サーバーID", value=guild.id, inline=True)
-        embed.add_field(name="オーナー", value=guild.owner.mention if guild.owner else "不明", inline=True)
-        embed.add_field(name="メンバー数", value=guild.member_count, inline=True)
-        embed.add_field(name="テキストチャンネル数", value=len(guild.text_channels), inline=True)
-        embed.add_field(name="ボイスチャンネル数", value=len(guild.voice_channels), inline=True)
-        embed.add_field(name="ロール数", value=len(guild.roles), inline=True)
-        embed.add_field(name="作成日時", value=discord.utils.format_dt(guild.created_at, style='F'), inline=False)
-        embed.add_field(name="認証レベル", value=str(guild.verification_level).capitalize(), inline=True)
+
+        embed.add_field(name="サーバーID / Server ID", value=guild.id, inline=True)
+        owner_mention = guild.owner.mention if guild.owner else (
+            "不明" if interaction.locale == discord.Locale.japanese else "Unknown")
+        embed.add_field(name="オーナー / Owner", value=owner_mention, inline=True)
+        embed.add_field(name="メンバー数 / Member Count", value=guild.member_count, inline=True)
+        embed.add_field(name="テキストチャンネル数 / Text Channels", value=len(guild.text_channels), inline=True)
+        embed.add_field(name="ボイスチャンネル数 / Voice Channels", value=len(guild.voice_channels), inline=True)
+        embed.add_field(name="ロール数 / Roles", value=len(guild.roles), inline=True)
+
+        created_at_text_ja = discord.utils.format_dt(guild.created_at, style='F')
+        created_at_text_en = discord.utils.format_dt(guild.created_at, style='F', locale='en-US')  # 英語ロケール指定
+        embed.add_field(name="作成日時 / Created At", value=f"{created_at_text_ja}\n{created_at_text_en}", inline=False)
+
+        verification_level_str_ja = str(guild.verification_level).capitalize()
+        verification_level_str_en = str(guild.verification_level).name.replace('_', ' ').capitalize()
+        embed.add_field(name="認証レベル / Verification Level",
+                        value=f"{verification_level_str_ja}\n({verification_level_str_en})", inline=True)
+
         if guild.features:
-            embed.add_field(name="サーバー機能",
-                            value=", ".join(f"`{f.replace('_', ' ').title()}`" for f in guild.features), inline=False)
+            features_str = ", ".join(f"`{f.replace('_', ' ').title()}`" for f in guild.features)
+            embed.add_field(name="サーバー機能 / Server Features", value=features_str, inline=False)
+
         await interaction.response.send_message(embed=embed, ephemeral=False)
         logger.info(f"/serverinfo が実行されました。 (Server: {guild.id}, User: {interaction.user.id})")
 
-    @app_commands.command(name="userinfo", description="指定されたユーザーの情報を表示します。")
-    @app_commands.describe(user="情報を表示するユーザー（任意、デフォルトはコマンド実行者）")
-    async def userinfo(self, interaction: discord.Interaction, user: discord.User = None):
+    @app_commands.command(name="userinfo",
+                          description="指定されたユーザーの情報を表示します。/ Displays information about the specified user.")
+    @app_commands.describe(
+        user="情報を表示するユーザー（任意、デフォルトはコマンド実行者） / User to display information for (optional, defaults to you)")
+    async def userinfo(self, interaction: discord.Interaction, user: Optional[discord.User] = None):
         target_user = user or interaction.user
-        embed = discord.Embed(title=f"{target_user.display_name} のユーザー情報",
+
+        embed = discord.Embed(title=f"{target_user.display_name} のユーザー情報 / User Information",
                               color=target_user.accent_color or discord.Color.blurple())
-        embed.set_thumbnail(url=target_user.display_avatar.url)
-        username_val = f"{target_user.name}#{target_user.discriminator}" if target_user.discriminator != '0' else target_user.name
-        embed.add_field(name="ユーザー名", value=username_val, inline=True)
-        embed.add_field(name="ユーザーID", value=target_user.id, inline=True)
-        embed.add_field(name="Botアカウントか", value="はい" if target_user.bot else "いいえ", inline=True)
-        embed.add_field(name="アカウント作成日時", value=discord.utils.format_dt(target_user.created_at, style='F'),
+        if target_user.display_avatar: embed.set_thumbnail(url=target_user.display_avatar.url)
+
+        username_val_ja = f"{target_user.name}#{target_user.discriminator}" if target_user.discriminator != '0' else target_user.name
+        username_val_en = f"{target_user.name}#{target_user.discriminator}" if target_user.discriminator != '0' else target_user.name
+        embed.add_field(name="ユーザー名 / Username", value=f"{username_val_ja}\n({username_val_en})", inline=True)
+        embed.add_field(name="ユーザーID / User ID", value=target_user.id, inline=True)
+        bot_status_ja = "はい" if target_user.bot else "いいえ"
+        bot_status_en = "Yes" if target_user.bot else "No"
+        embed.add_field(name="Botアカウントか / Bot Account?", value=f"{bot_status_ja} / {bot_status_en}", inline=True)
+
+        created_at_ja = discord.utils.format_dt(target_user.created_at, style='F')
+        created_at_en = discord.utils.format_dt(target_user.created_at, style='F', locale='en-US')
+        embed.add_field(name="アカウント作成日時 / Account Created", value=f"{created_at_ja}\n{created_at_en}",
                         inline=False)
+
         if interaction.guild and isinstance(target_user, discord.Member):
             member: discord.Member = target_user
-            embed.add_field(name="サーバー参加日時",
-                            value=discord.utils.format_dt(member.joined_at, style='F') if member.joined_at else "不明",
+            joined_at_ja = discord.utils.format_dt(member.joined_at, style='F') if member.joined_at else "不明"
+            joined_at_en = discord.utils.format_dt(member.joined_at, style='F',
+                                                   locale='en-US') if member.joined_at else "Unknown"
+            embed.add_field(name="サーバー参加日時 / Joined Server", value=f"{joined_at_ja}\n{joined_at_en}",
                             inline=False)
+
             roles = [r.mention for r in reversed(member.roles) if r.name != "@everyone"]
+            roles_count = len(roles)
+            roles_text_ja = "なし"
+            roles_text_en = "None"
             if roles:
                 roles_str = ", ".join(roles)
-                embed.add_field(name=f"ロール ({len(roles)})",
-                                value=roles_str[:1020] if len(roles_str) > 1020 else (roles_str or "なし"),
-                                inline=False)
-            else:
-                embed.add_field(name="ロール", value="なし", inline=False)
-            if member.nick: embed.add_field(name="ニックネーム", value=member.nick, inline=True)
-            if member.premium_since: embed.add_field(name="サーバーブースト開始",
-                                                     value=discord.utils.format_dt(member.premium_since, style='R'),
-                                                     inline=True)
+                roles_text_ja = roles_str[:1000] + "..." if len(roles_str) > 1000 else roles_str  # 1024文字制限のため短縮
+                roles_text_en = roles_text_ja  # メンションなので日英共通
+            embed.add_field(name=f"ロール ({roles_count}) / Roles ({roles_count})", value=f"{roles_text_ja}",
+                            inline=False)
+
+            if member.nick:
+                embed.add_field(name="ニックネーム / Nickname", value=member.nick, inline=True)
+            if member.premium_since:
+                premium_ja = discord.utils.format_dt(member.premium_since, style='R')
+                premium_en = discord.utils.format_dt(member.premium_since, style='R', locale='en-US')
+                embed.add_field(name="サーバーブースト開始 / Server Boosting Since",
+                                value=f"{premium_ja}\n({premium_en})", inline=True)
+
         await interaction.response.send_message(embed=embed, ephemeral=False)
         logger.info(f"/userinfo が実行されました。 (TargetUser: {target_user.id}, Requester: {interaction.user.id})")
 
-    @app_commands.command(name="avatar", description="指定されたユーザーのアバター画像URLを表示します。")
-    @app_commands.describe(user="アバターを表示するユーザー（任意、デフォルトはコマンド実行者）")
-    async def avatar_command(self, interaction: discord.Interaction, user: discord.User = None):
+    @app_commands.command(name="avatar",
+                          description="指定されたユーザーのアバター画像URLを表示します。/ Displays the avatar of the specified user.")
+    @app_commands.describe(
+        user="アバターを表示するユーザー（任意、デフォルトはコマンド実行者） / User whose avatar to display (optional, defaults to you)")
+    async def avatar_command(self, interaction: discord.Interaction, user: Optional[discord.User] = None):
         target_user = user or interaction.user
-        embed = discord.Embed(title=f"{target_user.display_name} のアバター",
+        avatar_url = target_user.display_avatar.url
+        embed = discord.Embed(title=f"{target_user.display_name} のアバター / Avatar",
                               color=target_user.accent_color or discord.Color.default())
-        embed.set_image(url=target_user.display_avatar.url)
-        embed.add_field(name="画像URL", value=f"[リンク]({target_user.display_avatar.url})")
+        embed.set_image(url=avatar_url)
+        embed.add_field(name="画像URL / Image URL", value=f"[リンク / Link]({avatar_url})")
         await interaction.response.send_message(embed=embed, ephemeral=False)
         logger.info(f"/avatar が実行されました。 (TargetUser: {target_user.id}, Requester: {interaction.user.id})")
 
-    @app_commands.command(name="arona", description="Arona Music Botのリポジトリを表示します")
+    @app_commands.command(name="arona",
+                          description="Arona Music Botのリポジトリを表示します / Shows the Arona Music Bot repository")
     async def arona_repo_slash(self, interaction: discord.Interaction) -> None:
         if self.arona_repository:
-            message = f"アロナ (Arona Music Bot) のリポジトリはこちらです！\n{self.arona_repository}"
-            await interaction.response.send_message(message, ephemeral=False)
+            message_ja = f"アロナ (Arona Music Bot) のリポジトリはこちらです！\n{self.arona_repository}"
+            message_en = f"Here is the repository for Arona (Arona Music Bot)!\n{self.arona_repository}"
+            await interaction.response.send_message(f"{message_ja}\n\n{message_en}", ephemeral=False)
             logger.info(f"/arona が実行されました。 (User: {interaction.user.id})")
         else:
-            await interaction.response.send_message("Arona Music BotのリポジトリURLが設定されていません。",
-                                                    ephemeral=False)
+            message_ja = "Arona Music BotのリポジトリURLが設定されていません。"
+            message_en = "The repository URL for Arona Music Bot is not set."
+            await interaction.response.send_message(f"{message_ja}\n{message_en}", ephemeral=False)
             logger.warning(f"/arona が実行されましたが、リポジトリURL未設定。 (User: {interaction.user.id})")
 
-    @app_commands.command(name="plana", description="llmcord-JP-planaのリポジトリを表示します")
+    @app_commands.command(name="plana",
+                          description="llmcord-JP-planaのリポジトリを表示します / Shows the llmcord-JP-plana repository")
     async def plana_repo_slash(self, interaction: discord.Interaction) -> None:
         if self.plana_repository:
-            message = f"プラナ (llmcord-JP-plana) のリポジトリはこちらです！\n{self.plana_repository}"
-            await interaction.response.send_message(message, ephemeral=False)
+            message_ja = f"プラナ (llmcord-JP-plana) のリポジトリはこちらです！\n{self.plana_repository}"
+            message_en = f"Here is the repository for Plana (llmcord-JP-plana)!\n{self.plana_repository}"
+            await interaction.response.send_message(f"{message_ja}\n\n{message_en}", ephemeral=False)
             logger.info(f"/plana が実行されました。 (User: {interaction.user.id})")
         else:
-            await interaction.response.send_message("llmcord-JP-planaのリポジトリURLが設定されていません。",
-                                                    ephemeral=False)
+            message_ja = "llmcord-JP-planaのリポジトリURLが設定されていません。"
+            message_en = "The repository URL for llmcord-JP-plana is not set."
+            await interaction.response.send_message(f"{message_ja}\n{message_en}", ephemeral=False)
             logger.warning(f"/plana が実行されましたが、リポジトリURL未設定。 (User: {interaction.user.id})")
 
-    @app_commands.command(name="support", description="サポートサーバーの招待コードを表示します")
+    @app_commands.command(name="support",
+                          description="サポートサーバーの招待コードを表示します / Shows the support server invite code")
     async def support_server_slash(self, interaction: discord.Interaction) -> None:
         if self.support_server_invite and self.support_server_invite != "https://discord.gg/HogeFugaPiyo":
-            message = f"サポートサーバーへの招待リンクはこちらです！\n{self.support_server_invite}"
-            await interaction.response.send_message(message, ephemeral=False)
+            message_ja = f"サポートサーバーへの招待リンクはこちらです！\n{self.support_server_invite}"
+            message_en = f"Here is the invitation link to our support server!\n{self.support_server_invite}"
+            await interaction.response.send_message(f"{message_ja}\n\n{message_en}", ephemeral=False)
             logger.info(f"/support が実行されました。 (User: {interaction.user.id})")
         else:
-            await interaction.response.send_message(
-                "申し訳ありませんが、現在サポートサーバーの招待リンクが設定されていません。\n管理者にお問い合わせください。",
-                ephemeral=False
-            )
+            message_ja = "申し訳ありませんが、現在サポートサーバーの招待リンクが設定されていません。\n管理者にお問い合わせください。"
+            message_en = "Sorry, the invitation link for the support server is not currently set.\nPlease contact an administrator."
+            await interaction.response.send_message(f"{message_ja}\n\n{message_en}", ephemeral=False)
             logger.warning(
                 f"/support が実行されましたが、招待リンク未設定またはプレースホルダ。 (User: {interaction.user.id})")
 
-    @app_commands.command(name="invite", description="このBotをあなたのサーバーに招待します。")
+    @app_commands.command(name="invite",
+                          description="このBotをあなたのサーバーに招待します。/ Invites this bot to your server.")
     async def invite_bot_slash(self, interaction: discord.Interaction) -> None:
         invite_url_to_display = self.bot_invite_url
+        bot_name = self.bot.user.name if self.bot.user else "This Bot"
+
         if invite_url_to_display and invite_url_to_display not in ["YOUR_BOT_INVITE_LINK_HERE", "HOGE_FUGA_PIYO"]:
-            message_title = f"{self.bot.user.name} をサーバーに招待"
-            message_description = "下のボタンからPLANAをあなたのサーバーに招待できます！"
-            embed = discord.Embed(title=message_title, description=message_description,
-                                  color=discord.Color.og_blurple())
-            if self.bot.user and self.bot.user.avatar: embed.set_thumbnail(url=self.bot.user.avatar.url)
-            embed.set_footer(text=f"{self.bot.user.name} をご利用いただきありがとうございます！")
-            view = discord.ui.View();
-            view.add_item(
-                discord.ui.Button(label="サーバーに招待する", style=discord.ButtonStyle.link, url=invite_url_to_display,
-                                  emoji="💌"))
+            title_ja = f"{bot_name} をサーバーに招待"
+            title_en = f"Invite {bot_name} to Your Server"
+            desc_ja = "下のボタンからPLANAをあなたのサーバーに招待できます！"
+            desc_en = "You can invite PLANA to your server using the button below!"
+
+            embed = discord.Embed(
+                title=f"{title_ja} / {title_en}",
+                description=f"{desc_ja}\n\n{desc_en}",
+                color=discord.Color.og_blurple()
+            )
+            if self.bot.user and self.bot.user.avatar:
+                embed.set_thumbnail(url=self.bot.user.avatar.url)
+
+            footer_ja = f"{bot_name} をご利用いただきありがとうございます！"
+            footer_en = f"Thank you for using {bot_name}!"
+            embed.set_footer(text=f"{footer_ja}\n{footer_en}")
+
+            view = discord.ui.View()
+            view.add_item(discord.ui.Button(label="サーバーに招待 / Invite to Server", style=discord.ButtonStyle.link,
+                                            url=invite_url_to_display, emoji="💌"))
             await interaction.response.send_message(embed=embed, view=view, ephemeral=False)
             logger.info(f"/invite が実行されました。 (User: {interaction.user.id})")
         else:
-            error_message = "エラー: Botの招待URLが `config.yaml` に正しく設定されていません。\nBotの管理者にご連絡ください。"
-            await interaction.response.send_message(error_message, ephemeral=True)
+            error_message_ja = "エラー: Botの招待URLが `config.yaml` に正しく設定されていません。\nBotの管理者にご連絡ください。"
+            error_message_en = "Error: The bot's invitation URL is not set correctly in `config.yaml`.\nPlease contact the bot administrator."
+            await interaction.response.send_message(f"{error_message_ja}\n\n{error_message_en}", ephemeral=True)
             logger.error(
                 f"/invite が実行されましたが、招待URLがconfig.yamlに未設定またはプレースホルダです。 (User: {interaction.user.id})")
 
-    # --- ここから新しい /help コマンド ---
-    @app_commands.command(name="help", description="Botのヘルプ情報を表示します。特定の機能のヘルプも表示可能です。")
-    @app_commands.describe(module="ヘルプを表示したい機能 (例: llm, music)")
+    @app_commands.command(name="help", description="Botのヘルプ情報を表示します。/ Displays bot help information.")
+    @app_commands.describe(
+        module="ヘルプを表示したい機能 (例: llm, music) / Feature to display help for (e.g., llm, music)")
     async def help_slash_command(self, interaction: discord.Interaction, module: Optional[str] = None):
-        """
-        Botの機能に関するヘルプ情報を表示します。
-        'module' 引数に 'llm' または 'music' を指定すると、各機能の詳細なヘルプを表示します。
-        引数なしの場合は、全体の概要と各詳細ヘルプへの案内を表示します。
-        """
-        await interaction.response.defer(ephemeral=False)  # ephemeral=False
+        await interaction.response.defer(ephemeral=False)
 
-        bot_name = self.bot.user.name if self.bot.user else "当Bot"
+        bot_name_ja = self.bot.user.name if self.bot.user else "当Bot"
+        bot_name_en = self.bot.user.name if self.bot.user else "This Bot"
         bot_avatar_url = self.bot.user.avatar.url if self.bot.user and self.bot.user.avatar else None
         prefix = await self.get_prefix_from_config()
 
         if module:
             module_lower = module.lower()
-            if module_lower == "llm":
-                llm_cog = self.bot.get_cog("LLM")
-                if llm_cog and hasattr(llm_cog, 'llm_help_slash'):  # LLMCogにllm_help_slashがあると仮定
-                    # LLMCogのヘルプコマンドを直接呼び出すのは推奨されないため、Embedを生成するメソッドを呼び出す
-                    if hasattr(llm_cog, 'generate_llm_help_embed'):  # LLMCogにこのメソッドがあると仮定
-                        embed = await llm_cog.generate_llm_help_embed(interaction)  # interactionを渡す
-                        await interaction.followup.send(embed=embed, ephemeral=False)
-                    else:  # フォールバック
-                        await interaction.followup.send(f"LLM機能の詳細ヘルプは `/llm_help` コマンドで確認できます。",
-                                                        ephemeral=False)
+            embed_to_send = None
+            cog_name_map = {"llm": "LLM", "music": "音楽"}
+
+            if module_lower in cog_name_map:
+                target_cog_name = cog_name_map[module_lower]
+                cog_instance = self.bot.get_cog(target_cog_name)
+
+                bilingual_help_method_name = f"generate_bilingual_{module_lower}_help_embed"
+                if cog_instance and hasattr(cog_instance, bilingual_help_method_name) and callable(
+                        getattr(cog_instance, bilingual_help_method_name)):
+                    try:
+                        if module_lower == "music":
+                            embed_to_send = await getattr(cog_instance, bilingual_help_method_name)(interaction,
+                                                                                                    prefix)  # MusicCogはprefixも取る想定
+                        else:
+                            embed_to_send = await getattr(cog_instance, bilingual_help_method_name)(interaction)
+                    except Exception as e_help_gen:
+                        logger.error(f"{target_cog_name}のバイリンガルヘルプ生成中にエラー: {e_help_gen}",
+                                     exc_info=True)
+                        embed_to_send = discord.Embed(title="エラー / Error",
+                                                      description=f"{target_cog_name}のヘルプ生成中にエラーが発生しました。\nAn error occurred while generating help for {target_cog_name}.",
+                                                      color=discord.Color.red())
+
+                # フォールバック (各Cogの単一言語ヘルプコマンドへ誘導)
+                elif module_lower == "llm" and cog_instance and hasattr(cog_instance, 'llm_help_slash_command'):
+                    await interaction.followup.send(
+                        f"LLM機能の詳細ヘルプは `/llm_help` (日本語) または `/llm_help_en` (英語) コマンドで確認できます。",
+                        ephemeral=False);
                     return
-                else:
-                    await interaction.followup.send("LLM機能モジュールが見つからないか、ヘルプ機能が実装されていません。",
-                                                    ephemeral=False)
+                elif module_lower == "music" and cog_instance and hasattr(cog_instance, 'music_help_slash'):
+                    await interaction.followup.send(
+                        f"音楽機能の詳細ヘルプは `/music_help` (日本語) または `/music_help_en` (英語) コマンドで確認できます。",
+                        ephemeral=False);
                     return
-            elif module_lower == "music":
-                music_cog = self.bot.get_cog("音楽")
-                if music_cog and hasattr(music_cog, 'music_help_slash'):  # MusicCogにmusic_help_slashがあると仮定
-                    if hasattr(music_cog, 'get_music_commands_help_embed'):  # MusicCogにこのメソッドがあると仮定
-                        embed = music_cog.get_music_commands_help_embed(prefix)  # プレフィックスを渡す
-                        await interaction.followup.send(embed=embed, ephemeral=False)
-                    else:  # フォールバック
-                        await interaction.followup.send(f"音楽機能の詳細ヘルプは `/music_help` コマンドで確認できます。",
-                                                        ephemeral=False)
-                    return
+
+                if embed_to_send:
+                    await interaction.followup.send(embed=embed_to_send, ephemeral=False)
                 else:
                     await interaction.followup.send(
-                        "音楽機能モジュールが見つからないか、ヘルプ機能が実装されていません。", ephemeral=False)
-                    return
+                        f"{target_cog_name} 機能モジュールのヘルプ情報が見つかりませんでした。\nHelp information for the {target_cog_name} module was not found.",
+                        ephemeral=False)
+                return
             else:
-                await interaction.followup.send(f"'{module}' という機能モジュールのヘルプは現在提供されていません。\n"
-                                                f"利用可能なモジュール: `llm`, `music`", ephemeral=False)
+                await interaction.followup.send(
+                    f"'{module}' という機能モジュールのヘルプは現在提供されていません。\n利用可能なモジュール: `llm`, `music`\n\n"
+                    f"Help for the '{module}' module is not currently available.\nAvailable modules: `llm`, `music`",
+                    ephemeral=False)
                 return
 
-        # 引数なしの場合: 全体ヘルプ
+        # 引数なしの場合: 全体ヘルプ (日英併記)
         embed = discord.Embed(
-            title=f"{bot_name} 機能概要ヘルプ",
-            description=self.generic_help_message_text + \
-                        f"\n\nより詳細な情報は、以下のコマンドで確認できます。\n"
-                        f"• AI対話機能: `/help module:llm` または `/llm_help`\n"
-                        f"• 音楽再生機能: `/help module:music` または `/music_help`\n"
-                        f"\nプレフィックスコマンドも利用可能です (現在のプレフィックス: `{prefix}` )。",
+            title=f"{bot_name_ja} ヘルプ / {bot_name_en} Help",
+            description=f"{self.generic_help_message_text_ja}\n\n{self.generic_help_message_text_en}",
             color=discord.Color.teal()
         )
         if bot_avatar_url:
             embed.set_thumbnail(url=bot_avatar_url)
 
+        desc_ja_detail = "より詳細な情報は、以下のコマンドで確認できます。"
+        desc_en_detail = "For more detailed information, please check the following commands:"
+        llm_help_cmd_ja = "• **AI対話機能:** `/help module:llm` (または `/llm_help`)"
+        llm_help_cmd_en = "• **AI Chat (LLM):** `/help module:llm` (or `/llm_help`, `/llm_help_en`)"
+        music_help_cmd_ja = "• **音楽再生機能:** `/help module:music` (または `/music_help`)"
+        music_help_cmd_en = "• **Music Playback:** `/help module:music` (or `/music_help`, `/music_help_en`)"
+        prefix_info_ja = f"プレフィックスコマンドも利用可能です (現在のプレフィックス: `{prefix}` )。"
+        prefix_info_en = f"(Prefix commands are also available. Current prefix: `{prefix}` )"
+
         embed.add_field(
-            name="主な機能",
-            value="- **AIとの対話 (LLM):** メンションで話しかけるとAIが応答します。画像も認識可能です。\n"
-                  "- **音楽再生:** ボイスチャンネルで音楽を再生、キュー管理、各種操作ができます。\n"
-                  "- **情報表示:** サーバー情報、ユーザー情報、Botのレイテンシなどを表示します。",
+            name="詳細情報 / More Information",
+            value=f"{desc_ja_detail}\n{llm_help_cmd_ja}\n{music_help_cmd_ja}\n{prefix_info_ja}\n\n"
+                  f"{desc_en_detail}\n{llm_help_cmd_en}\n{music_help_cmd_en}\n{prefix_info_en}",
             inline=False
         )
 
-        other_commands_value = (
-            f"`/ping` - Botの応答速度を確認\n"
-            f"`/serverinfo` - サーバー情報を表示\n"
-            f"`/userinfo [ユーザー]` - ユーザー情報を表示\n"
-            f"`/avatar [ユーザー]` - アバター画像を表示\n"
-            f"`/invite` - Botの招待リンクを表示\n"
+        main_features_title_ja = "主な機能"
+        main_features_ja_val = (
+            "- **AIとの対話 (LLM):** メンションで話しかけるとAIが応答します。画像も認識可能です。\n"
+            "- **音楽再生:** ボイスチャンネルで音楽を再生、キュー管理、各種操作ができます。\n"
+            "- **情報表示:** サーバー情報、ユーザー情報、Botのレイテンシなどを表示します。"
         )
+        main_features_en_val = (
+            "- **AI Chat (LLM):** Mention the bot to talk with AI. It can also recognize images (if model supports).\n"
+            "- **Music Playback:** Play music in voice channels, manage queues, and perform various operations.\n"
+            "- **Information Display:** Show server info, user info, bot latency, etc."
+        )
+        embed.add_field(
+            name=f"{main_features_title_ja} / Main Features",
+            value=f"{main_features_ja_val}\n\n{main_features_en_val}",
+            inline=False
+        )
+
+        utility_title_ja = "便利なコマンド"
+        utility_cmds_ja = [f"`/ping` - Botの応答速度を確認", f"`/serverinfo` - サーバー情報を表示",
+                           f"`/userinfo [ユーザー]` - ユーザー情報を表示", f"`/avatar [ユーザー]` - アバター画像を表示",
+                           f"`/invite` - Botの招待リンクを表示"]
+        utility_cmds_en = [f"`/ping` - Check bot's latency", f"`/serverinfo` - Display server info",
+                           f"`/userinfo [user]` - Display user info", f"`/avatar [user]` - Display avatar",
+                           f"`/invite` - Display bot invite link"]
+
         if self.support_server_invite and self.support_server_invite != "https://discord.gg/HogeFugaPiyo":
-            other_commands_value += f"`/support` - サポートサーバーの招待リンクを表示\n"
+            utility_cmds_ja.append(f"`/support` - サポートサーバー招待")
+            utility_cmds_en.append(f"`/support` - Support server invite")
         if self.plana_repository:
-            other_commands_value += f"`/plana` - Plana (このBot) のリポジトリを表示\n"
+            utility_cmds_ja.append(f"`/plana` - Plana (Bot)リポジトリ")
+            utility_cmds_en.append(f"`/plana` - Plana (Bot) repository")
 
-        embed.add_field(name="便利なコマンド", value=other_commands_value.strip(), inline=False)
+        embed.add_field(
+            name=f"{utility_title_ja} / Useful Commands",
+            value="\n".join(utility_cmds_ja) + "\n\n" + "\n".join(utility_cmds_en),
+            inline=False
+        )
 
+        footer_ja = "<> は必須引数、[] は任意引数を表します。"
+        footer_en = "<> denotes a required argument, [] denotes an optional argument."
+        embed.set_footer(text=f"{footer_ja}\n{footer_en}")
+
+        view_items = []
         if self.bot_invite_url and self.bot_invite_url not in ["YOUR_BOT_INVITE_LINK_HERE", "HOGE_FUGA_PIYO"]:
+            view_items.append(discord.ui.Button(label="Botを招待 / Invite Bot", style=discord.ButtonStyle.link,
+                                                url=self.bot_invite_url))
+
+        if view_items:
             view = discord.ui.View()
-            view.add_item(
-                discord.ui.Button(label="Botをサーバーに招待", style=discord.ButtonStyle.link, url=self.bot_invite_url))
+            for item in view_items: view.add_item(item)
             await interaction.followup.send(embed=embed, view=view, ephemeral=False)
         else:
             await interaction.followup.send(embed=embed, ephemeral=False)
 
         logger.info(f"/help (概要) が実行されました。 (User: {interaction.user.id})")
-    # --- /help コマンドここまで ---
 
 
 async def setup(bot: commands.Bot):

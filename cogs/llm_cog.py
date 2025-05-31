@@ -377,6 +377,88 @@ class LLMCog(commands.Cog, name="LLM"):
         await interaction.followup.send(embed=embed, ephemeral=False)
         logger.info(f"/llm_help が実行されました。 (User: {interaction.user.id}, Guild: {interaction.guild_id})")
 
+    # 英語版のLLMヘルプコマンド
+    @app_commands.command(name="llm_help_en",description="Displays detailed help for LLM (AI Chat) features in English.")
+    async def llm_help_en_slash(self, interaction: discord.Interaction):
+        """Displays information about AI chat features, settings, and available tools in English."""
+        await interaction.response.defer(ephemeral=False)
+
+        bot_name = self.bot.user.name if self.bot.user else "This Bot"
+
+        embed = discord.Embed(
+            title="💡 LLM (AI Chat) Feature Help",
+            description=f"This is an explanation of the AI chat features for {bot_name}.",
+            color=discord.Color.purple()  # LLM-like color
+        )
+        if self.bot.user and self.bot.user.avatar:
+            embed.set_thumbnail(url=self.bot.user.avatar.url)
+
+        # 1. Basic Usage
+        embed.add_field(
+            name="Basic Usage",
+            value=f"• Mention the bot (`@{bot_name}`) and send a message to get a response from the AI.\n"
+                  f"• If you attach images along with your message, the AI will try to understand their content (if using a compatible model).",
+            inline=False
+        )
+
+        # 2. Current AI Settings
+        model_name_en = self.llm_config.get('model', 'Not set')
+        max_hist_en = self.llm_config.get('max_messages', 'Not set')
+        max_text_en = self.llm_config.get('max_text', 'Not set')
+        max_images_en = self.llm_config.get('max_images', 'Not set')
+
+        settings_value = (
+            f"• **Model in Use:** `{model_name_en}`\n"
+            f"• **Max Conversation History:** {max_hist_en} pairs (user and AI response form one pair)\n"
+            f"• **Max Input Text Length:** {max_text_en:,} characters (if a number)\n"
+            f"• **Max Images Processed at Once:** {max_images_en} image(s)"
+        )
+        # max_text_en が数値でない場合はカンマ区切りを避ける
+        if not isinstance(max_text_en, int):
+            settings_value = settings_value.replace(f"{max_text_en:,}", str(max_text_en))
+
+        embed.add_field(
+            name="Current AI Settings",
+            value=settings_value,
+            inline=False
+        )
+
+        # 3. Available AI Tools
+        active_tools_list_en = self.llm_config.get('active_tools', [])
+        tools_description_en = ""
+        if 'search' in active_tools_list_en and self.search_agent:
+            tools_description_en += f"• **Web Search (Search):** If the AI deems it necessary, it will search the internet for information to use in its response.\n"
+            search_model_en = self.llm_config.get('search_agent', {}).get('model', 'Not set')
+            tools_description_en += f"  *Search Agent Model: `{search_model_en}`*\n"
+
+        # Add other tools here if any
+        # if 'another_tool' in active_tools_list_en and self.another_tool_agent:
+        #     tools_description_en += f"• **Another Tool:** Description...\n"
+
+        if not tools_description_en:
+            tools_description_en = "Currently, no special additional features (tools) are enabled."
+
+        embed.add_field(
+            name="AI's Additional Features (Tools)",
+            value=tools_description_en,
+            inline=False
+        )
+
+        # 4. Tips and Important Notes
+        embed.add_field(
+            name="Tips & Important Notes",
+            value="• The AI does not always provide correct information. Always verify important information yourself.\n"
+                  "• Conversations are remembered obstáculosy for each channel.\n"
+                  "• Excessively long conversations or overly complex instructions can confuse the AI.\n"
+                  "• Do not send personal or sensitive information.",
+            inline=False
+        )
+
+        embed.set_footer(
+            text="Enjoy your conversation with the AI! This feature is under development and specifications may change.")
+
+        await interaction.followup.send(embed=embed, ephemeral=False)
+        logger.info(f"/llm_help_en was executed. (User: {interaction.user.id}, Guild: {interaction.guild_id})")
 
 async def setup(bot: commands.Bot):
     if not hasattr(bot, 'config') or not bot.config:

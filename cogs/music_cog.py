@@ -1,6 +1,6 @@
 import discord
 from discord.ext import commands, tasks
-from discord import app_commands  # スラッシュコマンド用にインポート
+from discord import app_commands
 import asyncio
 import logging
 import yaml
@@ -373,7 +373,6 @@ class MusicCog(commands.Cog, name="音楽"):
     # --- プレフィックスコマンド ---
     @commands.command(name="join", aliases=["connect", "j"], help="ボットを指定したVCに接続。")
     async def join_command(self, ctx: commands.Context, *, channel: Optional[discord.VoiceChannel] = None):
-        # ... (内容は変更なし)
         state = self._get_guild_state(ctx.guild.id);
         state.update_last_text_channel(ctx.channel.id)
         target_channel = channel or (ctx.author.voice.channel if ctx.author.voice else None)
@@ -403,7 +402,6 @@ class MusicCog(commands.Cog, name="音楽"):
 
     @commands.command(name="leave", aliases=["disconnect", "dc", "bye"], help="ボットをVCから切断。")
     async def leave_command(self, ctx: commands.Context):
-        # ... (内容は変更なし)
         state = self._get_guild_state(ctx.guild.id);
         state.update_last_text_channel(ctx.channel.id)
         if not state.voice_client or not state.voice_client.is_connected(): await self._send_msg(ctx.channel,
@@ -414,7 +412,6 @@ class MusicCog(commands.Cog, name="音楽"):
 
     @commands.command(name="play", aliases=["p"], help="曲を再生/キュー追加。\nURLか検索語を指定。")
     async def play_command(self, ctx: commands.Context, *, query: str):
-        # ... (内容は変更なし)
         state = self._get_guild_state(ctx.guild.id);
         vc = await self._ensure_voice(ctx, connect_if_not_in=True);
         if not vc: return
@@ -467,7 +464,6 @@ class MusicCog(commands.Cog, name="音楽"):
 
     @commands.command(name="skip", aliases=["s", "next"], help="再生中の曲をスキップ。")
     async def skip_command(self, ctx: commands.Context):
-        # ... (内容は変更なし)
         state = self._get_guild_state(ctx.guild.id);
         vc = await self._ensure_voice(ctx, connect_if_not_in=False);
         if not vc: return
@@ -481,7 +477,6 @@ class MusicCog(commands.Cog, name="音楽"):
 
     @commands.command(name="stop", help="再生停止、キュークリア。")
     async def stop_command(self, ctx: commands.Context):
-        # ... (内容は変更なし)
         state = self._get_guild_state(ctx.guild.id);
         vc = await self._ensure_voice(ctx, connect_if_not_in=False);
         if not vc: return
@@ -503,7 +498,6 @@ class MusicCog(commands.Cog, name="音楽"):
 
     @commands.command(name="pause", help="再生を一時停止。")
     async def pause_command(self, ctx: commands.Context):
-        # ... (内容は変更なし)
         state = self._get_guild_state(ctx.guild.id);
         vc = await self._ensure_voice(ctx, connect_if_not_in=False);
         if not vc: return
@@ -516,7 +510,6 @@ class MusicCog(commands.Cog, name="音楽"):
 
     @commands.command(name="resume", aliases=["unpause"], help="一時停止中の再生を再開。")
     async def resume_command(self, ctx: commands.Context):
-        # ... (内容は変更なし)
         state = self._get_guild_state(ctx.guild.id);
         vc = await self._ensure_voice(ctx, connect_if_not_in=False);
         if not vc: return
@@ -528,7 +521,6 @@ class MusicCog(commands.Cog, name="音楽"):
 
     @commands.command(name="volume", aliases=["vol"], help="音量変更 (0-200)。引数なしで現在値表示。")
     async def volume_command(self, ctx: commands.Context, volume: Optional[int] = None):
-        # ... (内容は変更なし)
         state = self._get_guild_state(ctx.guild.id)
         if volume is None: current_vol_percent = int(state.volume * 100); await ctx.send(
             self._get_message("volume_set", volume=current_vol_percent).replace("設定しました",
@@ -541,7 +533,6 @@ class MusicCog(commands.Cog, name="音楽"):
 
     @commands.command(name="queue", aliases=["q", "list"], help="現在の再生キュー表示。")
     async def queue_command(self, ctx: commands.Context, page: int = 1):
-        # ... (内容は変更なし)
         state = self._get_guild_state(ctx.guild.id);
         state.update_last_text_channel(ctx.channel.id)
         if state.queue.empty() and not state.current_track: await self._send_msg(ctx.channel, "queue_empty"); return
@@ -575,7 +566,6 @@ class MusicCog(commands.Cog, name="音楽"):
 
     @commands.command(name="shuffle", aliases=["sh"], help="再生キューをシャッフル。")
     async def shuffle_command(self, ctx: commands.Context):
-        # ... (内容は変更なし)
         state = self._get_guild_state(ctx.guild.id);
         vc = await self._ensure_voice(ctx, connect_if_not_in=False);
         if not vc: return
@@ -590,7 +580,6 @@ class MusicCog(commands.Cog, name="音楽"):
 
     @commands.command(name="nowplaying", aliases=["np", "current"], help="現在再生中の曲情報表示。")
     async def nowplaying_command(self, ctx: commands.Context):
-        # ... (内容は変更なし)
         state = self._get_guild_state(ctx.guild.id);
         state.update_last_text_channel(ctx.channel.id)
         if not state.current_track: await self._send_msg(ctx.channel, "now_playing_nothing"); return
@@ -606,7 +595,6 @@ class MusicCog(commands.Cog, name="音楽"):
 
     @commands.command(name="clear", aliases=["clr"], help="再生キュークリア (再生中の曲は影響なし)。")
     async def clear_command(self, ctx: commands.Context):
-        # ... (内容は変更なし)
         state = self._get_guild_state(ctx.guild.id);
         await self._ensure_voice(ctx, connect_if_not_in=False)
         await state.clear_queue();
@@ -614,7 +602,6 @@ class MusicCog(commands.Cog, name="音楽"):
 
     @commands.command(name="loop", aliases=["repeat"], help="ループモード設定 (off, one, all)。引数なしで現在値表示。")
     async def loop_command(self, ctx: commands.Context, mode: Optional[str] = None):
-        # ... (内容は変更なし)
         state = self._get_guild_state(ctx.guild.id)
         if mode is None: await ctx.send(self._get_message("loop_all").replace("キュー全体をループ再生します。",
                                                                               f"現在のループモード: {state.loop_mode.name.lower()}")); return
@@ -630,7 +617,6 @@ class MusicCog(commands.Cog, name="音楽"):
 
     @commands.command(name="remove", aliases=["rm"], help="キューから指定番号の曲削除。")
     async def remove_command(self, ctx: commands.Context, index: int):
-        # ... (内容は変更なし)
         state = self._get_guild_state(ctx.guild.id)
         if state.queue.empty(): await ctx.send(self._get_message("queue_empty")); return
         actual_index = index - 1
@@ -643,104 +629,149 @@ class MusicCog(commands.Cog, name="音楽"):
         state.queue = new_q;
         await self._send_msg(ctx.channel, "song_removed", title=removed_track.title)
 
-    # --- ここから音楽ヘルプスラッシュコマンド ---
     async def get_music_prefix_from_config(self) -> str:
-        """設定から音楽コマンド用のプレフィックスを取得するヘルパー"""
-        prefix = DEFAULT_PREFIX  # MusicCog内のDEFAULT_PREFIXを参照
+        prefix = DEFAULT_PREFIX
         if hasattr(self.bot, 'config') and self.bot.config:
-            # config.yamlのトップレベルの 'prefix' を参照 (Bot全体のプレフィックス)
             cfg_prefix = self.bot.config.get('prefix')
             if isinstance(cfg_prefix, str) and cfg_prefix:
                 prefix = cfg_prefix
         return prefix
 
-    @app_commands.command(name="music_help", description="音楽機能に関する詳細なヘルプを表示します。")
+    # --- ここから日英併記の音楽ヘルプスラッシュコマンド ---
+    @app_commands.command(name="music_help",description="音楽機能に関するヘルプを日英で表示します。/ Displays music help in JP & EN.")
     async def music_help_slash(self, interaction: discord.Interaction):
-        """音楽機能のコマンド一覧と各コマンドの詳細な使い方を説明するヘルプを表示します。"""
-        await interaction.response.defer(ephemeral=False)  # ephemeral=False
+        """音楽機能のコマンド一覧と各コマンドの詳細な使い方を日本語と英語で併記して表示します。"""
+        await interaction.response.defer(ephemeral=False)
 
         prefix = await self.get_music_prefix_from_config()
 
         embed = discord.Embed(
-            title="🎵 音楽機能 ヘルプ詳細",
-            description=f"音楽再生に関するコマンドの詳細な説明です。\nコマンドプレフィックス: `{prefix}`",
-            color=discord.Color.from_rgb(79, 194, 255)  # 音楽っぽい色
+            title="🎵 音楽機能 ヘルプ詳細 / Music Feature - Detailed Help",
+            description=(
+                f"音楽再生に関するコマンドの詳細な説明です。\n"
+                f"Here is a detailed explanation of commands related to music playback.\n\n"
+                f"コマンドプレフィックス / Command Prefix: `{prefix}`"
+            ),
+            color=discord.Color.from_rgb(79, 194, 255)
         )
-        # サムネイルを設定したい場合
-        # music_icon_url = self.music_config.get("help_icon_url", "https://example.com/default_music_icon.png")
-        # embed.set_thumbnail(url=music_icon_url)
+        # Optional: Set a thumbnail for the music help
+        # embed.set_thumbnail(url="https://i.imgur.com/your-music-icon.png")
 
-        command_categories = {
-            "▶️ 再生コントロール": [
-                {"name": "play", "args": "<曲名またはURL>",
-                 "desc": "指定された曲を再生、またはキューに追加します。YouTube, SoundCloudなどのURLや検索語が使えます。"},
-                {"name": "pause", "args": "", "desc": "現在再生中の曲を一時停止します。"},
-                {"name": "resume", "args": "", "desc": "一時停止中の曲の再生を再開します。"},
-                {"name": "stop", "args": "", "desc": "再生を完全に停止し、キューをクリアします。"},
-                {"name": "skip", "args": "", "desc": "現在再生中の曲をスキップして次の曲を再生します。"},
-                {"name": "volume", "args": "[音量(0-200)]", "desc": "再生音量を変更します。引数なしで現在の音量を表示。"},
+        # コマンドカテゴリと情報を日英で定義
+        # (nameはBot内部のコマンド名と一致させる)
+        command_info_bilingual = {
+            "▶️ 再生コントロール / Playback Control": [
+                {"name": "play", "args_ja": "<曲名またはURL>", "args_en": "<song name or URL>",
+                 "desc_ja": "指定された曲を再生、またはキューに追加します。YouTube, SoundCloudなどのURLや検索語が使えます。",
+                 "desc_en": "Plays the specified song or adds it to the queue. Supports URLs from YouTube, SoundCloud, etc., or search terms."},
+                {"name": "pause", "args_ja": "", "args_en": "",
+                 "desc_ja": "現在再生中の曲を一時停止します。",
+                 "desc_en": "Pauses the currently playing song."},
+                {"name": "resume", "args_ja": "", "args_en": "",
+                 "desc_ja": "一時停止中の曲の再生を再開します。",
+                 "desc_en": "Resumes playback of a paused song."},
+                {"name": "stop", "args_ja": "", "args_en": "",
+                 "desc_ja": "再生を完全に停止し、キューをクリアします。",
+                 "desc_en": "Completely stops playback and clears the queue."},
+                {"name": "skip", "args_ja": "", "args_en": "",
+                 "desc_ja": "現在再生中の曲をスキップして次の曲を再生します。",
+                 "desc_en": "Skips the currently playing song and plays the next one in the queue."},
+                {"name": "volume", "args_ja": "[音量(0-200)]", "args_en": "[level (0-200)]",
+                 "desc_ja": "再生音量を変更します。引数なしで現在の音量を表示。",
+                 "desc_en": "Changes the playback volume. Shows current volume if no argument is given."},
             ],
-            "順番待ちリスト (キュー)": [
-                {"name": "queue", "args": "[ページ番号]", "desc": "現在の再生キュー（順番待ちリスト）を表示します。"},
-                {"name": "nowplaying", "args": "", "desc": "現在再生中の曲の情報を表示します。"},
-                {"name": "shuffle", "args": "", "desc": "再生キューをシャッフル（ランダムな順番に並び替え）します。"},
-                {"name": "clear", "args": "", "desc": "再生キューをクリアします（再生中の曲は停止しません）。"},
-                {"name": "remove", "args": "<キューの番号>", "desc": "再生キューから指定した番号の曲を削除します。"},
-                {"name": "loop", "args": "[off | one | all]",
-                 "desc": "ループ再生モードを設定します (off: ループなし, one: 現在の曲, all: キュー全体)。引数なしで現在のモードを表示。"},
+            "💿 キュー管理 / Queue Management": [
+                {"name": "queue", "args_ja": "[ページ番号]", "args_en": "[page number]",
+                 "desc_ja": "現在の再生キュー（順番待ちリスト）を表示します。",
+                 "desc_en": "Displays the current song queue."},
+                {"name": "nowplaying", "args_ja": "", "args_en": "",
+                 "desc_ja": "現在再生中の曲の情報を表示します。",
+                 "desc_en": "Shows information about the currently playing song."},
+                {"name": "shuffle", "args_ja": "", "args_en": "",
+                 "desc_ja": "再生キューをシャッフル（ランダムな順番に並び替え）します。",
+                 "desc_en": "Shuffles the song queue into a random order."},
+                {"name": "clear", "args_ja": "", "args_en": "",
+                 "desc_ja": "再生キューをクリアします（再生中の曲は停止しません）。",
+                 "desc_en": "Clears the song queue (does not stop the current song)."},
+                {"name": "remove", "args_ja": "<キューの番号>", "args_en": "<queue number>",
+                 "desc_ja": "再生キューから指定した番号の曲を削除します。",
+                 "desc_en": "Removes a song from the queue by its number."},
+                {"name": "loop", "args_ja": "[off | one | all]", "args_en": "[off | one | all]",
+                 "desc_ja": "ループ再生モードを設定します (off: ループなし, one: 現在の曲, all: キュー全体)。引数なしで現在のモードを表示。",
+                 "desc_en": "Sets the loop mode (off: no loop, one: current song, all: entire queue). Shows current mode if no argument."},
             ],
-            "🔊 ボイスチャンネル": [
-                {"name": "join", "args": "[チャンネル名またはID]",
-                 "desc": "Botをあなたのいるボイスチャンネル、または指定したチャンネルに接続します。"},
-                {"name": "leave", "args": "", "desc": "Botをボイスチャンネルから切断します。"},
+            "🔊 ボイスチャンネル / Voice Channel": [
+                {"name": "join", "args_ja": "[チャンネル名またはID]", "args_en": "[channel name or ID]",
+                 "desc_ja": "Botをあなたのいるボイスチャンネル、または指定したチャンネルに接続します。",
+                 "desc_en": "Connects the bot to your current voice channel or a specified channel."},
+                {"name": "leave", "args_ja": "", "args_en": "",
+                 "desc_ja": "Botをボイスチャンネルから切断します。",
+                 "desc_en": "Disconnects the bot from the voice channel."},
             ]
         }
 
-        cog_commands = self.get_commands()  # このCog (MusicCog) のコマンドを取得
+        cog_commands = self.get_commands()
         cog_commands_dict = {cmd.name: cmd for cmd in cog_commands}
-        for cmd in cog_commands:
+        for cmd in cog_commands:  # エイリアスもコマンドオブジェクトにマッピング
             for alias in cmd.aliases:
-                cog_commands_dict[alias] = cmd  # エイリアスも参照可能にする
+                cog_commands_dict[alias] = cmd
 
-        for category_title, commands_in_category in command_categories.items():
+        for category_title_bilingual, commands_in_category in command_info_bilingual.items():
             field_value = ""
             for cmd_info in commands_in_category:
                 command = cog_commands_dict.get(cmd_info["name"])  # Cog内のコマンド辞書から取得
 
                 if command and not command.hidden:
-                    usage = f"`{prefix}{command.name}"  # 主コマンド名を使用
-                    if cmd_info["args"]:
-                        usage += f" {cmd_info['args']}"
-                    usage += "`"
+                    # 使い方 (日本語と英語の引数を結合するが、コマンド名は1つ)
+                    usage_ja = f"`{prefix}{command.name}"
+                    if cmd_info["args_ja"]: usage_ja += f" {cmd_info['args_ja']}"
+                    usage_ja += "`"
 
-                    description_line = f"{cmd_info['desc']}"
+                    usage_en = f"`{prefix}{command.name}"
+                    if cmd_info["args_en"]: usage_en += f" {cmd_info['args_en']}"
+                    usage_en += "`"
 
-                    aliases_line = ""
+                    # 説明 (日本語と英語)
+                    description_line_ja = f"{cmd_info['desc_ja']}"
+                    description_line_en = f"{cmd_info['desc_en']}"
+
+                    aliases_line_ja = ""
+                    aliases_line_en = ""
                     if command.aliases:
-                        aliases_line = f"\n   *別名: `{', '.join(command.aliases)}`*"
+                        aliases_str = f"`{', '.join(command.aliases)}`"
+                        aliases_line_ja = f"\n   *別名: {aliases_str}*"
+                        aliases_line_en = f"\n   *Aliases: {aliases_str}*"
 
-                    field_value += f"**{usage}**\n   {description_line}{aliases_line}\n\n"
+                    # 日本語セクションと英語セクションを構成
+                    entry_ja = f"**{usage_ja}**\n   {description_line_ja}{aliases_line_ja}"
+                    entry_en = f"**{usage_en}**\n   {description_line_en}{aliases_line_en}"
+
+                    field_value += f"{entry_ja}\n\n{entry_en}\n\n---\n\n"  # セパレータを追加
 
             if field_value:
+                field_value = field_value.rsplit("\n\n---\n\n", 1)[0]  # 最後のセパレータを削除
                 # フィールド値が長すぎる場合の対処
                 if len(field_value) > 1024:
-                    # 複数のフィールドに分割するロジック (より複雑になるため、ここでは単純な切り捨て)
-                    # 理想的には、1024文字を超えないように複数のフィールドに分割する
                     chunks = [field_value[i:i + 1020] for i in range(0, len(field_value), 1020)]
                     for i, chunk in enumerate(chunks):
-                        title = f"**{category_title} (続き {i + 1})**" if i > 0 else f"**{category_title}**"
+                        title = f"**{category_title_bilingual} (続き / Cont. {i + 1})**" if i > 0 else f"**{category_title_bilingual}**"
                         embed.add_field(name=title, value=chunk.strip() + ("..." if len(chunk) == 1020 else ""),
                                         inline=False)
                 else:
-                    embed.add_field(name=f"**{category_title}**", value=field_value.strip(), inline=False)
+                    embed.add_field(name=f"**{category_title_bilingual}**", value=field_value.strip(), inline=False)
 
         if not embed.fields:
-            embed.description += "\n利用可能な音楽コマンドが見つかりませんでした。"
+            desc_ja_no_cmd = "\n利用可能な音楽コマンドが見つかりませんでした。"
+            desc_en_no_cmd = "\nNo available music commands found."
+            embed.description += f"{desc_ja_no_cmd}\n{desc_en_no_cmd}"
 
-        embed.set_footer(text="<> は必須引数、[] は任意引数を表します。")
+        footer_ja = "<> は必須引数、[] は任意引数を表します。"
+        footer_en = "<> denotes a required argument, [] denotes an optional argument."
+        embed.set_footer(text=f"{footer_ja}\n{footer_en}")
 
         await interaction.followup.send(embed=embed, ephemeral=False)
-        logger.info(f"/music_help が実行されました。 (User: {interaction.user.id}, Guild: {interaction.guild_id})")
+        logger.info(
+            f"/music_help_bilingual が実行されました。 (User: {interaction.user.id}, Guild: {interaction.guild_id})")
 
 
 async def setup(bot: commands.Bot):
