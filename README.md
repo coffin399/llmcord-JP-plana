@@ -3,7 +3,7 @@
 </h1>
 
 ## 面倒な人向けのBOT招待,24/7稼働 / Invite the bot. Available 24/7 :
-### [ここをクリックでBOTをサーバーに入れられます！ / Click here to invite the BOT ](https://discord.com/api/oauth2/authorize?client_id=1031673203774464160&permissions=412317273088&scope=bot)
+### [ここをクリックでBOTをサーバーに入れられます！ / Click here to invite the BOT ](https://discord.com/oauth2/authorize?client_id=1031673203774464160&permissions=551906765824&scope=bot)
 
 <h3 align="center"><i>
   プラナちゃんとおしゃべりしよう！
