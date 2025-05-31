@@ -7,6 +7,13 @@ allowed_channel_ids: [] # このボットが反応するチャンネルIDのリ�
 allowed_role_ids: []  # このボットのコマンドを使用できるロールIDのリスト (空の場合は全ユーザー)
 admin_user_ids: []    # ボットの管理者ユーザーIDのリスト (特別なコマンド用)
 
+# slash command settings
+plana_repository_url: "https://github.com/coffin399/llmcord-JP-plana/tree/advanced-bot-utilities" # 例
+support_server_invite_url: "https://discord.gg/SjuWKtwNAG" # 例
+bot_invite_url: "https://discord.com/oauth2/authorize?client_id=1031673203774464160&permissions=551906765824&scope=bot" # Botの招待URL (Permissions Calculatorなどで生成)
+generic_help_message: "これは汎用ヘルプメッセージです。\n各機能の詳細は `/help module:<機能名>` で確認できます"
+
+
 # LLM Cog Settings
 llm:
   max_text: 100000

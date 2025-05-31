@@ -21,7 +21,7 @@ logging.getLogger('httpx').setLevel(logging.WARNING)  # openaiが内部で使用
 COGS_DIRECTORY_NAME = "cogs"
 
 
-class Shittim(commands.Bot):
+class Shittim(commands.Bot): # Botクラス名を Shittim に変更 (以前は MyBot でした)
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.config = None  # Botインスタンスにconfigを持たせる
@@ -37,7 +37,6 @@ class Shittim(commands.Bot):
                     logging.critical("config.yaml が空または無効です。ボットを起動できません。")
                     raise RuntimeError("config.yaml が空または無効です。")
             logging.info("config.yaml を正常に読み込みました。")
-            # デバッグ用に読み込んだconfigの内容（一部）を表示
             logging.debug(f"Loaded config keys: {list(self.config.keys())}")
             if 'llm' in self.config:
                 logging.debug(f"LLM config keys: {list(self.config['llm'].keys())}")
@@ -60,7 +59,7 @@ class Shittim(commands.Bot):
                         f"enabled_cogs 内に不正なCog名が含まれています: {cog_name} (型: {type(cog_name)})。スキップします。")
                     continue
 
-                cog_module_path = f"{COGS_DIRECTORY_NAME}.{cog_name.strip()}"  # 前後の空白を除去
+                cog_module_path = f"{COGS_DIRECTORY_NAME}.{cog_name.strip()}"
                 try:
                     await self.load_extension(cog_module_path)
                     logging.info(f"Cog '{cog_module_path}' のロードに成功しました。")
@@ -82,9 +81,31 @@ class Shittim(commands.Bot):
             logging.warning(
                 "config.yamlに 'enabled_cogs' が設定されていないか、リスト形式ではありません。Cogはロードされません。")
 
+        # 3. スラッシュコマンドの同期 (全てのCogロード後)
+        if self.config.get('sync_slash_commands', True):  # configで同期を制御できるようにする (任意)
+            try:
+                test_guild_id = self.config.get('test_guild_id')
+                if test_guild_id:
+                    # 特定のテストギルドにのみコマンドを同期 (反映が早い)
+                    guild_obj = discord.Object(id=int(test_guild_id))
+                    # self.tree.copy_global_to(guild=guild_obj) # グローバルコマンドをギルドにコピーする場合
+                    synced_commands = await self.tree.sync(guild=guild_obj)
+                    logging.info(f"{len(synced_commands)}個のスラッシュコマンドをテストギルド {test_guild_id} に同期しました。")
+                else:
+                    # グローバルにコマンドを同期 (反映に最大1時間かかることがある)
+                    synced_commands = await self.tree.sync()
+                    logging.info(f"{len(synced_commands)}個のグローバルスラッシュコマンドを同期しました。")
+            except discord.errors.Forbidden as e:
+                logging.error(f"スラッシュコマンドの同期に必要な権限がありません: {e}")
+            except Exception as e:
+                logging.error(f"スラッシュコマンドの同期中にエラーが発生しました: {e}", exc_info=True)
+        else:
+            logging.info("スラッシュコマンドの同期は設定で無効化されています。")
+
+
     async def on_ready(self):
         """Botが完全に準備完了したときに呼び出される"""
-        if not self.user:  # まれにuserがNoneのことがある
+        if not self.user:
             logging.error("on_ready: self.user が None です。処理をスキップします。")
             return
 
@@ -96,16 +117,15 @@ class Shittim(commands.Bot):
             return
 
         # Botのステータスメッセージ設定
-        status_template = self.config.get('status_message', "オンライン | {prefix}help")  # configから取得
-        bot_prefix_for_status = self.config.get('prefix', '!!')  # configからプレフィックス取得
+        status_template = self.config.get('status_message', "オンライン | {prefix}help")
+        bot_prefix_for_status = self.config.get('prefix', '!!')
 
-        # status_message 内のプレースホルダを置換
         status_text = status_template.format(
             prefix=bot_prefix_for_status,
-            guild_count=len(self.guilds)  # 参加サーバー数を動的に取得
+            guild_count=len(self.guilds)
         )
 
-        activity_type_str = self.config.get('status_activity_type', 'streaming').lower()
+        activity_type_str = self.config.get('status_activity_type', 'streaming').lower() # デフォルトをstreamingに変更
         activity_type_map = {
             'playing': discord.ActivityType.playing,
             'streaming': discord.ActivityType.streaming,
@@ -113,13 +133,12 @@ class Shittim(commands.Bot):
             'watching': discord.ActivityType.watching,
             'competing': discord.ActivityType.competing,
         }
-        selected_activity_type = activity_type_map.get(activity_type_str, discord.ActivityType.listening)
+        selected_activity_type = activity_type_map.get(activity_type_str, discord.ActivityType.streaming) # デフォルトをstreamingに変更
 
         activity = discord.Activity(type=selected_activity_type, name=status_text)
 
-        # ストリーミングの場合のURL (オプション)
         if selected_activity_type == discord.ActivityType.streaming:
-            stream_url = self.config.get('status_stream_url', 'https://www.twitch.tv/discord')  # 例
+            stream_url = self.config.get('status_stream_url', 'https://www.twitch.tv/discord') # 適切なURLに変更してください
             activity = discord.Streaming(name=status_text, url=stream_url)
 
         try:
@@ -131,31 +150,29 @@ class Shittim(commands.Bot):
     async def on_command_error(self, ctx: commands.Context, error: commands.CommandError):
         """コマンド処理中にエラーが発生した際のグローバルエラーハンドラ"""
         if isinstance(error, commands.CommandNotFound):
-            # logger.debug(f"コマンドが見つかりません: {ctx.invoked_with}") # 頻繁なのでデバッグレベル
-            return  # 不明なコマンドは無視するか、ユーザーに通知
+            return
         elif isinstance(error, commands.MissingRequiredArgument):
             await ctx.send(
                 f"引数が不足しています: `{error.param.name}`\n`{ctx.prefix}{ctx.command.qualified_name} {ctx.command.signature}`")
         elif isinstance(error, commands.BadArgument):
             await ctx.send(
                 f"引数の型が正しくありません。\n`{ctx.prefix}{ctx.command.qualified_name} {ctx.command.signature}`")
-        elif isinstance(error, commands.CheckFailure):  # has_permissions などのチェック失敗
+        elif isinstance(error, commands.CheckFailure):
             await ctx.send("このコマンドを実行する権限がありません。")
         elif isinstance(error, commands.CommandOnCooldown):
             await ctx.send(f"このコマンドはクールダウン中です。あと {error.retry_after:.2f} 秒お待ちください。")
-        elif isinstance(error, commands.ExtensionError):  # Cog関連のエラー
+        elif isinstance(error, commands.ExtensionError):
             logger.error(
                 f"Cog関連のエラーが発生しました ({ctx.command.cog_name if ctx.command else 'UnknownCog'}): {error}",
                 exc_info=error)
             await ctx.send("コマンドの処理中にCogエラーが発生しました。管理者に報告してください。")
         else:
-            # その他の予期しないエラー
             logger.error(
                 f"コマンド '{ctx.command.qualified_name if ctx.command else ctx.invoked_with}' の実行中に予期しないエラーが発生しました:",
                 exc_info=error)
             try:
                 await ctx.send("コマンドの実行中に予期しないエラーが発生しました。しばらくしてから再試行してください。")
-            except discord.errors.Forbidden:  # メッセージ送信権限がない場合
+            except discord.errors.Forbidden:
                 logger.warning(f"エラーメッセージを送信できませんでした ({ctx.channel.id}): 権限不足")
 
 
@@ -178,8 +195,7 @@ if __name__ == "__main__":
         logging.critical(f"メイン実行: config.yaml の読み込み中に予期せぬエラー: {e_main_generic}。")
         exit(1)
 
-    # Botのプレフィックスとトークンを取得
-    bot_prefix_val = temp_config.get('prefix')  # getの第2引数でデフォルト値を指定できる
+    bot_prefix_val = temp_config.get('prefix')
     if not bot_prefix_val or not isinstance(bot_prefix_val, str):
         logging.warning(f"config.yamlの 'prefix' が無効です。デフォルト値 '!!' を使用します。")
         bot_prefix_val = '!!'
@@ -189,24 +205,18 @@ if __name__ == "__main__":
         logging.critical("config.yamlにbot_tokenが設定されていないか、無効な形式です。ボットを起動できません。")
         exit(1)
 
-    # --- Intentsの設定 ---
     intents = discord.Intents.default()
     intents.message_content = True
     intents.voice_states = True
-    # intents.members = True # 必要に応じて
-    # intents.presences = True # 必要に応じて
 
-    # --- Botインスタンスの作成 ---
-    # command_prefix には callable, str, list[str], tuple[str] などが指定可能
     allowed_mentions = discord.AllowedMentions(everyone=False, users=True, roles=False, replied_user=True)
     bot_instance = Shittim(
         command_prefix=commands.when_mentioned_or(bot_prefix_val),
         intents=intents,
-        help_command=None,  # デフォルトのヘルプコマンドを無効化 (Cogで独自に実装するため)
-        allowed_mentions=allowed_mentions  # 全体メンションを抑制
+        help_command=None,
+        allowed_mentions=allowed_mentions
     )
 
-    # --- Botの実行 ---
     try:
         bot_instance.run(bot_token_val)
     except RuntimeError as e_run:
