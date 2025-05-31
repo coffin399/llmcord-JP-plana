@@ -98,7 +98,7 @@ llm:
   max_tool_iterations: 3 # ツール呼び出しの最大反復回数
 
   search_agent: # SearchAgent用の設定
-    model: "gemini-1.0-pro" # Google Search (AIAgent) が使用するモデル (例: gemini-1.0-pro, gemini-1.5-flash など)
+    model: "gemini-2.5-flash-preview-05-20" # Google Search (AIAgent) が使用するモデル (例: gemini-1.0-pro, gemini-1.5-flash など)
     api_key: YOUR_GOOGLE_AI_STUDIO_API_KEY_HERE # Google AI Studio (Gemini) のAPIキー
     format_control: "The research should be comprehensive and high detail and the information should be presented in a formal report format; the report should be in English, queries too"
 
