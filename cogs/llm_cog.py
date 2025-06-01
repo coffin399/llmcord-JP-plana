@@ -1,15 +1,14 @@
 import discord
 from discord.ext import commands
-from discord import app_commands  # スラッシュコマンド用にインポート
+from discord import app_commands
 import yaml
-import openai  # OpenAIライブラリを複数のプロバイダーで使用
+import openai
 import json
 import logging
 import asyncio
-import io  # 画像をバイトとして扱うために追加
-import base64  # 画像をBase64エンコードするために追加 (モデルやAPIによっては必要)
+import io
+import base64
 
-# search_agent.py から SearchAgent をインポート
 try:
     from plugins.search_agent import SearchAgent
 except ImportError:
@@ -18,128 +17,91 @@ except ImportError:
     SearchAgent = None
 
 logger = logging.getLogger(__name__)
-
-# サポートする画像形式 (小文字)
-SUPPORTED_IMAGE_EXTENSIONS = ('.png', '.jpeg', '.jpg', '.gif', '.webp')  # gif, webpはモデルによる
+SUPPORTED_IMAGE_EXTENSIONS = ('.png', '.jpeg', '.jpg', '.gif', '.webp')
 
 
 class LLMCog(commands.Cog, name="LLM"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-
         logger.debug(f"LLMCog __init__: self.bot.config のタイプ: {type(self.bot.config)}")
-        if isinstance(self.bot.config, dict):
-            logger.debug(f"LLMCog __init__: self.bot.config のキー: {list(self.bot.config.keys())}")
-
+        if isinstance(self.bot.config, dict): logger.debug(
+            f"LLMCog __init__: self.bot.config のキー: {list(self.bot.config.keys())}")
         if not hasattr(self.bot, 'config') or not self.bot.config:
-            logger.error("LLMCog: Botインスタンスに 'config' 属性が見つからないか空です。設定を読み込めません。")
+            logger.error("LLMCog: Botインスタンスに 'config' 属性がないか空です。設定を読み込めません。")
             raise commands.ExtensionFailed(self.qualified_name, "Botのconfigがロードされていません。")
-
-        self.config = self.bot.config  # Bot全体のconfig
-
+        self.config = self.bot.config
         if 'llm' not in self.config:
             logger.error("config.yamlに 'llm' セクションが見つかりません。LLM Cogを開始できません。")
             raise commands.ExtensionFailed(self.qualified_name, "'llm' 設定セクションがありません。")
-
-        self.llm_config = self.config['llm']  # LLM固有の設定
-
+        self.llm_config = self.config['llm']
         if not isinstance(self.llm_config, dict):
             logger.error(
                 f"config.yamlの 'llm' セクションが辞書ではありません (タイプ: {type(self.llm_config)})。LLM Cogを開始できません。")
             raise commands.ExtensionFailed(self.qualified_name, "'llm' 設定セクションが辞書形式ではありません。")
-
-        if hasattr(self.bot, 'cfg'):
-            logger.warning(
-                "LLMCog: self.bot.cfg は既に存在します。上書きします。複数のCogがこの属性を使用している場合、問題が発生する可能性があります。")
+        if hasattr(self.bot, 'cfg'): logger.warning("LLMCog: self.bot.cfg は既に存在します。上書きします。")
         self.bot.cfg = self.llm_config
-
         self.chat_histories = {}
-
         self.main_llm_client = None
         main_model_str = self.llm_config.get('model')
-        if main_model_str:
-            self.main_llm_client = self._initialize_llm_client(
-                main_model_str,
-                provider_config_section='providers'
-            )
-        if not self.main_llm_client:
-            logger.error("メインLLMクライアントの初期化に失敗しました。主要機能が無効になります。")
-
+        if main_model_str: self.main_llm_client = self._initialize_llm_client(main_model_str,
+                                                                              provider_config_section='providers')
+        if not self.main_llm_client: logger.error(
+            "メインLLMクライアントの初期化に失敗しました。主要機能が無効になります。")
         self.search_agent = None
         if 'search' in self.llm_config.get('active_tools', []) and SearchAgent:
             search_agent_settings = self.llm_config.get('search_agent', {})
             if not search_agent_settings.get('api_key') or not search_agent_settings.get('model'):
                 logger.error(
-                    "SearchAgentの設定 (llm.search_agent.api_key または llm.search_agent.model) が不足しています。検索機能は無効になります。")
+                    "SearchAgentの設定 (llm.search_agent.api_key または llm.search_agent.model) が不足。検索機能無効。")
             else:
                 try:
-                    self.search_agent = SearchAgent(self.bot)
-                    logger.info("SearchAgentが正常に初期化されました。")
+                    self.search_agent = SearchAgent(self.bot); logger.info("SearchAgentが正常に初期化されました。")
                 except Exception as e:
-                    logger.error(f"SearchAgentの初期化に失敗しました: {e}", exc_info=True)
-                    self.search_agent = None
+                    logger.error(f"SearchAgentの初期化失敗: {e}", exc_info=True); self.search_agent = None
         elif not SearchAgent:
-            logger.info("SearchAgentクラスがインポートできなかったため、検索機能は無効です。")
+            logger.info("SearchAgentクラスインポート不可。検索機能無効。")
         else:
-            logger.info("llm_configのactive_toolsに'search'が含まれていないため、SearchAgentは初期化されません。")
-
-        if not self.llm_config.get('system_prompt'):
-            logger.warning("system_prompt が llm_config にありません。LLMが期待通りに動作しない可能性があります。")
+            logger.info("llm_configのactive_toolsに'search'未指定。SearchAgent初期化せず。")
+        if not self.llm_config.get('system_prompt'): logger.warning("system_prompt が llm_config になし。")
 
     def _initialize_llm_client(self, model_string: str, provider_config_section: str, api_key_override: str = None):
         try:
-            if '/' not in model_string:
-                logger.error(
-                    f"無効なモデル形式: '{model_string}'。'プロバイダー名/モデル名' の形式である必要があります。")
-                return None
+            if '/' not in model_string: logger.error(
+                f"無効なモデル形式: '{model_string}'。'プロバイダー名/モデル名' の形式必須。"); return None
             provider_name, model_name = model_string.split('/', 1)
-
-            providers_settings = self.llm_config.get(provider_config_section, {})
+            providers_settings = self.llm_config.get(provider_config_section, {});
             provider_specific_config = providers_settings.get(provider_name)
-
-            if not provider_specific_config:
-                logger.error(
-                    f"LLMプロバイダー '{provider_name}' の設定が llm_config.{provider_config_section} に見つかりません。")
-                return None
-
-            base_url = provider_specific_config.get('base_url')
+            if not provider_specific_config: logger.error(
+                f"LLMプロバイダー '{provider_name}' 設定が llm_config.{provider_config_section} になし。"); return None
+            base_url = provider_specific_config.get('base_url');
             api_key_from_provider = provider_specific_config.get('api_key')
             actual_api_key = api_key_override if api_key_override is not None else api_key_from_provider
             is_local_provider = provider_name.lower() in ['ollama', 'oobabooga', 'jan', 'lmstudio']
-
             if not actual_api_key:
                 if is_local_provider:
-                    actual_api_key = "local-dummy-key"
-                    logger.info(f"ローカルプロバイダー '{provider_name}' モデル '{model_name}' にダミーAPIキーを使用。")
+                    actual_api_key = "local-dummy-key"; logger.info(
+                        f"ローカルプロバイダー '{provider_name}' モデル '{model_name}' にダミーAPIキー使用。")
                 else:
-                    logger.error(f"リモートプロバイダー '{provider_name}' モデル '{model_name}' のAPIキーがありません。")
-                    return None
-
+                    logger.error(
+                        f"リモートプロバイダー '{provider_name}' モデル '{model_name}' のAPIキーなし。"); return None
             if not base_url and provider_name.lower() != "openai":
-                logger.warning(
-                    f"プロバイダー '{provider_name}' のベースURLがありません。OpenAIデフォルトAPIベースを使用します（ライブラリが上書きしない場合）。")
+                logger.warning(f"プロバイダー '{provider_name}' ベースURLなし。OpenAIデフォルトAPIベース使用。")
             elif not base_url and provider_name.lower() == "openai":
-                if not (actual_api_key and (actual_api_key.startswith("sk-") or actual_api_key.startswith("gsk_"))):
-                    logger.warning(
-                        f"OpenAIプロバイダーでAPIキーの形式が標準的でないため、ベースURLがないと問題が発生する可能性があります。")
+                if not (actual_api_key and (
+                        actual_api_key.startswith("sk-") or actual_api_key.startswith("gsk_"))): logger.warning(
+                    f"OpenAIプロバイダーでAPIキー形式非標準。ベースURLなしで問題の可能性。")
             elif not base_url:
-                logger.error(f"プロバイダー '{provider_name}' のベースURLがありません。クライアントを初期化できません。")
-                return None
-
-            client = openai.AsyncOpenAI(
-                base_url=base_url,
-                api_key=actual_api_key,
-            )
+                logger.error(f"プロバイダー '{provider_name}' ベースURLなし。クライアント初期化不可。"); return None
+            client = openai.AsyncOpenAI(base_url=base_url, api_key=actual_api_key);
             client.model_name_for_api_calls = model_name
             logger.info(
-                f"プロバイダー '{provider_name}'、モデル '{model_name}' のLLMクライアント初期化完了 (Base URL: {base_url or 'ライブラリデフォルト'})")
+                f"プロバイダー '{provider_name}'、モデル '{model_name}' LLMクライアント初期化完了 (Base URL: {base_url or 'ライブラリデフォルト'})");
             return client
         except Exception as e:
-            logger.error(f"LLMクライアント '{model_string}' の初期化中にエラー: {e}", exc_info=True)
-            return None
+            logger.error(f"LLMクライアント '{model_string}' 初期化中エラー: {e}", exc_info=True); return None
 
     def get_tools_definition(self):
-        active_tool_names = self.llm_config.get('active_tools', [])
+        active_tool_names = self.llm_config.get('active_tools', []);
         if not active_tool_names: return None
         tools_definitions = []
         if 'search' in active_tool_names and self.search_agent and hasattr(self.search_agent, 'tool_spec'):
@@ -149,23 +111,19 @@ class LLMCog(commands.Cog, name="LLM"):
         return tools_definitions if tools_definitions else None
 
     async def _process_attachments(self, message: discord.Message) -> list:
-        """メッセージの添付ファイルを処理し、LLM用の画像入力リストを作成する"""
-        image_inputs = []
-        max_images = self.llm_config.get('max_images', 1)
+        image_inputs = [];
+        max_images = self.llm_config.get('max_images', 1);
         processed_image_count = 0
-
-        user_informed_about_max_images = False  # ユーザーへの通知を一度だけにするためのフラグ
-
+        user_informed_about_max_images = False
         for attachment in message.attachments:
             if processed_image_count >= max_images:
                 if not user_informed_about_max_images:
                     try:
-                        # ユーザーへの通知はサイレントではない方が良いかもしれない
                         await message.channel.send(
                             self.llm_config.get('error_msg', {}).get('msg_max_image_size',
                                                                      f"⚠️ 最大画像数は {max_images} 枚です。超過分は無視されます。").format(
                                 max_images=max_images),
-                            silent=False  # ユーザーへの警告は通知する
+                            silent=False
                         )
                         user_informed_about_max_images = True
                     except Exception as e_send:
@@ -173,17 +131,9 @@ class LLMCog(commands.Cog, name="LLM"):
                 logger.info(
                     f"最大画像数 ({max_images}枚) に達したため、残りの添付ファイル ({attachment.filename}) は無視します。")
                 break
-
-            if attachment.content_type and attachment.content_type.startswith('image/'):  # MIMEタイプでチェック
-                # サポートする拡張子もチェック (より厳密に)
+            if attachment.content_type and attachment.content_type.startswith('image/'):
                 if attachment.filename.lower().endswith(SUPPORTED_IMAGE_EXTENSIONS):
-                    image_inputs.append({
-                        "type": "image_url",
-                        "image_url": {
-                            "url": attachment.url,
-                            # "detail": "auto" # or "low", "high" for some models like GPT-4o
-                        }
-                    })
+                    image_inputs.append({"type": "image_url", "image_url": {"url": attachment.url}})
                     processed_image_count += 1
                     logger.info(f"添付画像をLLM入力に追加: {attachment.filename} (URL: {attachment.url})")
                 else:
@@ -197,6 +147,13 @@ class LLMCog(commands.Cog, name="LLM"):
     async def on_message(self, message: discord.Message):
         if message.author.bot: return
         if not self.bot.user.mentioned_in(message): return
+
+        # --- @everyone/@hereメンションのチェック ---
+        if message.mention_everyone:
+            logger.info(
+                f"メッセージ無視: @everyone/@hereメンションが含まれています (User: {message.author.id}, Channel: {message.channel.id})")
+            return
+        # --- ここまで追加 ---
 
         allowed_channel_ids = self.config.get('allowed_channel_ids', [])
         if allowed_channel_ids and message.channel.id not in allowed_channel_ids:
@@ -218,21 +175,20 @@ class LLMCog(commands.Cog, name="LLM"):
             user_text_content_for_llm = user_text_content_for_llm.replace(mention_pattern, '').strip()
         if user_text_content_for_llm: log_message_parts.append(f"テキスト: '{user_text_content_for_llm}'")
 
-        # 添付ファイルのログ出力は _process_attachments 内でも行われるが、ここでは概要を記録
         if message.attachments:
             attachment_summary = [f"{att.filename} ({att.content_type or 'unknown type'})" for att in
                                   message.attachments]
             log_message_parts.append(f"添付ファイル ({len(message.attachments)}件): {', '.join(attachment_summary)}")
-        logger.info("\n".join(log_message_parts))  # ユーザー入力全体のログ
+        logger.info("\n".join(log_message_parts))
 
         history_key = message.channel.id
         if history_key not in self.chat_histories: self.chat_histories[history_key] = []
 
-        image_contents_for_llm = await self._process_attachments(message)  # ここで詳細な画像処理ログが出る
+        image_contents_for_llm = await self._process_attachments(message)
 
         if not user_text_content_for_llm and not image_contents_for_llm:
             reply_text = self.llm_config.get('error_msg', {}).get('empty_mention_reply', "はい、ご用件は何でしょうか？")
-            await message.channel.send(reply_text, silent=False)  # ユーザーへの直接応答はサイレントにしない
+            await message.channel.send(reply_text, silent=False)
             return
 
         max_text_len = self.llm_config.get('max_text', 100000)
@@ -252,7 +208,6 @@ class LLMCog(commands.Cog, name="LLM"):
             {"type": "text", "text": user_text_content_for_llm})
         if image_contents_for_llm: user_input_content_parts.extend(image_contents_for_llm)
 
-        # contentが空リストになる場合 (テキストも有効な画像もない) は、上で弾かれているはずだが念のため
         if not user_input_content_parts:
             logger.warning("LLMに渡すcontentが空です。これは予期しない状況です。")
             await message.channel.send(
@@ -274,7 +229,7 @@ class LLMCog(commands.Cog, name="LLM"):
         messages_for_llm_api.extend(current_channel_history)
 
         try:
-            async with message.channel.typing():  # Typing... 表示
+            async with message.channel.typing():
                 current_llm_call_messages_api_format = messages_for_llm_api;
                 llm_reply_text_content = None
                 for i in range(self.llm_config.get('max_tool_iterations', 3)):
@@ -321,7 +276,7 @@ class LLMCog(commands.Cog, name="LLM"):
                     else:
                         llm_reply_text_content = response_message.content; break
                 if not llm_reply_text_content: llm_reply_text_content = self.llm_config.get('error_msg', {}).get(
-                    'tool_loop_timeout', "ツール処理複雑すぎ。")
+                    'tool_loop_timeout', "ツール処理複雑すぎ。←多分誰かのコードをLLMが学習してる")
 
             if llm_reply_text_content:
                 logger.info(
@@ -332,7 +287,7 @@ class LLMCog(commands.Cog, name="LLM"):
                     num_to_remove = len(self.chat_histories[history_key]) - max_hist_entries
                     self.chat_histories[history_key] = self.chat_histories[history_key][num_to_remove:]
                 for chunk in self._split_message(llm_reply_text_content):
-                    await message.channel.send(chunk, silent=False)  # ユーザーへの応答はサイレントにしない
+                    await message.channel.send(chunk, silent=False)
             else:
                 logger.warning("LLMが空の最終応答。")
                 await message.channel.send(self.llm_config.get('error_msg', {}).get('general_error', "AI空応答。"),
@@ -384,8 +339,8 @@ class LLMCog(commands.Cog, name="LLM"):
         return chunks if chunks else [""]
 
     @app_commands.command(name="llm_help", description="LLM (AI対話) 機能に関する詳細なヘルプを表示します。")
-    async def llm_help_slash(self, interaction: discord.Interaction):  # メソッド名を llm_help_slash に変更
-        await interaction.response.defer(ephemeral=False)  # ephemeral=False
+    async def llm_help_slash(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=False)
         embed = discord.Embed(title="💡 LLM (AI対話) 機能 ヘルプ",
                               description=f"{self.bot.user.name if self.bot.user else '当Bot'} のAI対話機能についての説明です。",
                               color=discord.Color.purple())
@@ -400,7 +355,6 @@ class LLMCog(commands.Cog, name="LLM"):
         max_hist = self.llm_config.get('max_messages', '未設定')
         max_text_val_help = self.llm_config.get('max_text', '未設定')
         max_text_str_help = f"{max_text_val_help:,}" if isinstance(max_text_val_help, int) else str(max_text_val_help)
-
         embed.add_field(
             name="現在のAI設定",
             value=f"• **使用モデル:** `{model_name}`\n"
@@ -426,10 +380,11 @@ class LLMCog(commands.Cog, name="LLM"):
             inline=False
         )
         embed.set_footer(text="現在開発中です。仕様が変更される可能性があります。")
-        await interaction.followup.send(embed=embed, ephemeral=False)  # ephemeral=False
+        await interaction.followup.send(embed=embed, ephemeral=False)
         logger.info(f"/llm_help が実行されました。 (User: {interaction.user.id}, Guild: {interaction.guild_id})")
 
-    @app_commands.command(name="llm_help_en", description="Displays detailed help for LLM (AI Chat) features in English.")
+    @app_commands.command(name="llm_help_en",
+                          description="Displays detailed help for LLM (AI Chat) features in English.")
     async def llm_help_en_slash(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=False)
         bot_name = self.bot.user.name if self.bot.user else "This Bot"
@@ -464,14 +419,13 @@ class LLMCog(commands.Cog, name="LLM"):
         embed.add_field(
             name="Tips & Important Notes",
             value="• The AI does not always provide correct information. Always verify important information yourself.\n"
-                  "• Conversations are remembered separately for each channel.\n"  # "obstáculosy" -> "separately"
+                  "• Conversations are remembered separately for each channel.\n"
                   "• Excessively long conversations or overly complex instructions can confuse the AI.\n"
                   "• Do not send personal or sensitive information.",
             inline=False
         )
-        embed.set_footer(
-            text="This feature is under development and specifications may change.")
-        await interaction.followup.send(embed=embed, ephemeral=False)  # ephemeral=False
+        embed.set_footer(text="This feature is under development and specifications may change.")
+        await interaction.followup.send(embed=embed, ephemeral=False)
         logger.info(f"/llm_help_en was executed. (User: {interaction.user.id}, Guild: {interaction.guild_id})")
 
 
