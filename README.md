@@ -6,7 +6,7 @@
   プラナちゃんとおしゃべりしよう！
 </i></h3>
 
-<p align="center">
+<p>
   <img src="https://cdn.discordapp.com/attachments/1231490510955483167/1378688090734071848/image.png?ex=683d82d7&is=683c3157&hm=b01ce381f990f092482c205271012c3919bd835971336868fed8733d5a8ee26f&" alt="Plana Bot Icon" width="200">
 </p>
 
@@ -17,20 +17,12 @@ Plana-Cord-JP (commonly known as PLANA) is a multi-functional Discord bot develo
 ## 🚀 クイックスタート / Quick Start
 
 ### 🤖 Botをあなたのサーバーに招待 / Invite Plana to Your Server:
-*   [ここをクリックしてプラナをサーバーに招待できます / Click here to invite Plana to your server](YOUR_BOT_INVITE_LINK_HERE) 
-    *   _(このリンクはBot管理者によって `config.yaml` の `bot_invite_url` に設定される必要があります。)_
-    *   _(This link needs to be set by the bot administrator in `config.yaml` under `bot_invite_url`.)_
+*   [ここをクリックしてプラナをサーバーに招待できます / Click here to invite Plana to your server](YOUR_BOT_INVITE_LINK_HERE)
 
 ### 💬 サポートサーバー / Support Server:
-*   [サポートサーバーに参加する / Join the Support Server](https://discord.gg/SjuWKtwNAG) 
-    *   _(このリンクも `config.yaml` の `support_server_invite_url` で設定可能です。)_
-    *   _(This link can also be configured in `config.yaml` under `support_server_invite_url`.)_
+*   [サポートサーバーに参加する / Join the Support Server](https://discord.gg/SjuWKtwNAG)
 
 ## ✨ 主な機能 / Main Features
-
-Planaは、あなたのDiscord体験をより豊かに、より便利にするための多彩な機能を提供します。
-Plana offers a variety of features to make your Discord experience richer and more convenient.
-
 ### 🗣️ AIとの対話 (LLM) / AI Chat (LLM)
 Botにメンション (`@Plana`) を付けて話しかけることで、AIとの会話が始まります。
 Start a conversation with the AI by mentioning the bot (`@Plana`).
