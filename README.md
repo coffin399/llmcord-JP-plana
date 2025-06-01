@@ -1,5 +1,5 @@
 <h1 align="center">
-  Plana-Cord-JP (プラナ)
+  Plana-Cord-JP
 </h1>
 
 <h3 align="center"><i>
@@ -10,22 +10,22 @@
   <img src="https://cdn.discordapp.com/attachments/1231490510955483167/1378688090734071848/image.png?ex=683d82d7&is=683c3157&hm=b01ce381f990f092482c205271012c3919bd835971336868fed8733d5a8ee26f&" alt="Plana Bot Icon" width="200">
 </p>
 
-Plana-Cord-JP (通称: PLANA) は、[llmcord](https://github.com/approximatelabs/llmcord) を基盤として開発された多機能Discordボットです。大規模言語モデル (LLM) との対話、音楽再生、画像認識、便利なサーバーユーティリティ機能などを提供します。リモートホスト型やローカルホスト型など、ほぼすべてのLLMに対応しています。
+Plana-Cord-JP (通称: PLANA) は、[llmcord](https://github.com/jakobdylanc/llmcord) を基盤として開発された多機能Discordボットです。大規模言語モデル (LLM) との対話、音楽再生、画像認識、便利なサーバーユーティリティ機能などを提供します。リモートホスト型やローカルホスト型など、ほぼすべてのLLMに対応しています。
 
-Plana-Cord-JP (commonly known as PLANA) is a multi-functional Discord bot developed based on [llmcord](https://github.com/approximatelabs/llmcord). It offers features such as conversations with Large Language Models (LLMs), music playback, image recognition, and useful server utilities. It supports almost all LLMs, including remotely hosted and locally hosted ones.
+Plana-Cord-JP (commonly known as PLANA) is a multi-functional Discord bot developed based on [llmcord](https://github.com/jakobdylanc/llmcord). It offers features such as conversations with Large Language Models (LLMs), music playback, image recognition, and useful server utilities. It supports almost all LLMs, including remotely hosted and locally hosted ones.
 
 ## 🚀 クイックスタート / Quick Start
 
 ### 🤖 Botをあなたのサーバーに招待 / Invite Plana to Your Server:
-*   [ここをクリックしてプラナをサーバーに招待できます / Click here to invite Plana to your server](YOUR_BOT_INVITE_LINK_HERE)
+*   [ここをクリックしてプラナをサーバーに招待できます / Click here to invite PLANA to your server](https://discord.com/oauth2/authorize?client_id=1031673203774464160&permissions=551906765824&scope=bot)
 
 ### 💬 サポートサーバー / Support Server:
 *   [サポートサーバーに参加する / Join the Support Server](https://discord.gg/SjuWKtwNAG)
 
 ## ✨ 主な機能 / Main Features
 ### 🗣️ AIとの対話 (LLM) / AI Chat (LLM)
-Botにメンション (`@Plana`) を付けて話しかけることで、AIとの会話が始まります。
-Start a conversation with the AI by mentioning the bot (`@Plana`).
+Botにメンション (`@PLANA`) を付けて話しかけることで、AIとの会話が始まります。
+Start a conversation with the AI by mentioning the bot (`@PLANA`).
 
 *   **継続的な会話 / Continuous Conversations:** 返信を続けることで会話を展開できます。
     You can develop conversations by continuing to reply.
@@ -37,12 +37,6 @@ Start a conversation with the AI by mentioning the bot (`@Plana`).
     Reply to any message in the server while mentioning the bot to ask about its content.
 *   **自動メッセージ結合 / Automatic Message Grouping:** 同じユーザーによる連続メッセージは自動的にまとめて処理されます。
     Consecutive messages from the same user are automatically processed together.
-*   **スレッド対応 / Thread Support:** 任意の会話を簡単にスレッドに移行できます。
-    Easily move any conversation to a thread.
-*   **DMでの会話 / Direct Messages:** BotへのDMではメンションなしで会話が自動的に続きます。
-    Conversations continue automatically in DMs to the bot without needing mentions.
-*   **柔軟なLLM選択 / Flexible LLM Choice:** OpenAI, xAI, Mistral, Groq, OpenRouter APIや、Ollama, LM Studioなどのローカルモデルに対応。OpenAI互換APIも利用可能です。
-    Supports API platforms like OpenAI, xAI, Mistral, Groq, OpenRouter, and local models like Ollama, LM Studio. OpenAI-compatible APIs can also be used.
 *   **カスタマイズ可能なAIパーソナリティ / Customizable AI Personality:** システムプロンプトを編集することで、AIの性格や応答スタイルを変更できます。
     You can change the AI's personality and response style by editing the system prompt.
 *   **ウェブ検索機能 (Search Agent) / Web Search (Search Agent):** AIが必要と判断した場合、インターネットで情報を検索して応答に利用します (Google AI Studio APIキーが必要です)。
@@ -100,8 +94,8 @@ Provides useful slash commands.
 2.  **(初回起動時) `config.yaml` の生成 / (First time) Generate `config.yaml`:**
     `config.default.yaml` が存在する場合、初回の `python main.py` 実行時に `config.yaml` が自動的にコピー生成されます。
     If `config.default.yaml` exists, `config.yaml` will be automatically copied and generated on the first run of `python main.py`.
-    **必ず生成された `config.yaml` を開き、ボットトークン、APIキー、その他の必要な設定を編集してください。**
-    **Be sure to open the generated `config.yaml` and edit the bot token, API keys, and other necessary settings.**
+    **生成された `config.yaml` を開き、ボットトークン、APIキー、Search Agentキー、その他の必要な設定を編集してください。**
+    **Open the generated `config.yaml` and edit the bot token, API keys,Search Agent Key and other necessary settings.**
 
 3.  **`config.yaml` を設定します / Configure `config.yaml`:**
 
@@ -166,3 +160,8 @@ Provides useful slash commands.
     docker compose up --build -d 
     ```
     (初回以降は `--build` は不要 / `--build` is not needed after the first time)
+
+<p align="center">
+現在開発中です。仕様は変更される可能性があります。非他機能版はmainブランチを参照してください。
+Currently in development. Specifications subject to change. See the main branch for the version without this/these feature(s).
+</p>
