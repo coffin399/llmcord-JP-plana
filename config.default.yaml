@@ -2,7 +2,7 @@
 bot_token: YOUR_BOT_TOKEN_HERE # ここにボットトークンを入力してください
 client_id: YOUR_CLIENT_ID_HERE # 必要に応じて更新
 prefix: "!!" # Bot全体のコマンドプレフィックス
-status_message: "音楽再生機能追加♪ | {prefix}help {guild_count}サーバー" # {prefix} と {guild_count} をプレースホルダとして使用
+status_message: "/music_help 音楽再生機能追加♪"
 allowed_channel_ids: [] # このボットが反応するチャンネルIDのリスト (空の場合は全チャンネル)
 allowed_role_ids: []  # このボットのコマンドを使用できるロールIDのリスト (空の場合は全ユーザー)
 admin_user_ids: []    # ボットの管理者ユーザーIDのリスト (特別なコマンド用)
@@ -130,7 +130,7 @@ music:
   max_queue_size: 10000
   auto_leave_timeout: 60 # ユーザー不在時の自動退出までの秒数
   log_level: "INFO" # Music Cogのログレベル (DEBUG, INFO, WARNING, ERROR)
-  bot_activity_playing: "音楽再生中 | {prefix}help\nPlaying music | {prefix}help" # Botの再生中アクティビティ (日英)
+  bot_activity_playing: "/music_help 音楽再生機能追加♪"
   max_playlist_items: 10000 # プレイリストから一度に読み込む最大曲数
 
   # FFmpeg settings
@@ -150,8 +150,8 @@ music:
     not_connected_to_your_channel: ":warning: あなたが参加しているボイスチャンネルに接続していません。\n:warning: Not connected to your voice channel."
     must_be_in_same_channel: ":warning: ボットと同じボイスチャンネルにいる必要があります。\n:warning: You must be in the same voice channel as the bot."
 
-    now_playing: ":notes: 再生中: **{title}** (`{duration}`) - リクエスト: <@{requester_id}>\n:notes: Now Playing: **{title}** (`{duration}`) - Requested by: <@{requester_id}>"
-    added_to_queue: ":ballot_box_with_check: キューに追加しました: **{title}** (`{duration}`) - リクエスト: <@{requester_id}>\n:ballot_box_with_check: Added to queue: **{title}** (`{duration}`) - Requested by: <@{requester_id}>"
+    now_playing: ":notes: 再生中: **{title}** (`{duration}`) - リクエスト: **{requester_display_name}**\n:notes: Now Playing: **{title}** (`{duration}`) - Requested by: **{requester_display_name}**"
+    added_to_queue: ":ballot_box_with_check: キューに追加しました: **{title}** (`{duration}`) - リクエスト: **{requester_display_name}**\n:ballot_box_with_check: Added to queue: **{title}** (`{duration}`) - Requested by: **{requester_display_name}**"
     added_playlist_to_queue: ":ballot_box_with_check: プレイリストから **{count}** 曲をキューに追加しました。\n:ballot_box_with_check: Added **{count}** songs from the playlist to the queue."
 
     queue_empty: ":page_facing_up: キューは空です。\n:page_facing_up: The queue is empty."
