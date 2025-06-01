@@ -124,8 +124,25 @@ enabled_cogs:
 
 # Music Cog Settings
 
+# Music Cog Settings
 music:
-  # ... (他のmusic設定) ...
+  default_volume: 50 # デフォルト音量 (0-200 の入力だが、内部では 0.0-2.0 で扱う)
+  max_queue_size: 10000
+  auto_leave_timeout: 60 # ユーザー不在時の自動退出までの秒数
+  log_level: "INFO" # Music Cogのログレベル (DEBUG, INFO, WARNING, ERROR)
+  bot_activity_playing: "音楽再生中 | {prefix}help\nPlaying music | {prefix}help" # Botの再生中アクティビティ (日英)
+  max_playlist_items: 10000 # プレイリストから一度に読み込む最大曲数
+
+  # FFmpeg settings
+  ffmpeg_before_options: "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5"
+  ffmpeg_options: "-vn"
+
+  # Niconico account (オプション)
+  niconico:
+    email: "YOUR_NICONICO_EMAIL_HERE"
+    password: "YOUR_NICONICO_PASSWORD_HERE"
+
+  # Music Cog 用のメッセージテンプレート (日英併記)
   messages:
     join_voice_channel_first: ":warning: まずボイスチャンネルに参加してください。\n:warning: You need to be in a voice channel first."
     bot_not_in_voice_channel: ":warning: ボットがボイスチャンネルにいません。\n:warning: The bot is not in a voice channel."
@@ -139,9 +156,8 @@ music:
 
     queue_empty: ":page_facing_up: キューは空です。\n:page_facing_up: The queue is empty."
     queue_ended: ":information_source: キューの再生が終了しました。\n:information_source: Playback queue has ended."
-    # queue_title と queue_entry はEmbedで使われることが多いため、ここでは変更しないか、
-    # Embed生成側で日英の文字列を組み立てるようにします。
-    # もしテキストで表示するなら:
+    # queue_title, queue_entry はEmbedで使われる想定なので、日英併記はEmbed生成側で行う
+    # もしテキストで使うなら例:
     # queue_title: "現在のキュー ({count}曲) / Current Queue ({count} songs)"
     # queue_entry: "`{index}.` **{title}** (`{duration}`) - リク: <@{req_id}>\n`{index}.` **{title}** (`{duration}`) - Req: <@{req_id}>"
 
