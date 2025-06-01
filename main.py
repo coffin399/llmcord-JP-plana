@@ -15,8 +15,8 @@ logging.getLogger('google.ai').setLevel(logging.WARNING)
 logging.getLogger('httpx').setLevel(logging.WARNING)
 
 COGS_DIRECTORY_NAME = "cogs"
-CONFIG_FILE = 'config.yaml'  # 設定ファイル名を変数化
-DEFAULT_CONFIG_FILE = 'config.default.yaml'  # デフォルト設定ファイル名を変数化
+CONFIG_FILE = 'config.yaml'
+DEFAULT_CONFIG_FILE = 'config.default.yaml'
 
 
 class Shittim(commands.Bot):
@@ -27,7 +27,6 @@ class Shittim(commands.Bot):
 
     async def setup_hook(self):
         """Botの初期セットアップ（ログイン後、接続準備完了前）"""
-        # 1. config.yaml の存在確認と生成
         if not os.path.exists(CONFIG_FILE):
             if os.path.exists(DEFAULT_CONFIG_FILE):
                 try:
@@ -68,8 +67,6 @@ class Shittim(commands.Bot):
             logging.critical(f"{CONFIG_FILE} の読み込み中に予期せぬエラー: {e}", exc_info=True)
             raise RuntimeError(f"{CONFIG_FILE} の読み込み中に予期せぬエラー: {e}")
 
-        # 3. Cogのロード (config.yaml の enabled_cogs に基づいて)
-        # ... (Cogロード処理は変更なし) ...
         if self.config and 'enabled_cogs' in self.config and isinstance(self.config['enabled_cogs'], list):
             for cog_name in self.config['enabled_cogs']:
                 if not isinstance(cog_name, str):
@@ -99,8 +96,6 @@ class Shittim(commands.Bot):
             logging.warning(
                 "config.yamlに 'enabled_cogs' が設定されていないか、リスト形式ではありません。Cogはロードされません。")
 
-        # 4. スラッシュコマンドの同期 (全てのCogロード後)
-        # ... (スラッシュコマンド同期処理は変更なし) ...
         if self.config.get('sync_slash_commands', True):
             try:
                 test_guild_id = self.config.get('test_guild_id')
@@ -120,7 +115,6 @@ class Shittim(commands.Bot):
             logging.info("スラッシュコマンドの同期は設定で無効化されています。")
 
     async def on_ready(self):
-        # ... (on_ready の内容は変更なし) ...
         if not self.user:
             logging.error("on_ready: self.user が None です。処理をスキップします。")
             return
@@ -158,7 +152,6 @@ class Shittim(commands.Bot):
             logging.error(f"ステータスの設定中にエラーが発生しました: {e}", exc_info=True)
 
     async def on_command_error(self, ctx: commands.Context, error: commands.CommandError):
-        # ... (on_command_error の内容は変更なし) ...
         if isinstance(error, commands.CommandNotFound):
             return
         elif isinstance(error, commands.MissingRequiredArgument):
@@ -187,15 +180,6 @@ class Shittim(commands.Bot):
 
 
 if __name__ == "__main__":
-    # --- 起動前の準備 (config.yamlの読み込みは setup_hook に移動) ---
-    # temp_config は Botインスタンス作成に必要な最小限の情報取得に限定する
-    # (あるいは、Botインスタンス作成後に setup_hook で全て行う前提でも良い)
-
-    # Botの初期化に最低限必要な情報を config.yaml から直接読み込むのではなく、
-    # setup_hook での処理に任せるため、ここではダミーの値や固定値で初期化し、
-    # setup_hook で Bot の command_prefix などを再設定することも可能です。
-    # しかし、ここでは __main__ で一度 config を読んでトークンとプレフィックスを取得する形を維持します。
-
     initial_config = {}
     try:
         # config.yaml がなくても、デフォルトからコピーされることを期待してまず試行

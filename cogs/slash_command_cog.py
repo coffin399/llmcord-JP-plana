@@ -25,13 +25,10 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
                 "CRITICAL: 'bot_invite_url' がプレースホルダのままです。/invite コマンドは正しく機能しません。config.yamlを確認してください。")
 
         # config.yaml から日本語と英語の汎用ヘルプメッセージを取得
-        self.generic_help_message_text_ja = self.bot.config.get("generic_help_message_ja",
-                                                                "ヘルプメッセージが設定されていません。")
-        self.generic_help_message_text_en = self.bot.config.get("generic_help_message_en",
-                                                                "Help message is not configured.")
+        self.generic_help_message_text_ja = self.bot.config.get("generic_help_message_ja","ヘルプ")
+        self.generic_help_message_text_en = self.bot.config.get("generic_help_message_en","Help")
 
     async def get_prefix_from_config(self) -> str:
-        """設定からプレフィックスを取得するヘルパー"""
         prefix = "!!"  # デフォルト
         if hasattr(self.bot, 'config') and self.bot.config:
             cfg_prefix = self.bot.config.get('prefix')
@@ -246,9 +243,8 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
                 f"/invite が実行されましたが、招待URLがconfig.yamlに未設定またはプレースホルダです。 (User: {interaction.user.id})")
 
     @app_commands.command(name="help", description="Botのヘルプ情報を表示します。/ Displays bot help information.")
-    @app_commands.describe(
-        module="ヘルプを表示したい機能 (例: llm, music) / Feature to display help for (e.g., llm, music)")
-    async def help_slash_command(self, interaction: discord.Interaction, module: Optional[str] = None):
+    # @app_commands.describe(module=...) を削除
+    async def help_slash_command(self, interaction: discord.Interaction):  # module 引数を削除
         await interaction.response.defer(ephemeral=False)
 
         bot_name_ja = self.bot.user.name if self.bot.user else "当Bot"
@@ -256,58 +252,7 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
         bot_avatar_url = self.bot.user.avatar.url if self.bot.user and self.bot.user.avatar else None
         prefix = await self.get_prefix_from_config()
 
-        if module:
-            module_lower = module.lower()
-            embed_to_send = None
-            cog_name_map = {"llm": "LLM", "music": "音楽"}
-
-            if module_lower in cog_name_map:
-                target_cog_name = cog_name_map[module_lower]
-                cog_instance = self.bot.get_cog(target_cog_name)
-
-                bilingual_help_method_name = f"generate_bilingual_{module_lower}_help_embed"
-                if cog_instance and hasattr(cog_instance, bilingual_help_method_name) and callable(
-                        getattr(cog_instance, bilingual_help_method_name)):
-                    try:
-                        if module_lower == "music":
-                            embed_to_send = await getattr(cog_instance, bilingual_help_method_name)(interaction,
-                                                                                                    prefix)  # MusicCogはprefixも取る想定
-                        else:
-                            embed_to_send = await getattr(cog_instance, bilingual_help_method_name)(interaction)
-                    except Exception as e_help_gen:
-                        logger.error(f"{target_cog_name}のバイリンガルヘルプ生成中にエラー: {e_help_gen}",
-                                     exc_info=True)
-                        embed_to_send = discord.Embed(title="エラー / Error",
-                                                      description=f"{target_cog_name}のヘルプ生成中にエラーが発生しました。\nAn error occurred while generating help for {target_cog_name}.",
-                                                      color=discord.Color.red())
-
-                # フォールバック (各Cogの単一言語ヘルプコマンドへ誘導)
-                elif module_lower == "llm" and cog_instance and hasattr(cog_instance, 'llm_help_slash_command'):
-                    await interaction.followup.send(
-                        f"LLM機能の詳細ヘルプは `/llm_help` (日本語) または `/llm_help_en` (英語) コマンドで確認できます。",
-                        ephemeral=False);
-                    return
-                elif module_lower == "music" and cog_instance and hasattr(cog_instance, 'music_help_slash'):
-                    await interaction.followup.send(
-                        f"音楽機能の詳細ヘルプは `/music_help` (日本語) または `/music_help_en` (英語) コマンドで確認できます。",
-                        ephemeral=False);
-                    return
-
-                if embed_to_send:
-                    await interaction.followup.send(embed=embed_to_send, ephemeral=False)
-                else:
-                    await interaction.followup.send(
-                        f"{target_cog_name} 機能モジュールのヘルプ情報が見つかりませんでした。\nHelp information for the {target_cog_name} module was not found.",
-                        ephemeral=False)
-                return
-            else:
-                await interaction.followup.send(
-                    f"'{module}' という機能モジュールのヘルプは現在提供されていません。\n利用可能なモジュール: `llm`, `music`\n\n"
-                    f"Help for the '{module}' module is not currently available.\nAvailable modules: `llm`, `music`",
-                    ephemeral=False)
-                return
-
-        # 引数なしの場合: 全体ヘルプ (日英併記)
+        # module引数に関する分岐処理を削除し、常に全体ヘルプを表示
         embed = discord.Embed(
             title=f"{bot_name_ja} ヘルプ / {bot_name_en} Help",
             description=f"{self.generic_help_message_text_ja}\n\n{self.generic_help_message_text_en}",
@@ -316,12 +261,15 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
         if bot_avatar_url:
             embed.set_thumbnail(url=bot_avatar_url)
 
+        # 詳細ヘルプへの誘導 (日英併記)
+        # 各機能の専用ヘルプコマンドが存在することを前提とする
         desc_ja_detail = "より詳細な情報は、以下のコマンドで確認できます。"
         desc_en_detail = "For more detailed information, please check the following commands:"
-        llm_help_cmd_ja = "• **AI対話機能:** `/help module:llm` (または `/llm_help`)"
-        llm_help_cmd_en = "• **AI Chat (LLM):** `/help module:llm` (or `/llm_help`, `/llm_help_en`)"
-        music_help_cmd_ja = "• **音楽再生機能:** `/help module:music` (または `/music_help`)"
-        music_help_cmd_en = "• **Music Playback:** `/help module:music` (or `/music_help`, `/music_help_en`)"
+        llm_help_cmd_ja = "• **AI対話機能:** `/llm_help` (または `/llm_help_en`)"  # LLMCogが提供する想定
+        llm_help_cmd_en = "• **AI Chat (LLM):** `/llm_help` (or `/llm_help_en`)"
+        music_help_cmd_ja = "• **音楽再生機能:** `/music_help`"  # MusicCogが提供する想定
+        music_help_cmd_en = "• **Music Playback:** `/music_help` (or `/music_help_en`)"  # MusicCogが提供する想定
+
         prefix_info_ja = f"プレフィックスコマンドも利用可能です (現在のプレフィックス: `{prefix}` )。"
         prefix_info_en = f"(Prefix commands are also available. Current prefix: `{prefix}` )"
 
@@ -387,7 +335,6 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
             await interaction.followup.send(embed=embed, ephemeral=False)
 
         logger.info(f"/help (概要) が実行されました。 (User: {interaction.user.id})")
-
 
 async def setup(bot: commands.Bot):
     if not hasattr(bot, 'config') or not bot.config:

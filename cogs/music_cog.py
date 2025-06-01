@@ -117,7 +117,7 @@ class MusicCog(commands.Cog, name="音楽"):
 
     def _get_message(self, key: str, **kwargs) -> str:
         messages_dict = self.music_config.get('messages', {})
-        template = messages_dict.get(key, f"メッセージキー '{key}' が見つかりません。")
+        template = messages_dict.get(key, f"Queue")
         prefix_val = DEFAULT_PREFIX
         if hasattr(self.bot, 'command_prefix'):
             prefix = self.bot.command_prefix
@@ -303,7 +303,6 @@ class MusicCog(commands.Cog, name="音楽"):
             asyncio.create_task(self._play_next_song(guild_id))
 
     def _song_finished_callback(self, error: Optional[Exception], guild_id: int):
-        # ... (内容は変更なし) ...
         state = self._get_guild_state(guild_id)
         finished_track = state.current_track;
         state.is_playing = False
@@ -322,7 +321,6 @@ class MusicCog(commands.Cog, name="音楽"):
         asyncio.run_coroutine_threadsafe(coro, self.bot.loop)
 
     def _schedule_auto_leave(self, guild_id: int):
-        # ... (内容は変更なし) ...
         state = self._get_guild_state(guild_id)
         if state.auto_leave_task and not state.auto_leave_task.done(): state.auto_leave_task.cancel(); state.auto_leave_task = None
         if not state.is_playing and not state.is_paused and state.queue.empty() and not state.current_track:
@@ -338,7 +336,6 @@ class MusicCog(commands.Cog, name="音楽"):
                 logger.debug(f"ギルドID {guild_id}: VC未接続のため自動退出タイマー開始せず。")
 
     async def _auto_leave_coroutine(self, guild_id: int):
-        # ... (内容は変更なし) ...
         state = self._get_guild_state(guild_id)
         await asyncio.sleep(self.auto_leave_timeout)
         if state.voice_client and state.voice_client.is_connected() and \
@@ -356,7 +353,6 @@ class MusicCog(commands.Cog, name="音楽"):
             logger.info(f"ギルドID {guild_id}: 自動退出処理中に状態変化、退出中止。")
 
     async def _cleanup_guild_state(self, guild_id: int):
-        # ... (内容は変更なし) ...
         logger.debug(f"ギルドID {guild_id}: ギルド状態クリーンアップ。")
         if guild_id in self.guild_states:
             state = self.guild_states[guild_id]
@@ -379,7 +375,6 @@ class MusicCog(commands.Cog, name="音楽"):
 
     @commands.Cog.listener()
     async def on_ready(self):
-        # ... (内容は変更なし) ...
         logger.info(f"{self.bot.user.name} の MusicCog が正常にロードされました。")
         activity_template = self.music_config.get('bot_activity_playing', "音楽再生中 | {prefix}help")
         prefix = DEFAULT_PREFIX
@@ -396,7 +391,6 @@ class MusicCog(commands.Cog, name="音楽"):
     @commands.Cog.listener()
     async def on_voice_state_update(self, member: discord.Member, before: discord.VoiceState,
                                     after: discord.VoiceState):
-        # ... (内容は変更なし) ...
         if member.bot and member.id != self.bot.user.id: return
         guild_id = member.guild.id
         if guild_id not in self.guild_states: return
@@ -533,7 +527,6 @@ class MusicCog(commands.Cog, name="音楽"):
         if added_count == 0:
             pass
         elif len(tracks_to_add) > 1 and added_count > 0:
-            # プレイリスト追加メッセージでは個別のリクエスト者名は出さないことが多いので、ここでは変更なし
             await self._send_msg(ctx.channel, "added_playlist_to_queue", count=added_count)
         elif added_count == 1 and first_added_track_info:
             await self._send_msg(ctx.channel, "added_to_queue", **first_added_track_info)
@@ -543,7 +536,6 @@ class MusicCog(commands.Cog, name="音楽"):
 
     @commands.command(name="skip", aliases=["s", "next"], help="再生中の曲をスキップ。")
     async def skip_command(self, ctx: commands.Context):
-        # ... (内容は変更なし) ...
         state = self._get_guild_state(ctx.guild.id);
         vc = await self._ensure_voice(ctx, connect_if_not_in=False);
         if not vc: return
@@ -557,7 +549,6 @@ class MusicCog(commands.Cog, name="音楽"):
 
     @commands.command(name="stop", help="再生停止、キュークリア。")
     async def stop_command(self, ctx: commands.Context):
-        # ... (内容は変更なし) ...
         state = self._get_guild_state(ctx.guild.id);
         vc = await self._ensure_voice(ctx, connect_if_not_in=False);
         if not vc: return
@@ -579,7 +570,6 @@ class MusicCog(commands.Cog, name="音楽"):
 
     @commands.command(name="pause", help="再生を一時停止。")
     async def pause_command(self, ctx: commands.Context):
-        # ... (内容は変更なし) ...
         state = self._get_guild_state(ctx.guild.id);
         vc = await self._ensure_voice(ctx, connect_if_not_in=False);
         if not vc: return
@@ -592,7 +582,6 @@ class MusicCog(commands.Cog, name="音楽"):
 
     @commands.command(name="resume", aliases=["unpause"], help="一時停止中の再生を再開。")
     async def resume_command(self, ctx: commands.Context):
-        # ... (内容は変更なし) ...
         state = self._get_guild_state(ctx.guild.id);
         vc = await self._ensure_voice(ctx, connect_if_not_in=False);
         if not vc: return
@@ -604,7 +593,6 @@ class MusicCog(commands.Cog, name="音楽"):
 
     @commands.command(name="volume", aliases=["vol"], help="音量変更 (0-200)。引数なしで現在値表示。")
     async def volume_command(self, ctx: commands.Context, volume: Optional[int] = None):
-        # ... (内容は変更なし) ...
         state = self._get_guild_state(ctx.guild.id)
         if volume is None: current_vol_percent = int(state.volume * 100); await ctx.send(
             self._get_message("volume_set", volume=current_vol_percent).replace("設定しました",
@@ -622,14 +610,6 @@ class MusicCog(commands.Cog, name="音楽"):
         state.update_last_text_channel(ctx.channel.id)
         if state.queue.empty() and not state.current_track: await self._send_msg(ctx.channel, "queue_empty"); return
         items_per_page = 10
-
-        # --- requester_display_name の取得とEmbedタイトル (queue_title の {requester_display_name} は通常使わないが例として) ---
-        # guild = ctx.guild # 現在のギルド
-        # requester_display_name = "N/A" # デフォルト
-        # if state.current_track and state.current_track.requester_id:
-        #     member = guild.get_member(state.current_track.requester_id) if guild else None
-        #     requester_display_name = member.display_name if member else (await self.bot.fetch_user(state.current_track.requester_id)).display_name
-        # --- ここまで修正例 (実際にはキュー表示では不要なことが多い) ---
 
         embed = discord.Embed(
             title=self._get_message("queue_title", count=state.queue.qsize() + (1 if state.current_track else 0)),
@@ -684,10 +664,6 @@ class MusicCog(commands.Cog, name="音楽"):
                             track_in_q.requester_id); display_name_queued = user_q.display_name
                     except:
                         pass
-
-            # config.yamlの queue_entry に requester_display_name を使うように変更した場合
-            # description_lines.append(self._get_message("queue_entry", index=i, title=track_in_q.title, duration=format_duration(track_in_q.duration), requester_display_name=display_name_queued))
-            # そうでない場合は、ここで文字列を組み立てる
             description_lines.append(
                 f"`{i}.` **{track_in_q.title}** (`{format_duration(track_in_q.duration)}`) - リクエスト: **{display_name_queued}**")
 
@@ -701,7 +677,6 @@ class MusicCog(commands.Cog, name="音楽"):
 
     @commands.command(name="shuffle", aliases=["sh"], help="再生キューをシャッフル。")
     async def shuffle_command(self, ctx: commands.Context):
-        # ... (内容は変更なし) ...
         state = self._get_guild_state(ctx.guild.id);
         vc = await self._ensure_voice(ctx, connect_if_not_in=False);
         if not vc: return
@@ -726,7 +701,6 @@ class MusicCog(commands.Cog, name="音楽"):
         status_icon = ":arrow_forward:" if state.is_playing else (
             ":pause_button:" if state.is_paused else ":musical_note:")
 
-        # --- requester_display_name の取得 ---
         requester_display_name = "不明なユーザー (Unknown User)"
         if track.requester_id:
             guild = ctx.guild  # コマンドが実行されたギルド
