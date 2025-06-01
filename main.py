@@ -34,7 +34,7 @@ class Shittim(commands.Bot):
                     shutil.copyfile(DEFAULT_CONFIG_FILE, CONFIG_FILE)
                     logging.info(
                         f"{CONFIG_FILE} が見つからなかったため、{DEFAULT_CONFIG_FILE} をコピーして生成しました。")
-                    logging.warning(f"生成された {CONFIG_FILE} を確認し、特にボットトークンやAPIキーを設定してください。")
+                    logging.warning(f"生成された {CONFIG_FILE} を確認し、ボットトークンやAPIキーを設定してください。")
                 except Exception as e_copy:
                     logging.critical(
                         f"{DEFAULT_CONFIG_FILE} から {CONFIG_FILE} のコピー中にエラーが発生しました: {e_copy}",
