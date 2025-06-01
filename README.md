@@ -1,5 +1,5 @@
 <h1 align="center">
-  plana-cord-JP
+  Plana-Cord-JP (プラナ)
 </h1>
 
 <h3 align="center"><i>
@@ -7,101 +7,170 @@
 </i></h3>
 
 <p align="center">
-  <img src="https://cdn.discordapp.com/attachments/1231490510955483167/1378688090734071848/image.png?ex=683d82d7&is=683c3157&hm=b01ce381f990f092482c205271012c3919bd835971336868fed8733d5a8ee26f&" alt="">
+  <img src="https://cdn.discordapp.com/attachments/1231490510955483167/1378688090734071848/image.png?ex=683d82d7&is=683c3157&hm=b01ce381f990f092482c205271012c3919bd835971336868fed8733d5a8ee26f&" alt="Plana Bot Icon" width="200">
 </p>
 
-planacordは、llmcordを基盤として開発された、Discord内でLLM（大規模言語モデル）と直接会話が可能になるツールです。リモートホスト型やローカルホスト型など、ほぼすべてのLLMに対応しています。
+Plana-Cord-JP (通称: PLANA) は、[llmcord](https://github.com/approximatelabs/llmcord) を基盤として開発された多機能Discordボットです。大規模言語モデル (LLM) との対話、音楽再生、画像認識、便利なサーバーユーティリティ機能などを提供します。リモートホスト型やローカルホスト型など、ほぼすべてのLLMに対応しています。
 
-## 面倒な人向け(BOT招待):
-### [ここをクリックでBOTをサーバーに入れられます / Click here to invite the BOT ](https://discord.com/oauth2/authorize?client_id=1031673203774464160&permissions=551906765824&scope=bot)
-## サポートサーバーはこちら:
-### [サポートサーバーに入るにはこちら](https://discord.gg/SjuWKtwNAG)
-## 概要
+Plana-Cord-JP (commonly known as PLANA) is a multi-functional Discord bot developed based on [llmcord](https://github.com/approximatelabs/llmcord). It offers features such as conversations with Large Language Models (LLMs), music playback, image recognition, and useful server utilities. It supports almost all LLMs, including remotely hosted and locally hosted ones.
 
-### 返信型LLM BOT
-BOTにメンションを付けて話しかけることで会話が始まり、その後返信を続けることで会話を展開できます。
+## 🚀 クイックスタート / Quick Start
 
-次のようなことが可能です:
-- 自分の会話を続ける、または他の人の会話を引き継ぐ
-- 過去のメッセージに返信して会話を「巻き戻す」
-- サーバー内の任意のメッセージに返信しながらBOTにメンションを付けて、その内容について質問する
+### 🤖 Botをあなたのサーバーに招待 / Invite Plana to Your Server:
+*   [ここをクリックしてプラナをサーバーに招待できます / Click here to invite Plana to your server](YOUR_BOT_INVITE_LINK_HERE) 
+    *   _(このリンクはBot管理者によって `config.yaml` の `bot_invite_url` に設定される必要があります。)_
+    *   _(This link needs to be set by the bot administrator in `config.yaml` under `bot_invite_url`.)_
 
-さらに以下の特徴があります:
-- 同じユーザーによる連続メッセージは自動的にまとめて処理されます。最新のメッセージに返信するだけで、BOTはすべての内容を参照します。
-- 任意の会話を簡単に[スレッド](https://support.discord.com/hc/ja/articles/4403205878423-Threads-FAQ)に移行可能。任意のメッセージからスレッドを作成し、その中でBOTにメンションを付けて会話を続けられます。
-- BOTへのDMでは返信なしで会話が自動的に続きます。新しい会話を始めるには、BOTにメンションを付けます。任意の箇所から返信して続けることも可能です。
+### 💬 サポートサーバー / Support Server:
+*   [サポートサーバーに参加する / Join the Support Server](https://discord.gg/SjuWKtwNAG) 
+    *   _(このリンクも `config.yaml` の `support_server_invite_url` で設定可能です。)_
+    *   _(This link can also be configured in `config.yaml` under `support_server_invite_url`.)_
 
-### 任意のLLMを選択可能
-llmcordが対応しているAPIプラットフォームは以下の通りです:
-- [OpenAI API](https://platform.openai.com/docs/models)
-- [xAI API](https://docs.x.ai/docs#models) (**New!**)
-- [Mistral API](https://docs.mistral.ai/platform/endpoints)
-- [Groq API](https://console.groq.com/docs/models)
-- [OpenRouter API](https://openrouter.ai/docs/models)
+## ✨ 主な機能 / Main Features
 
-ローカルモデルの例:
-- [Ollama](https://ollama.com)
-- [oobabooga](https://github.com/oobabooga/text-generation-webui)
-- [Jan](https://jan.ai)
-- [LM Studio](https://lmstudio.ai)
+Planaは、あなたのDiscord体験をより豊かに、より便利にするための多彩な機能を提供します。
+Plana offers a variety of features to make your Discord experience richer and more convenient.
 
-また、OpenAI互換APIを任意のURLで利用することも可能です。
+### 🗣️ AIとの対話 (LLM) / AI Chat (LLM)
+Botにメンション (`@Plana`) を付けて話しかけることで、AIとの会話が始まります。
+Start a conversation with the AI by mentioning the bot (`@Plana`).
+
+*   **継続的な会話 / Continuous Conversations:** 返信を続けることで会話を展開できます。
+    You can develop conversations by continuing to reply.
+*   **画像認識 / Image Recognition:** メッセージと一緒に画像を添付すると、AIが画像の内容も理解しようとします (対応モデルの場合)。
+    Attach images with your message, and the AI will try to understand their content (for compatible models).
+*   **過去のメッセージへの応答 / Replying to Past Messages:** 過去のメッセージに返信して会話を「巻き戻す」ことができます。
+    You can "rewind" conversations by replying to past messages.
+*   **任意のメッセージへの言及 / Referencing Any Message:** サーバー内の任意のメッセージに返信しながらBotにメンションを付けて、その内容について質問できます。
+    Reply to any message in the server while mentioning the bot to ask about its content.
+*   **自動メッセージ結合 / Automatic Message Grouping:** 同じユーザーによる連続メッセージは自動的にまとめて処理されます。
+    Consecutive messages from the same user are automatically processed together.
+*   **スレッド対応 / Thread Support:** 任意の会話を簡単にスレッドに移行できます。
+    Easily move any conversation to a thread.
+*   **DMでの会話 / Direct Messages:** BotへのDMではメンションなしで会話が自動的に続きます。
+    Conversations continue automatically in DMs to the bot without needing mentions.
+*   **柔軟なLLM選択 / Flexible LLM Choice:** OpenAI, xAI, Mistral, Groq, OpenRouter APIや、Ollama, LM Studioなどのローカルモデルに対応。OpenAI互換APIも利用可能です。
+    Supports API platforms like OpenAI, xAI, Mistral, Groq, OpenRouter, and local models like Ollama, LM Studio. OpenAI-compatible APIs can also be used.
+*   **カスタマイズ可能なAIパーソナリティ / Customizable AI Personality:** システムプロンプトを編集することで、AIの性格や応答スタイルを変更できます。
+    You can change the AI's personality and response style by editing the system prompt.
+*   **ウェブ検索機能 (Search Agent) / Web Search (Search Agent):** AIが必要と判断した場合、インターネットで情報を検索して応答に利用します (Google AI Studio APIキーが必要です)。
+    If the AI deems it necessary, it will search the internet for information to use in its response (requires a Google AI Studio API key).
+
+### 🎶 音楽再生 / Music Playback
+ボイスチャンネルで音楽を楽しめます。
+Enjoy music in your voice channels.
+
+*   **再生とキューイング / Play & Queue:** 曲名、URL (YouTube, SoundCloudなど)、または検索クエリで音楽を再生・キューに追加。
+    Play or queue music by song name, URL (YouTube, SoundCloud, etc.), or search query.
+*   **再生コントロール / Playback Controls:** 一時停止、再開、停止、スキップ、音量調整。
+    Pause, resume, stop, skip, and adjust volume.
+*   **キュー管理 / Queue Management:** 現在のキューの表示、シャッフル、クリア、特定の曲の削除。
+    View, shuffle, clear the current queue, or remove specific songs.
+*   **ループ再生 / Loop Modes:** ループなし、現在の曲のループ、キュー全体ループの切り替え。
+    Toggle between no loop, looping the current song, or looping the entire queue.
+*   **自動退出 / Auto-Leave:** ボイスチャンネルに誰もいなくなると一定時間後に自動で退出します。
+    Automatically leaves the voice channel after a certain period if no one is present.
+
+### 🛠️ ユーティリティコマンド (スラッシュコマンド) / Utility Commands (Slash Commands)
+その他、スラッシュコマンドを提供します。
+Provides useful slash commands.
+
+*   `/help [module]`: Botのヘルプ情報を表示します。モジュール名 (llm, music) を指定すると詳細ヘルプを表示。
+    Displays help information for the bot. Specify a module name (llm, music) for detailed help.
+*   `/ping`: Botのレイテンシを表示します。
+    Shows the bot's current latency.
+*   `/serverinfo`: 現在のサーバー情報を表示します。
+    Displays information about the current server.
+*   `/userinfo [user]`: 指定ユーザーの情報を表示します。
+    Displays information about the specified user.
+*   `/avatar [user]`: 指定ユーザーのアバター画像を表示します。
+    Displays the avatar image of the specified user.
+*   `/invite`: Botをサーバーに招待するリンクを表示します。
+    Displays the link to invite the bot to your server.
+*   `/support`: サポートサーバーへの招待リンクを表示します。
+    Displays the invitation link to the support server.
+*   `/plana` & `/arona`: 関連リポジトリへのリンクを表示します。
+    Displays links to related repositories.
+
+### その他 / Other Features
+*   **テキストファイル添付対応 / Text File Attachment Support:** `.txt`, `.py`, `.c` などのテキストファイルをLLMが読み込めます。
+    LLM can read text files like `.txt`, `.py`, `.c`, etc.
+*   **完全非同期処理 / Fully Asynchronous Processing:**
+
+## ⚙️ インストールと設定 / Installation and Setup
+
+1.  **リポジトリをクローンします / Clone the repository:**
+    ```bash
+    git clone https://github.com/coffin399/llmcord-JP-plana
+    cd llmcord-JP-plana
+    ```
+
+2.  **(初回起動時) `config.yaml` の生成 / (First time) Generate `config.yaml`:**
+    `config.default.yaml` が存在する場合、初回の `python main.py` 実行時に `config.yaml` が自動的にコピー生成されます。
+    If `config.default.yaml` exists, `config.yaml` will be automatically copied and generated on the first run of `python main.py`.
+    **必ず生成された `config.yaml` を開き、ボットトークン、APIキー、その他の必要な設定を編集してください。**
+    **Be sure to open the generated `config.yaml` and edit the bot token, API keys, and other necessary settings.**
+
+3.  **`config.yaml` を設定します / Configure `config.yaml`:**
+
+    #### Discord 設定 / Discord Settings:
+
+    | 設定 (Setting)          | 説明 (Description)                                                                                                                                                              |
+    |-------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+    | **`bot_token`**         | **必須。**[Discord Developer Portal](https://discord.com/developers/applications) でBotを作成し、トークンを取得します。"MESSAGE CONTENT INTENT" を有効にしてください。<br>**Required.** Create a bot and get its token from the [Discord Developer Portal](https://discord.com/developers/applications). Enable the "MESSAGE CONTENT INTENT". |
+    | **`client_id`**         | BotのクライアントID。"OAuth2" タブで見つけられます。<br>The bot's client ID. Found in the "OAuth2" tab.                                                                                        |
+    | **`prefix`**            | プレフィックスコマンドの接頭辞 (例: `!!`)。<br>The prefix for prefix commands (e.g., `!!`).                                                                                                |
+    | **`status_message`**    | Botのカスタムステータスメッセージ。`{prefix}` と `{guild_count}` が使えます。最大128文字。<br>Custom status message for the bot. `{prefix}` and `{guild_count}` can be used. Max 128 characters. |
+    | **`allowed_channel_ids`** | Botが反応するチャンネルIDのリスト。空白で全チャンネル対応。<br>List of channel IDs where the bot will respond. Leave blank for all channels.                                                              |
+    | **`allowed_role_ids`**  | Botを使用できるロールIDのリスト。空白で全員利用可。指定するとDMでの利用不可。<br>List of role IDsurethane that can use the bot. Leave blank for everyone. If specified, DM usage is disabled. |
+    | **`admin_user_ids`**    | Bot管理者ユーザーIDのリスト。<br>List of bot administrator user IDs.                                                                                                                     |
+    | **`bot_invite_url`**    | `/invite` コマンドで表示されるBotの招待URL。<br>The bot's invitation URL displayed by the `/invite` command.                                                                                 |
+    | **`support_server_invite_url`** | `/support` コマンドで表示されるサポートサーバーの招待URL。<br>The support server invitation URL displayed by the `/support` command.                                                              |
+    | **`arona_repository_url`** | `/arona` コマンドで表示されるリポジトリURL。<br>The repository URL displayed by the `/arona` command.                                                                                      |
+    | **`plana_repository_url`** | `/plana` コマンドで表示されるリポジトリURL。<br>The repository URL displayed by the `/plana` command.                                                                                      |
+    | **`sync_slash_commands`** | `true` の場合、起動時にスラッシュコマンドを同期します。<br>If `true`, syncs slash commands on startup.                                                                                               |
+    | **`test_guild_id`**     | 開発中、スラッシュコマンドを即時反映させるためのテストサーバーID。本番時は空欄またはコメントアウト。<br>Test server ID for immediate slash command updates during development. Leave blank or comment out for production. |
+
+    #### LLM 設定 / LLM Settings (under `llm:` key):
+
+    | 設定 (Setting)                  | 説明 (Description)                                                                                                                                                                                              |
+    |---------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+    | **`max_text`**                  | 1メッセージあたりの最大テキスト長 (添付ファイル含む)。(デフォルト: `100000`)<br>Max text length per message (including attachments). (Default: `100000`)                                                                                    |
+    | **`max_images`**                | 1メッセージあたりの最大画像添付数 (ビジョンモデル使用時)。(デフォルト: `1`)<br>Max image attachments per message (for vision models). (Default: `1`)                                                                                          |
+    | **`max_messages`**              | 返信チェインでの最大メッセージ保持数。(デフォルト: `10`)<br>Max messages to keep in a reply chain. (Default: `10`)                                                                                                                    |
+    | **`providers`**                 | 各LLMプロバイダーを `base_url` と `api_key` で設定。主要プロバイダーはテンプレートに記載済み。(OpenAI互換APIのみ)<br>Configure each LLM provider with `base_url` and `api_key`. Common providers are in the template. (OpenAI-compatible APIs only) |
+    | **`model`**                     | 使用するメインLLMモデル。`<provider name>/<model name>` 形式。(例: `openai/gpt-4o`)<br>Main LLM model to use. Format `<provider name>/<model name>`. (e.g., `openai/gpt-4o`)                                                 |
+    | **`extra_api_parameters`**      | `temperature` や `max_tokens` などのAPIパラメータ。(デフォルト: `max_tokens=4096, temperature=0.7`)<br>API parameters like `temperature` and `max_tokens`. (Default: `max_tokens=4096, temperature=0.7`)                     |
+    | **`system_prompt`**             | AIの性格や役割を定義するシステムプロンプト。なんかいい感じのものを書いてください。<br>System prompt to define the AI's personality and role.                                                                                                          |
+    | **`starter_prompt`**            | 会話開始時のAIの最初の発言を促すプロンプト (任意)。<br>Prompt to encourage the AI's first utterance at the start of a conversation (optional).                                                                                       |
+    | **`active_tools`**              | 有効にするツールのリスト (例: `["search"]`)。<br>List of tools to enable (e.g., `["search"]`).                                                                                                                              |
+    | **`max_tool_iterations`**       | ツール呼び出しの最大反復回数。(デフォルト: `3`)<br>Maximum number of tool call iterations. (Default: `3`)                                                                                                                         |
+    | **`search_agent`**              | ウェブ検索エージェントの設定 (`model`, `api_key`, `format_control`)。<br>Settings for the web search agent (`model`, `api_key`, `format_control`).                                                                           |
+    | **`error_msg`**                 | ユーザーに表示される各種エラーメッセージ (日英併記可能)。<br>Various error messages displayed to the user (can be bilingual).                                                                                                            |
+
+    #### 音楽再生設定 / Music Playback Settings (under `music:` key):
+
+    | 設定 (Setting)                | 説明 (Description)                                                                                                                                                                    |
+    |-------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+    | **`default_volume`**          | デフォルトの再生音量 (0-100)。(デフォルト: `50`)<br>Default playback volume (0-100). (Default: `50`)                                                                                         |
+    | **`max_queue_size`**          | キューに追加できる曲の最大数。(デフォルト: `100`)<br>Maximum number of songs that can be added to the queue. (Default: `100`)                                                                 |
+    | **`auto_leave_timeout`**      | VCに誰もいなくなってから自動退出するまでの秒数。(デフォルト: `60`)<br>Seconds to wait before auto-leaving an empty voice channel. (Default: `60`)                                                    |
+    | **`ffmpeg_before_options`**   | FFmpegの `before_options`。(デフォルト: `-reconnect 1 ...`)<br>FFmpeg `before_options`. (Default: `-reconnect 1 ...`)                                                                     |
+    | **`ffmpeg_options`**          | FFmpegの `options`。(デフォルト: `-vn`)<br>FFmpeg `options`. (Default: `-vn`)                                                                                                             |
+    | **`niconico`**                | ニコニコ動画のログイン情報 (`email`, `password`) (任意)。<br>Niconico login credentials (`email`, `password`) (optional).                                                                      |
+    | **`messages`**                | 音楽機能関連のBotの応答メッセージ (日英併記可能)。<br>Bot response messages related to music features (can be bilingual).                                                                           |
 
 
-### その他の特徴:
-- ビジョンモデル（gpt-4o, claude-3, llavaなど）を使用する場合、画像添付に対応
-- テキストファイル添付（.txt, .py, .c など）に対応
-- カスタマイズ可能なパーソナリティ（プラナのシステムプロンプトを書き換える事で可能）
-- ユーザーアイデンティティ対応
-- 設定のホットリロード（再起動せずに設定を変更可能）
-- 適切な警告を表示（例: "⚠️ 画像が見えません ><"）
-- メッセージデータを効率的にキャッシュ管理（サイズ制限あり、メモリリークなし、レースコンディションなし）
-- 完全非同期処理
-- Pythonファイル1つ、約400行
+4.  **依存関係をインストールし実行します / Install dependencies and run:**
 
-## インストール手順
-
-1. リポジトリをクローンします:
-   ```bash
-   git clone https://github.com/coffin399/llmcord-JP-plana
-   ```
-
-2. config.ymlを設定します:
-
-### Discord 設定:
-
-| Setting                 | Description                                                                                                                           |
-|-------------------------|---------------------------------------------------------------------------------------------------------------------------------------|
-| **bot_token**           | [discord.com/developers/applications](https://discord.com/developers/applications) でbot及びbotトークンを作成し、 "MESSAGE CONTENT INTENT"を有効にします |
-| **client_id**           | "OAuth2" タブで見つけることが出来ます。                                                                                                              |
-| **status_message**      | カスタムメッセージを設定することが出来ます。 **最大128文字**                                                                                                    |
-| **allowed_channel_ids** | チャンネルIDを指定すればそのチャンネルのみでの会話が可能です。 **空白にすることで全チャンネルで有効にできます**                                                                           |
-| **allowed_role_ids**    | BOTを使用できるロールIDのリストです。 **空白にすると全員が利用可能です。1つ以上指定するとDMでの会話が出来なくなります。**                                                                   |
-| **max_text**            | 1つのメッセージで許可される最大テキスト量。（添付ファイルのテキストも含む） <br />(Default: `100,000`)                                                                     |
-| **max_images**          | 1つのメッセージで許可される最大画像添付数。 **(ビジョンモデルを使用する場合のみ適用）**<br />(Default: `5`)                                                                   |
-| **max_messages**        | 返信チェーンで許可される最大メッセージ数。<br />(Default: `25`)                                                                                            |
-
-### LLM settings:
-
-| Setting                  | Description                                                                                                                                       |
-|--------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------|
-| **providers**            | それぞれプロバイダを `base_url` と `api_key` で追加します。 一般的なプロバイダ (`openai`, `ollama`, etc.) は既に含まれています. **(OpenAI互換APIのみサポートします。)**                            |
-| **model**                | プロバイダとモデルの設定`<provider name>/<model name>`, 例:<br /><br />-`openai/gpt-4o`<br />-`ollama/llama3.2`<br />-`openrouter/anthropic/claude-3.5-sonnet` |
-| **extra_api_parameters** | TemperatureとMax Output Tokensの設定 <br />(Default: `max_tokens=4096, temperature=1.0`)                                                              |
-| **system_prompt**        | ここにいい感じのプロンプトを書くことでキャラクターになりきる事が出来ます。                                                                                                             |
-| **starter_prompt**       | ここにいい感じのスタータープロンプトを入力するとキャラクターの一貫性が上がります。                                                                                                         |
-| **bio_record**           | bio(記憶機能)関連の設定。bio_record.messageは記録時の特別メッセージ。                                                                                                    |
-| **error_msg**            | ユーザーに示されるエラーメッセージの設定。                                                                                                                             |
-
-
-4. 実行:
-   **Dockerなし(またはstartPLANA.batをダブルクリック):**
-   ```bash
-   python -m pip install -U -r requirements.txt
-   python main.py
-   ```
+    **Dockerなし (または `start_plana.bat`) / Without Docker (or run `start_plana.bat`):**
+    ```bash
+    python -m pip install -U -r requirements.txt
+    python main.py
+    ```
    
-   **Dockerあり:**
-   ```bash
-   docker compose up
-   ```
+    **Dockerあり / With Docker:**
+    ```bash
+    docker compose up --build -d 
+    ```
+    (初回以降は `--build` は不要 / `--build` is not needed after the first time)
