@@ -66,22 +66,33 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
         if guild.icon: embed.set_thumbnail(url=guild.icon.url)
 
         embed.add_field(name="サーバーID / Server ID", value=guild.id, inline=True)
-        owner_mention = guild.owner.mention if guild.owner else (
-            "不明" if interaction.locale == discord.Locale.japanese else "Unknown")
-        embed.add_field(name="オーナー / Owner", value=owner_mention, inline=True)
+
+        owner_display = "不明 / Unknown"
+        if guild.owner:
+            owner_display = guild.owner.mention
+        elif guild.owner_id:  # オーナーIDだけでも取得できれば
+            try:
+                owner_user = await self.bot.fetch_user(guild.owner_id)
+                owner_display = owner_user.mention if owner_user else f"ID: {guild.owner_id}"
+            except discord.NotFound:
+                owner_display = f"ID: {guild.owner_id} (取得不可 / Not found)"
+            except Exception as e:
+                logger.warning(f"オーナー情報の取得に失敗 (ID: {guild.owner_id}): {e}")
+                owner_display = f"ID: {guild.owner_id} (エラー / Error)"
+        embed.add_field(name="オーナー / Owner", value=owner_display, inline=True)
+
         embed.add_field(name="メンバー数 / Member Count", value=guild.member_count, inline=True)
         embed.add_field(name="テキストチャンネル数 / Text Channels", value=len(guild.text_channels), inline=True)
         embed.add_field(name="ボイスチャンネル数 / Voice Channels", value=len(guild.voice_channels), inline=True)
         embed.add_field(name="ロール数 / Roles", value=len(guild.roles), inline=True)
 
-        created_at_text_ja = discord.utils.format_dt(guild.created_at, style='F')
-        created_at_text_en = discord.utils.format_dt(guild.created_at, style='F', locale='en-US')  # 英語ロケール指定
-        embed.add_field(name="作成日時 / Created At", value=f"{created_at_text_ja}\n{created_at_text_en}", inline=False)
+        created_at_text = discord.utils.format_dt(guild.created_at, style='F')
+        embed.add_field(name="作成日時 / Created At", value=created_at_text, inline=False)
 
-        verification_level_str_ja = str(guild.verification_level).capitalize()
-        verification_level_str_en = str(guild.verification_level).name.replace('_', ' ').capitalize()
+        verification_level_str_ja = str(guild.verification_level).capitalize()  # これは日本語のEnum名ではない
+        verification_level_str_en = guild.verification_level.name.replace('_', ' ').capitalize()  # Enumの .name から取得
         embed.add_field(name="認証レベル / Verification Level",
-                        value=f"{verification_level_str_ja}\n({verification_level_str_en})", inline=True)
+                        value=f"{verification_level_str_en}", inline=True)  # 英語ベースで表示
 
         if guild.features:
             features_str = ", ".join(f"`{f.replace('_', ' ').title()}`" for f in guild.features)
@@ -101,45 +112,42 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
                               color=target_user.accent_color or discord.Color.blurple())
         if target_user.display_avatar: embed.set_thumbnail(url=target_user.display_avatar.url)
 
-        username_val_ja = f"{target_user.name}#{target_user.discriminator}" if target_user.discriminator != '0' else target_user.name
-        username_val_en = f"{target_user.name}#{target_user.discriminator}" if target_user.discriminator != '0' else target_user.name
-        embed.add_field(name="ユーザー名 / Username", value=f"{username_val_ja}\n({username_val_en})", inline=True)
+        username_display = f"{target_user.name}#{target_user.discriminator}" if target_user.discriminator != '0' else target_user.name
+        embed.add_field(name="ユーザー名 / Username", value=username_display, inline=True)
         embed.add_field(name="ユーザーID / User ID", value=target_user.id, inline=True)
+
         bot_status_ja = "はい" if target_user.bot else "いいえ"
         bot_status_en = "Yes" if target_user.bot else "No"
         embed.add_field(name="Botアカウントか / Bot Account?", value=f"{bot_status_ja} / {bot_status_en}", inline=True)
 
-        created_at_ja = discord.utils.format_dt(target_user.created_at, style='F')
-        created_at_en = discord.utils.format_dt(target_user.created_at, style='F', locale='en-US')
-        embed.add_field(name="アカウント作成日時 / Account Created", value=f"{created_at_ja}\n{created_at_en}",
-                        inline=False)
+        created_at_text = discord.utils.format_dt(target_user.created_at, style='F')
+        embed.add_field(name="アカウント作成日時 / Account Created", value=created_at_text, inline=False)
 
         if interaction.guild and isinstance(target_user, discord.Member):
-            member: discord.Member = target_user
-            joined_at_ja = discord.utils.format_dt(member.joined_at, style='F') if member.joined_at else "不明"
-            joined_at_en = discord.utils.format_dt(member.joined_at, style='F',
-                                                   locale='en-US') if member.joined_at else "Unknown"
-            embed.add_field(name="サーバー参加日時 / Joined Server", value=f"{joined_at_ja}\n{joined_at_en}",
-                            inline=False)
+            member: discord.Member = target_user  # メンバーオブジェクトであることを明示
+
+            joined_at_text = "不明 / Unknown"
+            if member.joined_at:
+                joined_at_text = discord.utils.format_dt(member.joined_at, style='F')
+            embed.add_field(name="サーバー参加日時 / Joined Server", value=joined_at_text, inline=False)
 
             roles = [r.mention for r in reversed(member.roles) if r.name != "@everyone"]
             roles_count = len(roles)
-            roles_text_ja = "なし"
-            roles_text_en = "None"
+            roles_display_value = "なし / None"
             if roles:
                 roles_str = ", ".join(roles)
-                roles_text_ja = roles_str[:1000] + "..." if len(roles_str) > 1000 else roles_str  # 1024文字制限のため短縮
-                roles_text_en = roles_text_ja  # メンションなので日英共通
-            embed.add_field(name=f"ロール ({roles_count}) / Roles ({roles_count})", value=f"{roles_text_ja}",
+                if len(roles_str) > 1020:
+                    roles_display_value = roles_str[:1017] + "..."
+                else:
+                    roles_display_value = roles_str
+            embed.add_field(name=f"ロール ({roles_count}) / Roles ({roles_count})", value=roles_display_value,
                             inline=False)
 
             if member.nick:
                 embed.add_field(name="ニックネーム / Nickname", value=member.nick, inline=True)
             if member.premium_since:
-                premium_ja = discord.utils.format_dt(member.premium_since, style='R')
-                premium_en = discord.utils.format_dt(member.premium_since, style='R', locale='en-US')
-                embed.add_field(name="サーバーブースト開始 / Server Boosting Since",
-                                value=f"{premium_ja}\n({premium_en})", inline=True)
+                premium_text = discord.utils.format_dt(member.premium_since, style='R')  # 相対時間
+                embed.add_field(name="サーバーブースト開始 / Server Boosting Since", value=premium_text, inline=True)
 
         await interaction.response.send_message(embed=embed, ephemeral=False)
         logger.info(f"/userinfo が実行されました。 (TargetUser: {target_user.id}, Requester: {interaction.user.id})")
