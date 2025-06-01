@@ -7,13 +7,6 @@ google-genai
 PyNaCl>=1.5.0
 python-dotenv>=1.0.0
 google-generativeai
-# Audio processing
 yt-dlp
 pycryptodomex
 ffmpeg
-# Utilities
-colorlog>=6.7.0
-
-# Development tools
-pytest>=7.4.0
-pytest-asyncio>=0.21.1
