@@ -807,10 +807,6 @@ class MusicCog(commands.Cog, name="音楽"):
     @app_commands.command(name="music_help",
                           description="音楽機能に関するヘルプを日英で表示します。/ Displays music help in JP & EN.")
     async def music_help_slash(self, interaction: discord.Interaction):
-        # このヘルプコマンドの改編は要求されていないので、そのままにしておきます。
-        # もし、このヘルプコマンド内の "リクエスト: <@{requester_id}>" のような部分も
-        # ニックネーム表示に変えたい場合は、このメソッド内でも同様のユーザー情報取得処理が必要です。
-        # ただし、ヘルプコマンドは静的な情報表示が主なので、動的なユーザー名表示は通常行いません。
         await interaction.response.defer(ephemeral=False)
         prefix = await self.get_music_prefix_from_config()
         embed = discord.Embed(
@@ -825,30 +821,52 @@ class MusicCog(commands.Cog, name="音楽"):
         command_info_bilingual = {
             "▶️ 再生コントロール / Playback Control": [
                 {"name": "play", "args_ja": "<曲名またはURL>", "args_en": "<song name or URL>",
-                 "desc_ja": "指定された曲を再生、またはキューに追加します。",
-                 "desc_en": "Plays the specified song or adds it to the queue."},
+                 "desc_ja": "指定された曲を再生、またはキューに追加します。YouTube, SoundCloudなどのURLや検索語が使えます。",
+                 "desc_en": "Plays the specified song or adds it to the queue. Supports URLs from YouTube, SoundCloud, etc., or search terms."},
                 {"name": "pause", "args_ja": "", "args_en": "", "desc_ja": "現在再生中の曲を一時停止します。",
                  "desc_en": "Pauses the currently playing song."},
-                # ... (他のコマンド情報も同様に)
+                {"name": "resume", "args_ja": "", "args_en": "", "desc_ja": "一時停止中の曲の再生を再開します。",
+                 "desc_en": "Resumes playback of a paused song."},
+                {"name": "stop", "args_ja": "", "args_en": "", "desc_ja": "再生を完全に停止し、キューをクリアします。",
+                 "desc_en": "Completely stops playback and clears the queue."},
+                {"name": "skip", "args_ja": "", "args_en": "",
+                 "desc_ja": "現在再生中の曲をスキップして次の曲を再生します。",
+                 "desc_en": "Skips the currently playing song and plays the next one in the queue."},
+                {"name": "volume", "args_ja": "[音量(0-200)]", "args_en": "[level (0-200)]",
+                 "desc_ja": "再生音量を変更します。引数なしで現在の音量を表示。",
+                 "desc_en": "Changes the playback volume. Shows current volume if no argument is given."},
             ],
-            # ... (他のカテゴリ)
-        }  # ヘルプコマンドの詳細は簡略化のため省略
-
-        # (ヘルプコマンドのEmbed生成ロジック ... )
-        # この部分は非常に長くなるため、前回の回答を参照してください。
-        # 主なポイントは command_info_bilingual の内容を正確に記述することです。
-        # ここでは、そのロジックが既に存在すると仮定します。
-        # 実際には、前回の回答の music_help_slash のロジックをここに記述します。
-        # For brevity, the full help generation logic is omitted here,
-        # assuming it's similar to the previous detailed music_help_slash.
-
-        # 以下はダミーのヘルプ表示です。実際のヘルプ生成ロジックに置き換えてください。
+            "💿 キュー管理 / Queue Management": [
+                {"name": "queue", "args_ja": "[ページ番号]", "args_en": "[page number]",
+                 "desc_ja": "現在の再生キュー（順番待ちリスト）を表示します。",
+                 "desc_en": "Displays the current song queue."},
+                {"name": "nowplaying", "args_ja": "", "args_en": "", "desc_ja": "現在再生中の曲の情報を表示します。",
+                 "desc_en": "Shows information about the currently playing song."},
+                {"name": "shuffle", "args_ja": "", "args_en": "",
+                 "desc_ja": "再生キューをシャッフル（ランダムな順番に並び替え）します。",
+                 "desc_en": "Shuffles the song queue into a random order."},
+                {"name": "clear", "args_ja": "", "args_en": "",
+                 "desc_ja": "再生キューをクリアします（再生中の曲は停止しません）。",
+                 "desc_en": "Clears the song queue (does not stop the current song)."},
+                {"name": "remove", "args_ja": "<キューの番号>", "args_en": "<queue number>",
+                 "desc_ja": "再生キューから指定した番号の曲を削除します。",
+                 "desc_en": "Removes a song from the queue by its number."},
+                {"name": "loop", "args_ja": "[off | one | all]", "args_en": "[off | one | all]",
+                 "desc_ja": "ループ再生モードを設定します (off: ループなし, one: 現在の曲, all: キュー全体)。引数なしで現在のモードを表示。",
+                 "desc_en": "Sets the loop mode (off: no loop, one: current song, all: entire queue). Shows current mode if no argument."},
+            ],
+            "🔊 ボイスチャンネル / Voice Channel": [
+                {"name": "join", "args_ja": "[チャンネル名またはID]", "args_en": "[channel name or ID]",
+                 "desc_ja": "Botをあなたのいるボイスチャンネル、または指定したチャンネルに接続します。",
+                 "desc_en": "Connects the bot to your current voice channel or a specified channel."},
+                {"name": "leave", "args_ja": "", "args_en": "", "desc_ja": "Botをボイスチャンネルから切断します。",
+                 "desc_en": "Disconnects the bot from the voice channel."},
+            ]
+        }
         cog_commands = self.get_commands()
         cog_commands_dict = {cmd.name: cmd for cmd in cog_commands}
-        for cmd_obj in cog_commands:  # エイリアスも辞書に追加
-            for alias in cmd_obj.aliases:
-                cog_commands_dict[alias] = cmd_obj
-
+        for cmd_obj in cog_commands:
+            for alias in cmd_obj.aliases: cog_commands_dict[alias] = cmd_obj
         for category_title_bilingual, commands_in_category in command_info_bilingual.items():
             field_value = ""
             for cmd_info in commands_in_category:
@@ -856,20 +874,20 @@ class MusicCog(commands.Cog, name="音楽"):
                 if command and not command.hidden:
                     usage_ja = f"`{prefix}{command.name}"
                     if cmd_info["args_ja"]: usage_ja += f" {cmd_info['args_ja']}"
-                    usage_ja += "`"
+                    usage_ja += "`";
                     usage_en = f"`{prefix}{command.name}"
                     if cmd_info["args_en"]: usage_en += f" {cmd_info['args_en']}"
-                    usage_en += "`"
-                    desc_ja = cmd_info.get("desc_ja", "説明なし。")
+                    usage_en += "`";
+                    desc_ja = cmd_info.get("desc_ja", "説明なし。");
                     desc_en = cmd_info.get("desc_en", "No description.")
                     aliases_line_ja = f"\n   *別名: `{', '.join(command.aliases)}`*" if command.aliases else ""
                     aliases_line_en = f"\n   *Aliases: `{', '.join(command.aliases)}`*" if command.aliases else ""
-                    entry_ja = f"**{usage_ja}**\n   {desc_ja}{aliases_line_ja}"
+                    entry_ja = f"**{usage_ja}**\n   {desc_ja}{aliases_line_ja}";
                     entry_en = f"**{usage_en}**\n   {desc_en}{aliases_line_en}"
                     field_value += f"{entry_ja}\n\n{entry_en}\n\n---\n\n"
             if field_value:
                 field_value = field_value.rsplit("\n\n---\n\n", 1)[0]
-                if len(field_value) > 1024:  # 簡単なチャンク分割
+                if len(field_value) > 1024:
                     chunks = [field_value[i:i + 1020] for i in range(0, len(field_value), 1020)]
                     for i, chunk in enumerate(chunks):
                         title = f"**{category_title_bilingual} (続き / Cont. {i + 1})**" if i > 0 else f"**{category_title_bilingual}**"
@@ -877,14 +895,12 @@ class MusicCog(commands.Cog, name="音楽"):
                                         inline=False)
                 else:
                     embed.add_field(name=f"**{category_title_bilingual}**", value=field_value.strip(), inline=False)
-
-        if not embed.fields:
-            embed.description += "\n利用可能な音楽コマンドが見つかりませんでした。\nNo available music commands found."
+        if not embed.fields: embed.description += "\n利用可能な音楽コマンドが見つかりませんでした。\nNo available music commands found."
         embed.set_footer(
             text="<> は必須引数、[] は任意引数を表します。\n<> denotes a required argument, [] denotes an optional argument.")
-        await interaction.followup.send(embed=embed, ephemeral=False)
-        logger.info(
-            f"/music_help_bilingual が実行されました。 (User: {interaction.user.id}, Guild: {interaction.guild_id})")
+
+        await interaction.followup.send(embed=embed, silent=False)  # スラッシュコマンド応答はサイレントにしない
+        logger.info(f"/music_help が実行されました。 (User: {interaction.user.id}, Guild: {interaction.guild_id})")
 
 
 async def setup(bot: commands.Bot):
