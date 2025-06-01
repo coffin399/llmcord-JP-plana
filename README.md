@@ -6,7 +6,7 @@
   プラナちゃんとおしゃべりしよう！
 </i></h3>
 
-<p>
+<p align="center">
   <img src="https://cdn.discordapp.com/attachments/1231490510955483167/1378688090734071848/image.png?ex=683d82d7&is=683c3157&hm=b01ce381f990f092482c205271012c3919bd835971336868fed8733d5a8ee26f&" alt="Plana Bot Icon" width="200">
 </p>
 
