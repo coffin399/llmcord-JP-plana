@@ -1,4 +1,17 @@
-discord.py
+# ---------- global options ----------
+--pre                 # ytdlpのnightly用
+--extra-index-url https://pypi.org/simple
+
+discord.py[voice]>=2.3.2
+PyYAML>=6.0
+PyNaCl>=1.5.0
+python-dotenv>=1.0.0
+
+yt-dlp
+pycryptodomex
+
+colorlog>=6.7.0
+
 httpx
 openai
 pyyaml

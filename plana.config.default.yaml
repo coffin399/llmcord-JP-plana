@@ -1,9 +1,3 @@
-# Discord settings:
-
-bot_token: 
-client_id: 
-status_message: 
-
 allowed_channel_ids: []
 allowed_role_ids: []
 admin_user_ids: []
@@ -156,20 +150,6 @@ search_agent:
   model: gemini-2.5-flash-preview-04-17
   api_key:  "YOUR_AISTUDIO_API"
   format_control: "The research should be comprehensive and high detail and the information should be presented in a formal report format; the report should be in English, queries too"
-
-# command message
-help_message: "このボットは、Discord上でLLMと対話するためのボットです。
-              \n 以下のコマンドを使用できます:
-              \n - `/help`: このヘルプメッセージを表示します。Displays this help message.
-              \n - `/invite`: BOTの招待URLを送信します。Send the bot's invite URL.
-              \n - `/plana` : llmcord-JP-plana のリポジトリを表示します。 show plana's repository.
-              \n - `/arona` : ARONA MUSIC BOT のリポジトリを表示します。 show arona's repository.
-              \n - @PLANAでメンションをつけて、テキストメッセージを送信すると、ボットが応答します。
-              \n - Mention @PLANA and send a text message, and the bot will respond.
-              \n - If you want a reply in a language other than Japanese, you must enter @PLANA [conversation content here] Please reply in [any language]. 
-              \n - https://i.imgur.com/4muvYWH.gif
-              \n - https://github.com/coffin399/llmcord-JP-plana"
-              \n - "© NEXON Games Co.,Ltd & Yostar,Inc. for headers and icons."
 
 error_msg:
   msg_max_text_size: "⚠️ 最大文字数は {max_text:,} です ><"

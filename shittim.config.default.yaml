@@ -1,0 +1,5 @@
+discord:
+  token: "YOUR_DISCORD_TOKEN_HERE"
+  prefix: "!"
+  status_message: ""
+  client_id: YOUR_CLIENT_ID_HERE

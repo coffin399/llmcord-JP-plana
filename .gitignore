@@ -8,8 +8,14 @@
 !*.py
 
 !Dockerfile
-!config.default.yaml
+!shittim.config.default.yaml
+!plana.config.default.yaml
+!arona.config.default.yaml
 !docker-compose.yaml
 !requirements.txt
 !startPLANA.bat
-!plugins
+!modules
+!modules/**
+!modules/**/**
+
+*.pyc
