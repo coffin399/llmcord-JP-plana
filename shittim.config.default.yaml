@@ -3,3 +3,10 @@ discord:
   prefix: "!"
   status_message: ""
   client_id: YOUR_CLIENT_ID_HERE
+
+plana_repository_url: "https://github.com/coffin399/llmcord-JP-plana/tree/advanced-bot-utilities" # 例
+arona_repository_url: "https://github.com/coffin399/music-bot-arona" # 例
+support_server_invite_url: "https://discord.gg/SjuWKtwNAG" # 例
+bot_invite_url: "https://discord.com/oauth2/authorize?client_id=1031673203774464160&permissions=551906765824&scope=bot" # Botの招待URL
+generic_help_message: ""
+help_message: ""

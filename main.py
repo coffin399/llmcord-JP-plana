@@ -29,6 +29,7 @@ class Shittim(commands.Bot):
         self.initial_extensions = [
             'modules.music_arona.music_arona',
             'modules.llmcord_plana.llmcord_plana',   
+            'modules.shittim.shittim',
         ]
 
     async def setup_hook(self):
@@ -61,4 +62,11 @@ async def main():
         await bot.start(bot.config.get('discord.token'))
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logging.info("Shittim stopped")
+        sys.exit(0)
+    except Exception as e:
+        logging.error(f"Error in main: {e}")
+        sys.exit(1)

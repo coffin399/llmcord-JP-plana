@@ -96,7 +96,8 @@ class Music(commands.Cog):
         else:
             tracks.requester_id = ctx.author.id
             await player.enqueue(tracks)
-            await ctx.reply(self.config.get_message("added_to_queue", title=tracks.title), silent=True)
+            print(tracks)
+            await ctx.reply(self.config.get_message("added_to_queue", title=tracks.title, duration=fmt_dur(tracks.duration), requester_display_name=await _display_name(self.bot, ctx.guild, tracks.requester_id)), silent=True)
 
         player.start()
 
