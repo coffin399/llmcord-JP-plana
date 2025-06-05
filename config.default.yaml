@@ -7,6 +7,10 @@ allowed_channel_ids: [] # このボットが反応するチャンネルIDのリ�
 allowed_role_ids: []  # このボットのコマンドを使用できるロールIDのリスト (空の場合は全ユーザー)
 admin_user_ids: []    # ボットの管理者ユーザーIDのリスト (特別なコマンド用)
 
+# Image commands cogs setting
+# TheCatAPI
+thecatapi_api_key: "YOUR_THECATAPI_KEY_HERE" # (任意だが推奨)
+
 # slash command settings
 plana_repository_url: "https://github.com/coffin399/llmcord-JP-plana/tree/advanced-bot-utilities" # 例
 arona_repository_url: "https://github.com/coffin399/music-bot-arona" # 例
@@ -118,9 +122,10 @@ llm:
 
 # Enabled Cogs
 enabled_cogs:
-  - llm_cog # cogs/llm_cog.py
-  - music_cog # cogs/music_cog.py
-  - slash_command_cog #cogs/slash_command_cog.py
+  - llm_cog
+  - music_cog
+  - slash_command_cog
+  - image_commands_cog
 
 # Music Cog Settings
 

@@ -243,8 +243,7 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
                 f"/invite が実行されましたが、招待URLがconfig.yamlに未設定またはプレースホルダです。 (User: {interaction.user.id})")
 
     @app_commands.command(name="help", description="Botのヘルプ情報を表示します。/ Displays bot help information.")
-    # @app_commands.describe(module=...) を削除
-    async def help_slash_command(self, interaction: discord.Interaction):  # module 引数を削除
+    async def help_slash_command(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=False)
 
         bot_name_ja = self.bot.user.name if self.bot.user else "当Bot"
@@ -252,7 +251,6 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
         bot_avatar_url = self.bot.user.avatar.url if self.bot.user and self.bot.user.avatar else None
         prefix = await self.get_prefix_from_config()
 
-        # module引数に関する分岐処理を削除し、常に全体ヘルプを表示
         embed = discord.Embed(
             title=f"{bot_name_ja} ヘルプ / {bot_name_en} Help",
             description=f"{self.generic_help_message_text_ja}\n\n{self.generic_help_message_text_en}",
@@ -262,13 +260,12 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
             embed.set_thumbnail(url=bot_avatar_url)
 
         # 詳細ヘルプへの誘導 (日英併記)
-        # 各機能の専用ヘルプコマンドが存在することを前提とする
         desc_ja_detail = "より詳細な情報は、以下のコマンドで確認できます。"
         desc_en_detail = "For more detailed information, please check the following commands:"
-        llm_help_cmd_ja = "• **AI対話機能:** `/llm_help` (または `/llm_help_en`)"  # LLMCogが提供する想定
+        llm_help_cmd_ja = "• **AI対話機能:** `/llm_help` (または `/llm_help_en`)"
         llm_help_cmd_en = "• **AI Chat (LLM):** `/llm_help` (or `/llm_help_en`)"
-        music_help_cmd_ja = "• **音楽再生機能:** `/music_help`"  # MusicCogが提供する想定
-        music_help_cmd_en = "• **Music Playback:** `/music_help` (or `/music_help_en`)"  # MusicCogが提供する想定
+        music_help_cmd_ja = "• **音楽再生機能:** `/music_help`"
+        music_help_cmd_en = "• **Music Playback:** `/music_help` (or `/music_help_en`)"
 
         prefix_info_ja = f"プレフィックスコマンドも利用可能です (現在のプレフィックス: `{prefix}` )。"
         prefix_info_en = f"(Prefix commands are also available. Current prefix: `{prefix}` )"
@@ -284,11 +281,13 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
         main_features_ja_val = (
             "- **AIとの対話 (LLM):** メンションで話しかけるとAIが応答します。画像も認識可能です。\n"
             "- **音楽再生:** ボイスチャンネルで音楽を再生、キュー管理、各種操作ができます。\n"
+            "- **画像検索:** 猫の画像や、Yande.reから指定タグの画像を表示できます。\n"
             "- **情報表示:** サーバー情報、ユーザー情報、Botのレイテンシなどを表示します。"
         )
         main_features_en_val = (
             "- **AI Chat (LLM):** Mention the bot to talk with AI. It can also recognize images (if model supports).\n"
             "- **Music Playback:** Play music in voice channels, manage queues, and perform various operations.\n"
+            "- **Image Search:** Display cat pictures or images from Yande.re for specified tags.\n"
             "- **Information Display:** Show server info, user info, bot latency, etc."
         )
         embed.add_field(
@@ -298,12 +297,24 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
         )
 
         utility_title_ja = "便利なコマンド"
-        utility_cmds_ja = [f"`/ping` - Botの応答速度を確認", f"`/serverinfo` - サーバー情報を表示",
-                           f"`/userinfo [ユーザー]` - ユーザー情報を表示", f"`/avatar [ユーザー]` - アバター画像を表示",
-                           f"`/invite` - Botの招待リンクを表示"]
-        utility_cmds_en = [f"`/ping` - Check bot's latency", f"`/serverinfo` - Display server info",
-                           f"`/userinfo [user]` - Display user info", f"`/avatar [user]` - Display avatar",
-                           f"`/invite` - Display bot invite link"]
+        utility_cmds_ja = [
+            f"`/ping` - Botの応答速度を確認",
+            f"`/serverinfo` - サーバー情報を表示",
+            f"`/userinfo [ユーザー]` - ユーザー情報を表示",
+            f"`/avatar [ユーザー]` - アバター画像を表示",
+            f"`/invite` - Botの招待リンクを表示",
+            f"`/meow` - ランダムな猫の画像を表示",
+            f"`/yandere [タグ]` - Yande.reから画像を表示 (NSFWチャンネルのみ)"
+        ]
+        utility_cmds_en = [
+            f"`/ping` - Check bot's latency",
+            f"`/serverinfo` - Display server info",
+            f"`/userinfo [user]` - Display user info",
+            f"`/avatar [user]` - Display avatar",
+            f"`/invite` - Display bot invite link",
+            f"`/meow` - Displays a random cat picture",
+            f"`/yandere [tags]` - Shows an image from Yande.re (NSFW channels only)"
+        ]
 
         if self.support_server_invite and self.support_server_invite != "https://discord.gg/HogeFugaPiyo":
             utility_cmds_ja.append(f"`/support` - サポートサーバー招待")
@@ -311,6 +322,9 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
         if self.plana_repository:
             utility_cmds_ja.append(f"`/plana` - Plana (Bot)リポジトリ")
             utility_cmds_en.append(f"`/plana` - Plana (Bot) repository")
+        if self.arona_repository:
+            utility_cmds_ja.append(f"`/arona` - Arona (Music)リポジトリ")  # Aronaのリポジトリも追加する場合
+            utility_cmds_en.append(f"`/arona` - Arona (Music) repository")
 
         embed.add_field(
             name=f"{utility_title_ja} / Useful Commands",
@@ -335,7 +349,6 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
             await interaction.followup.send(embed=embed, ephemeral=False)
 
         logger.info(f"/help (概要) が実行されました。 (User: {interaction.user.id})")
-
 async def setup(bot: commands.Bot):
     if not hasattr(bot, 'config') or not bot.config:
         logger.error("SlashCommandsCog: Botインスタンスに 'config' 属性が見つからないか空です。Cogをロードできません。")
