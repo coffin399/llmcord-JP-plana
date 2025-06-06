@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 # --- 設定キー (config.yaml から読み込むことを想定) ---
 THECATAPI_API_KEY = "thecatapi_api_key"
 # User-Agent設定
-BOT_USER_AGENT = "PlanaDiscordBot/1.0 (YourDiscordTagOrContactInfo)"  # 適切に設定
+BOT_USER_AGENT = "PlanaDiscordBot/1.0"
 
 
 class ImageCommandsCog(commands.Cog, name="画像検索"):
