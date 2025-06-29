@@ -38,13 +38,12 @@ class Shittim(commands.Bot):
                     logging.critical(
                         f"{DEFAULT_CONFIG_FILE} から {CONFIG_FILE} のコピー中にエラーが発生しました: {e_copy}",
                         exc_info=True)
-                    # ここではRuntimeErrorを発生させて起動を止める
                     raise RuntimeError(f"{CONFIG_FILE} の生成に失敗しました。")
             else:
                 logging.critical(f"{CONFIG_FILE} も {DEFAULT_CONFIG_FILE} も見つかりません。設定ファイルがありません。")
                 raise FileNotFoundError(f"{CONFIG_FILE} も {DEFAULT_CONFIG_FILE} も見つかりません。")
 
-        # config.yaml を読み込む
+        # 2. config.yaml を読み込む
         try:
             with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
                 self.config = yaml.safe_load(f)
@@ -56,7 +55,7 @@ class Shittim(commands.Bot):
             if 'llm' in self.config:
                 logging.debug(f"LLM config keys: {list(self.config['llm'].keys())}")
 
-        except FileNotFoundError:  # このルートは上の処理で基本的に通らないはずだが、念のため
+        except FileNotFoundError:
             logging.critical(f"{CONFIG_FILE} が見つかりません。ボットを起動できません。")
             raise FileNotFoundError(f"{CONFIG_FILE} が見つかりません。")
         except yaml.YAMLError as e:
@@ -113,16 +112,9 @@ class Shittim(commands.Bot):
         else:
             logging.info("スラッシュコマンドの同期は設定で無効化されています。")
 
-    async def on_ready(self):
-        if not self.user:
-            logging.error("on_ready: self.user が None です。処理をスキップします。")
-            return
-
-        logging.info(f'{self.user.name} ({self.user.id}) としてDiscordにログインし、準備が完了しました！')
-        logging.info(f"現在 {len(self.guilds)} サーバーに参加しています。")
-
-        if not self.config:
-            logging.error("on_ready: Botのconfigがロードされていません。ステータスを設定できません。")
+    async def update_status(self):
+        """ボットのステータスを現在の状態で更新する"""
+        if not self.is_ready() or not self.config:
             return
 
         status_template = self.config.get('status_message', "operating on {guild_count} servers")
@@ -140,15 +132,38 @@ class Shittim(commands.Bot):
             'competing': discord.ActivityType.competing,
         }
         selected_activity_type = activity_type_map.get(activity_type_str, discord.ActivityType.streaming)
-        activity = discord.Activity(type=selected_activity_type, name=status_text)
+
         if selected_activity_type == discord.ActivityType.streaming:
-            stream_url = self.config.get('status_stream_url', 'https://www.twitch.tv/coffinnoob299')
+            stream_url = self.config.get('status_stream_url', 'https://www.twitch.tv/discord')
             activity = discord.Streaming(name=status_text, url=stream_url)
+        else:
+            activity = discord.Activity(type=selected_activity_type, name=status_text)
+
         try:
             await self.change_presence(activity=activity, status=discord.Status.online)
-            logging.info(f"ボットのステータスを「{activity.type.name}: {status_text}」に設定しました。")
+            logging.info(f"ボットのステータスを「{activity.type.name}: {status_text}」に更新しました。")
         except Exception as e:
-            logging.error(f"ステータスの設定中にエラーが発生しました: {e}", exc_info=True)
+            logging.error(f"ステータスの更新中にエラーが発生しました: {e}", exc_info=True)
+
+    async def on_ready(self):
+        if not self.user:
+            logging.error("on_ready: self.user が None です。処理をスキップします。")
+            return
+
+        logging.info(f'{self.user.name} ({self.user.id}) としてDiscordにログインし、準備が完了しました！')
+        logging.info(f"現在 {len(self.guilds)} サーバーに参加しています。")
+
+        await self.update_status()
+
+    async def on_guild_join(self, guild: discord.Guild):
+        """ボットがサーバーに参加したときに呼ばれる"""
+        logging.info(f"新しいサーバー '{guild.name}' (ID: {guild.id}) に参加しました。")
+        await self.update_status()
+
+    async def on_guild_remove(self, guild: discord.Guild):
+        """ボットがサーバーから退出したときに呼ばれる"""
+        logging.info(f"サーバー '{guild.name}' (ID: {guild.id}) から退出しました。")
+        await self.update_status()
 
     async def on_command_error(self, ctx: commands.Context, error: commands.CommandError):
         if isinstance(error, commands.CommandNotFound):
@@ -190,7 +205,7 @@ if __name__ == "__main__":
                 logging.critical(
                     f"メイン実行: {DEFAULT_CONFIG_FILE} から {CONFIG_FILE} のコピー中にエラー: {e_copy_main}",
                     exc_info=True)
-                exit(1)  # 設定ファイルがないと起動できないため終了
+                exit(1)
 
         with open(CONFIG_FILE, 'r', encoding='utf-8') as f_main_init:
             initial_config = yaml.safe_load(f_main_init)
@@ -215,15 +230,16 @@ if __name__ == "__main__":
 
     bot_token_val = initial_config.get('bot_token')
     if not bot_token_val or not isinstance(bot_token_val,
-                                           str) or bot_token_val == "YOUR_BOT_TOKEN_HERE":  # プレースホルダチェック追加
+                                           str) or bot_token_val == "YOUR_BOT_TOKEN_HERE":
         logging.critical(f"{CONFIG_FILE}にbot_tokenが未設定か無効、またはプレースホルダのままです。")
-        if os.path.exists(DEFAULT_CONFIG_FILE) and not os.path.exists(CONFIG_FILE):  # デフォルトからコピーした場合
+        if os.path.exists(DEFAULT_CONFIG_FILE) and not os.path.exists(CONFIG_FILE):
             logging.info(f"{CONFIG_FILE} は {DEFAULT_CONFIG_FILE} からコピーされました。トークンを設定してください。")
         exit(1)
 
     intents = discord.Intents.default()
     intents.message_content = True
     intents.voice_states = True
+    intents.guilds = True  # サーバー参加/退出イベントを受け取るために必要
 
     allowed_mentions = discord.AllowedMentions(everyone=False, users=True, roles=False, replied_user=True)
     bot_instance = Shittim(
