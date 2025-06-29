@@ -1,10 +1,10 @@
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
 import yaml
 import logging
 import asyncio
 import os
-import shutil  # shutilモジュールをインポート
+import shutil
 
 # --- ロギング設定 ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - [%(funcName)s] %(message)s')
@@ -23,6 +23,9 @@ class Shittim(commands.Bot):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.config = None
+        # ステータスローテーション用の設定
+        self.status_templates = []
+        self.status_index = 0
         # self.loop.set_debug(True)
 
     async def setup_hook(self):
@@ -43,7 +46,7 @@ class Shittim(commands.Bot):
                 logging.critical(f"{CONFIG_FILE} も {DEFAULT_CONFIG_FILE} も見つかりません。設定ファイルがありません。")
                 raise FileNotFoundError(f"{CONFIG_FILE} も {DEFAULT_CONFIG_FILE} も見つかりません。")
 
-        # 2. config.yaml を読み込む
+        # config.yaml を読み込む
         try:
             with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
                 self.config = yaml.safe_load(f)
@@ -51,49 +54,24 @@ class Shittim(commands.Bot):
                     logging.critical(f"{CONFIG_FILE} が空または無効です。ボットを起動できません。")
                     raise RuntimeError(f"{CONFIG_FILE} が空または無効です。")
             logging.info(f"{CONFIG_FILE} を正常に読み込みました。")
-            logging.debug(f"Loaded config keys: {list(self.config.keys())}")
-            if 'llm' in self.config:
-                logging.debug(f"LLM config keys: {list(self.config['llm'].keys())}")
-
-        except FileNotFoundError:
-            logging.critical(f"{CONFIG_FILE} が見つかりません。ボットを起動できません。")
-            raise FileNotFoundError(f"{CONFIG_FILE} が見つかりません。")
-        except yaml.YAMLError as e:
-            logging.critical(f"{CONFIG_FILE} の解析エラー: {e}。ボットを起動できません。")
-            raise yaml.YAMLError(f"{CONFIG_FILE} の解析エラー: {e}")
         except Exception as e:
-            logging.critical(f"{CONFIG_FILE} の読み込み中に予期せぬエラー: {e}", exc_info=True)
-            raise RuntimeError(f"{CONFIG_FILE} の読み込み中に予期せぬエラー: {e}")
+            logging.critical(f"{CONFIG_FILE} の読み込みまたは解析中にエラーが発生しました: {e}", exc_info=True)
+            raise
 
-        if self.config and 'enabled_cogs' in self.config and isinstance(self.config['enabled_cogs'], list):
+        # Cogのロード
+        if self.config.get('enabled_cogs') and isinstance(self.config['enabled_cogs'], list):
             for cog_name in self.config['enabled_cogs']:
-                if not isinstance(cog_name, str):
-                    logging.warning(
-                        f"enabled_cogs 内に不正なCog名が含まれています: {cog_name} (型: {type(cog_name)})。スキップします。")
-                    continue
-
-                cog_module_path = f"{COGS_DIRECTORY_NAME}.{cog_name.strip()}"
+                cog_module_path = f"{COGS_DIRECTORY_NAME}.{str(cog_name).strip()}"
                 try:
                     await self.load_extension(cog_module_path)
                     logging.info(f"Cog '{cog_module_path}' のロードに成功しました。")
-                except commands.ExtensionNotFound:
-                    logging.error(
-                        f"Cog '{cog_module_path}' が見つかりません。ファイルが存在し、正しい名前か確認してください。")
-                except commands.ExtensionAlreadyLoaded:
-                    logging.warning(f"Cog '{cog_module_path}' は既にロードされています。")
-                except commands.NoEntryPointError:
-                    logging.error(f"Cog '{cog_module_path}' に setup 関数が見つかりません。")
-                except commands.ExtensionFailed as e:
-                    logging.error(
-                        f"Cog '{cog_module_path}' のセットアップ中にエラーが発生しました: {e.name} - {e.original}",
-                        exc_info=e.original)
                 except Exception as e:
-                    logging.error(f"Cog '{cog_module_path}' のロード中に予期しないエラーが発生しました: {e}",
-                                  exc_info=True)
+                    logging.error(f"Cog '{cog_module_path}' のロード中にエラーが発生しました: {e}", exc_info=True)
         else:
             logging.warning(
                 "config.yamlに 'enabled_cogs' が設定されていないか、リスト形式ではありません。Cogはロードされません。")
 
+        # スラッシュコマンドの同期
         if self.config.get('sync_slash_commands', True):
             try:
                 test_guild_id = self.config.get('test_guild_id')
@@ -105,24 +83,27 @@ class Shittim(commands.Bot):
                 else:
                     synced_commands = await self.tree.sync()
                     logging.info(f"{len(synced_commands)}個のグローバルスラッシュコマンドを同期しました。")
-            except discord.errors.Forbidden as e:
-                logging.error(f"スラッシュコマンドの同期に必要な権限がありません: {e}")
             except Exception as e:
                 logging.error(f"スラッシュコマンドの同期中にエラーが発生しました: {e}", exc_info=True)
         else:
             logging.info("スラッシュコマンドの同期は設定で無効化されています。")
 
-    async def update_status(self):
-        """ボットのステータスを現在の状態で更新する"""
-        if not self.is_ready() or not self.config:
+    @tasks.loop(seconds=10)
+    async def rotate_status(self):
+        """10秒ごとにボットのステータスをローテーションさせるタスク"""
+        # status_templatesが空の場合は何もしない
+        if not self.status_templates:
             return
 
-        status_template = self.config.get('status_message', "operating on {guild_count} servers")
-        bot_prefix_for_status = self.config.get('prefix', '!!')
-        status_text = status_template.format(
-            prefix=bot_prefix_for_status,
-            guild_count=len(self.guilds)
+        # 現在のテンプレートを取得
+        current_template = self.status_templates[self.status_index]
+
+        # メッセージをフォーマット
+        status_text = current_template.format(
+            guild_count=len(self.guilds),
+            prefix=self.config.get('prefix', '!!')
         )
+
         activity_type_str = self.config.get('status_activity_type', 'streaming').lower()
         activity_type_map = {
             'playing': discord.ActivityType.playing,
@@ -141,9 +122,16 @@ class Shittim(commands.Bot):
 
         try:
             await self.change_presence(activity=activity, status=discord.Status.online)
-            logging.info(f"ボットのステータスを「{activity.type.name}: {status_text}」に更新しました。")
         except Exception as e:
             logging.error(f"ステータスの更新中にエラーが発生しました: {e}", exc_info=True)
+
+        # 次のステータスのためにインデックスを更新
+        self.status_index = (self.status_index + 1) % len(self.status_templates)
+
+    @rotate_status.before_loop
+    async def before_rotate_status(self):
+        # ボットが完全に準備完了になるまで待つ
+        await self.wait_until_ready()
 
     async def on_ready(self):
         if not self.user:
@@ -153,17 +141,25 @@ class Shittim(commands.Bot):
         logging.info(f'{self.user.name} ({self.user.id}) としてDiscordにログインし、準備が完了しました！')
         logging.info(f"現在 {len(self.guilds)} サーバーに参加しています。")
 
-        await self.update_status()
+        # config.yamlからステータスのリストを取得、なければデフォルト値を使用
+        self.status_templates = self.config.get('status_rotation', [
+            "plz type /help",
+            "operating on {guild_count} servers"
+        ])
+
+        # ステータスローテーションタスクを開始
+        self.rotate_status.start()
 
     async def on_guild_join(self, guild: discord.Guild):
         """ボットがサーバーに参加したときに呼ばれる"""
-        logging.info(f"新しいサーバー '{guild.name}' (ID: {guild.id}) に参加しました。")
-        await self.update_status()
+        logging.info(
+            f"新しいサーバー '{guild.name}' (ID: {guild.id}) に参加しました。現在のサーバー数: {len(self.guilds)}")
+        # タスクが自動で更新するため、ここでは何もしない
 
     async def on_guild_remove(self, guild: discord.Guild):
         """ボットがサーバーから退出したときに呼ばれる"""
-        logging.info(f"サーバー '{guild.name}' (ID: {guild.id}) から退出しました。")
-        await self.update_status()
+        logging.info(f"サーバー '{guild.name}' (ID: {guild.id}) から退出しました。現在のサーバー数: {len(self.guilds)}")
+        # タスクが自動で更新するため、ここでは何もしない
 
     async def on_command_error(self, ctx: commands.Context, error: commands.CommandError):
         if isinstance(error, commands.CommandNotFound):
@@ -188,7 +184,7 @@ class Shittim(commands.Bot):
                 f"コマンド '{ctx.command.qualified_name if ctx.command else ctx.invoked_with}' の実行中に予期しないエラーが発生しました:",
                 exc_info=error)
             try:
-                await ctx.send("コマンドの実行中に予期しないエラーが発生しました。しばらくしてから再試行してください。")
+                await ctx.send("コマンドの実行中に予期しないエラーが発生しました。")
             except discord.errors.Forbidden:
                 logging.warning(f"エラーメッセージを送信できませんでした ({ctx.channel.id}): 権限不足")
 
@@ -196,7 +192,6 @@ class Shittim(commands.Bot):
 if __name__ == "__main__":
     initial_config = {}
     try:
-        # config.yaml がなくても、デフォルトからコピーされることを期待してまず試行
         if not os.path.exists(CONFIG_FILE) and os.path.exists(DEFAULT_CONFIG_FILE):
             try:
                 shutil.copyfile(DEFAULT_CONFIG_FILE, CONFIG_FILE)
@@ -212,34 +207,21 @@ if __name__ == "__main__":
             if not initial_config or not isinstance(initial_config, dict):
                 logging.critical(f"メイン実行: {CONFIG_FILE} が空または無効な形式です。")
                 exit(1)
-    except FileNotFoundError:
-        logging.critical(
-            f"メイン実行: {CONFIG_FILE} が見つかりません。{DEFAULT_CONFIG_FILE} も存在しないかコピーに失敗しました。")
-        exit(1)
-    except yaml.YAMLError as e_main_yaml:
-        logging.critical(f"メイン実行: {CONFIG_FILE} の解析エラー: {e_main_yaml}。")
-        exit(1)
-    except Exception as e_main_generic:
-        logging.critical(f"メイン実行: {CONFIG_FILE} の読み込み中に予期せぬエラー: {e_main_generic}。")
+    except Exception as e_main:
+        logging.critical(f"メイン実行: {CONFIG_FILE} の読み込みまたは解析中にエラー: {e_main}。")
         exit(1)
 
-    bot_prefix_val = initial_config.get('prefix')
-    if not bot_prefix_val or not isinstance(bot_prefix_val, str):
-        logging.warning(f"{CONFIG_FILE}の 'prefix' が無効。デフォルト値 '!!' を使用。")
-        bot_prefix_val = '!!'
+    bot_prefix_val = initial_config.get('prefix', '!!')
 
     bot_token_val = initial_config.get('bot_token')
-    if not bot_token_val or not isinstance(bot_token_val,
-                                           str) or bot_token_val == "YOUR_BOT_TOKEN_HERE":
+    if not bot_token_val or bot_token_val == "YOUR_BOT_TOKEN_HERE":
         logging.critical(f"{CONFIG_FILE}にbot_tokenが未設定か無効、またはプレースホルダのままです。")
-        if os.path.exists(DEFAULT_CONFIG_FILE) and not os.path.exists(CONFIG_FILE):
-            logging.info(f"{CONFIG_FILE} は {DEFAULT_CONFIG_FILE} からコピーされました。トークンを設定してください。")
         exit(1)
 
     intents = discord.Intents.default()
     intents.message_content = True
     intents.voice_states = True
-    intents.guilds = True  # サーバー参加/退出イベントを受け取るために必要
+    intents.guilds = True
 
     allowed_mentions = discord.AllowedMentions(everyone=False, users=True, roles=False, replied_user=True)
     bot_instance = Shittim(
@@ -251,12 +233,5 @@ if __name__ == "__main__":
 
     try:
         bot_instance.run(bot_token_val)
-    except RuntimeError as e_run:
-        logging.critical(f"ボットの起動に失敗しました (RuntimeError): {e_run}")
-    except discord.errors.LoginFailure:
-        logging.critical("Discordへのログインに失敗しました。トークンが正しいか確認してください。")
-    except discord.errors.PrivilegedIntentsRequired as e_priv_intent:
-        logging.critical(
-            f"必要な特権インテントが無効です: {e_priv_intent}。Discord Developer Portalで有効化してください。")
-    except Exception as e_run_generic:
-        logging.critical(f"ボット実行中に予期せぬエラーが発生し終了しました: {e_run_generic}", exc_info=True)
+    except Exception as e:
+        logging.critical(f"ボットの実行中に致命的なエラーが発生しました: {e}", exc_info=True)
