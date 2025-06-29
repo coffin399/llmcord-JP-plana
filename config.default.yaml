@@ -2,7 +2,7 @@
 bot_token: YOUR_BOT_TOKEN_HERE # ここにボットトークンを入力してください
 client_id: YOUR_CLIENT_ID_HERE # 必要に応じて更新
 prefix: "!!" # Bot全体のコマンドプレフィックス
-status_message: "/music_help 音楽再生機能追加♪"
+status_message: "operating on {guild_count} servers"
 allowed_channel_ids: [] # このボットが反応するチャンネルIDのリスト (空の場合は全チャンネル)
 allowed_role_ids: []  # このボットのコマンドを使用できるロールIDのリスト (空の場合は全ユーザー)
 admin_user_ids: []    # ボットの管理者ユーザーIDのリスト (特別なコマンド用)

@@ -249,28 +249,27 @@ class MusicCog(commands.Cog, name="音楽"):
             state.voice_client.play(transformed_source, after=lambda e: self._song_finished_callback(e, guild_id))
             logger.info(f"ギルドID {guild_id}: 再生開始 - {track_to_play.title}")
 
-            # --- requester_display_name の取得とメッセージ送信 ---
             if text_channel and track_to_play.requester_id:
                 guild = self.bot.get_guild(guild_id)
                 requester_member = None
-                if guild:  # ギルド内でのコマンド実行の場合
+                if guild:
                     try:
                         requester_member = await guild.fetch_member(track_to_play.requester_id)
-                    except discord.NotFound:  # メンバーが見つからない場合 (既にサーバーを抜けているなど)
+                    except discord.NotFound:
                         logger.warning(
                             f"NowPlaying: リクエスト者 (ID: {track_to_play.requester_id}) がサーバーに見つかりません。")
                     except discord.HTTPException:
                         logger.error(
                             f"NowPlaying: リクエスト者 (ID: {track_to_play.requester_id}) の取得中にHTTPエラー。")
 
-                requester_display_name = "不明なユーザー (Unknown User)"  # デフォルト
+                requester_display_name = "不明なユーザー (Unknown User)"
                 if requester_member:
                     requester_display_name = requester_member.display_name
-                else:  # メンバーとして取得できなかった場合、ユーザーとして取得試行 (DMからのリクエストなど)
+                else:
                     try:
                         user = await self.bot.fetch_user(track_to_play.requester_id)
                         if user:
-                            requester_display_name = user.display_name  # DMならニックネームはない
+                            requester_display_name = user.display_name
                     except discord.NotFound:
                         logger.warning(
                             f"NowPlaying: リクエストユーザー (ID: {track_to_play.requester_id}) が見つかりません。")
@@ -289,10 +288,8 @@ class MusicCog(commands.Cog, name="音楽"):
                     "now_playing",
                     title=track_to_play.title,
                     duration=format_duration(track_to_play.duration),
-                    requester_display_name=requester_display_name  # メンションの代わりにニックネーム
+                    requester_display_name=requester_display_name
                 )
-            # --- ここまで修正 ---
-
         except Exception as e:
             logger.error(
                 f"ギルドID {guild_id}: 曲 '{track_to_play.title if track_to_play else 'N/A'}' 再生準備中エラー: {e}",
@@ -376,17 +373,6 @@ class MusicCog(commands.Cog, name="音楽"):
     @commands.Cog.listener()
     async def on_ready(self):
         logger.info(f"{self.bot.user.name} の MusicCog が正常にロードされました。")
-        activity_template = self.music_config.get('bot_activity_playing', "音楽再生中 | {prefix}help")
-        prefix = DEFAULT_PREFIX
-        if hasattr(self.bot, 'command_prefix'):
-            bot_prefix_attr = self.bot.command_prefix
-            if isinstance(bot_prefix_attr, (list, tuple)):
-                prefix = bot_prefix_attr[0]
-            elif isinstance(bot_prefix_attr, str):
-                prefix = bot_prefix_attr
-        activity_text = activity_template.format(prefix=prefix)
-        await self.bot.change_presence(
-            activity=discord.Activity(type=discord.ActivityType.listening, name=activity_text))
 
     @commands.Cog.listener()
     async def on_voice_state_update(self, member: discord.Member, before: discord.VoiceState,
@@ -417,10 +403,8 @@ class MusicCog(commands.Cog, name="音楽"):
                 state.auto_leave_task.cancel();
                 state.auto_leave_task = None
 
-    # --- プレフィックスコマンド ---
     @commands.command(name="join", aliases=["connect", "j"], help="ボットを指定したVCに接続。")
     async def join_command(self, ctx: commands.Context, *, channel: Optional[discord.VoiceChannel] = None):
-        # ... (内容は変更なし) ...
         state = self._get_guild_state(ctx.guild.id);
         state.update_last_text_channel(ctx.channel.id)
         target_channel = channel or (ctx.author.voice.channel if ctx.author.voice else None)
@@ -450,7 +434,6 @@ class MusicCog(commands.Cog, name="音楽"):
 
     @commands.command(name="leave", aliases=["disconnect", "dc", "bye"], help="ボットをVCから切断。")
     async def leave_command(self, ctx: commands.Context):
-        # ... (内容は変更なし) ...
         state = self._get_guild_state(ctx.guild.id);
         state.update_last_text_channel(ctx.channel.id)
         if not state.voice_client or not state.voice_client.is_connected(): await self._send_msg(ctx.channel,
@@ -503,21 +486,18 @@ class MusicCog(commands.Cog, name="音楽"):
 
         added_count = 0
         first_added_track_info = None
-
-        # --- requester_display_name の取得とメッセージ送信 (キュー追加時) ---
-        requester_display_name = ctx.author.display_name  # コマンド実行者のニックネーム/名前
-        # --- ここまで修正 ---
+        requester_display_name = ctx.author.display_name
 
         for track_idx, track in enumerate(tracks_to_add):
             if state.queue.qsize() < self.max_queue_size:
                 track.requester_id = ctx.author.id
                 track.original_query = query
                 await state.queue.put(track)
-                if added_count == 0:  # 最初の有効なトラック
+                if added_count == 0:
                     first_added_track_info = {
                         "title": track.title,
                         "duration": format_duration(track.duration),
-                        "requester_display_name": requester_display_name  # ニックネームを使用
+                        "requester_display_name": requester_display_name
                     }
                 added_count += 1
             else:
@@ -605,7 +585,6 @@ class MusicCog(commands.Cog, name="音楽"):
 
     @commands.command(name="queue", aliases=["q", "list"], help="現在の再生キュー表示。")
     async def queue_command(self, ctx: commands.Context, page: int = 1):
-        # ... (内容は変更なし、ただし queue_entry の表示でニックネームを使うならここも修正) ...
         state = self._get_guild_state(ctx.guild.id);
         state.update_last_text_channel(ctx.channel.id)
         if state.queue.empty() and not state.current_track: await self._send_msg(ctx.channel, "queue_empty"); return
@@ -618,12 +597,10 @@ class MusicCog(commands.Cog, name="音楽"):
         description_lines = []
         current_queue_list = list(state.queue._queue)
 
-        # 1ページ目で、かつ現在再生中の曲がある場合はそれを最初に表示
         if page == 1 and state.current_track:
             track = state.current_track
             prefix_char = ":arrow_forward:" if state.is_playing else (
                 ":pause_button:" if state.is_paused else ":musical_note:")
-            # 現在再生中の曲のリクエスト者名を取得
             display_name_now_playing = "不明"
             if track.requester_id:
                 member_np = ctx.guild.get_member(track.requester_id) if ctx.guild else None
@@ -634,13 +611,12 @@ class MusicCog(commands.Cog, name="音楽"):
                         user_np = await self.bot.fetch_user(
                             track.requester_id); display_name_now_playing = user_np.display_name
                     except:
-                        pass  # 取得失敗時は「不明」のまま
+                        pass
 
             description_lines.append(
                 f"**{prefix_char} {track.title}** (`{format_duration(track.duration)}`) - リクエスト: **{display_name_now_playing}**"
             )
 
-        # キューの該当ページ部分を表示
         total_queued_items = len(current_queue_list)
         total_pages = math.ceil(total_queued_items / items_per_page) if total_queued_items > 0 else 1
         if page < 1 or (page > total_pages and total_pages > 0):
@@ -652,7 +628,6 @@ class MusicCog(commands.Cog, name="音楽"):
         q_end_index = q_start_index + items_per_page
 
         for i, track_in_q in enumerate(current_queue_list[q_start_index:q_end_index], start=q_start_index + 1):
-            # キュー内の曲のリクエスト者名を取得
             display_name_queued = "不明"
             if track_in_q.requester_id:
                 member_q = ctx.guild.get_member(track_in_q.requester_id) if ctx.guild else None
@@ -667,7 +642,7 @@ class MusicCog(commands.Cog, name="音楽"):
             description_lines.append(
                 f"`{i}.` **{track_in_q.title}** (`{format_duration(track_in_q.duration)}`) - リクエスト: **{display_name_queued}**")
 
-        if not description_lines and not (page == 1 and state.current_track):  # 何も表示するものがない場合
+        if not description_lines and not (page == 1 and state.current_track):
             await self._send_msg(ctx.channel, "queue_empty");
             return
 
@@ -703,13 +678,13 @@ class MusicCog(commands.Cog, name="音楽"):
 
         requester_display_name = "不明なユーザー (Unknown User)"
         if track.requester_id:
-            guild = ctx.guild  # コマンドが実行されたギルド
+            guild = ctx.guild
             requester_member = None
             if guild:
                 try:
                     requester_member = await guild.fetch_member(track.requester_id)
                 except:
-                    pass  # 見つからない場合は何もしない
+                    pass
 
             if requester_member:
                 requester_display_name = requester_member.display_name
@@ -719,13 +694,12 @@ class MusicCog(commands.Cog, name="音楽"):
                     if user: requester_display_name = user.display_name
                 except:
                     pass
-        # --- ここまで修正 ---
 
         embed = discord.Embed(
             title=f"{status_icon} {track.title}",
             description=(
                 f"長さ: `{format_duration(track.duration)}`\n"
-                f"リクエスト: **{requester_display_name}**\n"  # メンションの代わりにニックネーム
+                f"リクエスト: **{requester_display_name}**\n"
                 f"ループモード: `{state.loop_mode.name.lower()}`"
             ),
             color=discord.Color.green() if state.is_playing else (
@@ -873,7 +847,7 @@ class MusicCog(commands.Cog, name="音楽"):
         embed.set_footer(
             text="<> は必須引数、[] は任意引数を表します。\n<> denotes a required argument, [] denotes an optional argument.")
 
-        await interaction.followup.send(embed=embed, silent=False)  # スラッシュコマンド応答はサイレントにしない
+        await interaction.followup.send(embed=embed, silent=False)
         logger.info(f"/music_help が実行されました。 (User: {interaction.user.id}, Guild: {interaction.guild_id})")
 
 

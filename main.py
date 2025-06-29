@@ -38,14 +38,13 @@ class Shittim(commands.Bot):
                     logging.critical(
                         f"{DEFAULT_CONFIG_FILE} から {CONFIG_FILE} のコピー中にエラーが発生しました: {e_copy}",
                         exc_info=True)
-                    # Botの起動を中止させるか、エラー処理を継続するか検討
                     # ここではRuntimeErrorを発生させて起動を止める
                     raise RuntimeError(f"{CONFIG_FILE} の生成に失敗しました。")
             else:
                 logging.critical(f"{CONFIG_FILE} も {DEFAULT_CONFIG_FILE} も見つかりません。設定ファイルがありません。")
                 raise FileNotFoundError(f"{CONFIG_FILE} も {DEFAULT_CONFIG_FILE} も見つかりません。")
 
-        # 2. config.yaml を読み込む
+        # config.yaml を読み込む
         try:
             with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
                 self.config = yaml.safe_load(f)
@@ -126,7 +125,7 @@ class Shittim(commands.Bot):
             logging.error("on_ready: Botのconfigがロードされていません。ステータスを設定できません。")
             return
 
-        status_template = self.config.get('status_message', "オンライン | {prefix}help")
+        status_template = self.config.get('status_message', "operating on {guild_count} servers")
         bot_prefix_for_status = self.config.get('prefix', '!!')
         status_text = status_template.format(
             prefix=bot_prefix_for_status,
@@ -143,7 +142,7 @@ class Shittim(commands.Bot):
         selected_activity_type = activity_type_map.get(activity_type_str, discord.ActivityType.streaming)
         activity = discord.Activity(type=selected_activity_type, name=status_text)
         if selected_activity_type == discord.ActivityType.streaming:
-            stream_url = self.config.get('status_stream_url', 'https://www.twitch.tv/discord')
+            stream_url = self.config.get('status_stream_url', 'https://www.twitch.tv/coffinnoob299')
             activity = discord.Streaming(name=status_text, url=stream_url)
         try:
             await self.change_presence(activity=activity, status=discord.Status.online)
@@ -165,18 +164,18 @@ class Shittim(commands.Bot):
         elif isinstance(error, commands.CommandOnCooldown):
             await ctx.send(f"このコマンドはクールダウン中です。あと {error.retry_after:.2f} 秒お待ちください。")
         elif isinstance(error, commands.ExtensionError):
-            logger.error(
+            logging.error(
                 f"Cog関連のエラーが発生しました ({ctx.command.cog_name if ctx.command else 'UnknownCog'}): {error}",
                 exc_info=error)
             await ctx.send("コマンドの処理中にCogエラーが発生しました。管理者に報告してください。")
         else:
-            logger.error(
+            logging.error(
                 f"コマンド '{ctx.command.qualified_name if ctx.command else ctx.invoked_with}' の実行中に予期しないエラーが発生しました:",
                 exc_info=error)
             try:
                 await ctx.send("コマンドの実行中に予期しないエラーが発生しました。しばらくしてから再試行してください。")
             except discord.errors.Forbidden:
-                logger.warning(f"エラーメッセージを送信できませんでした ({ctx.channel.id}): 権限不足")
+                logging.warning(f"エラーメッセージを送信できませんでした ({ctx.channel.id}): 権限不足")
 
 
 if __name__ == "__main__":
