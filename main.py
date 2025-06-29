@@ -134,7 +134,7 @@ class Shittim(commands.Bot):
         selected_activity_type = activity_type_map.get(activity_type_str, discord.ActivityType.streaming)
 
         if selected_activity_type == discord.ActivityType.streaming:
-            stream_url = self.config.get('status_stream_url', 'https://www.twitch.tv/discord')
+            stream_url = self.config.get('status_stream_url', 'https://www.twitch.tv/coffinnoob299')
             activity = discord.Streaming(name=status_text, url=stream_url)
         else:
             activity = discord.Activity(type=selected_activity_type, name=status_text)
