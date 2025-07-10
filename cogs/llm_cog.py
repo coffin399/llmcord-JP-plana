@@ -73,7 +73,8 @@ class LLMCog(commands.Cog, name="LLM"):
             return None
 
     def _initialize_search_agent(self) -> Optional[SearchAgent]:
-        if 'search' not in self.llm_config.get('active_tools', []) or not SearchAgent: return None
+        if 'search' not in self.llm_config.get('active_tools', []) or not SearchAgent:
+            return None
         search_config = self.llm_config.get('search_agent', {})
         if not search_config.get('api_key') or not search_config.get('model'):
             logger.error("SearchAgent config (api_key or model) is missing. Search will be disabled.")
@@ -120,15 +121,18 @@ class LLMCog(commands.Cog, name="LLM"):
         for msg in messages_to_scan:
             found_urls = IMAGE_URL_PATTERN.findall(msg.content)
             for url in found_urls:
-                if url not in processed_urls: source_urls.append(url); processed_urls.add(url)
+                if url not in processed_urls:
+                    source_urls.append(url)
+                    processed_urls.add(url)
             for attachment in msg.attachments:
                 if attachment.content_type and attachment.content_type.startswith(
                         'image/') and attachment.url not in processed_urls:
-                    source_urls.append(attachment.url);
+                    source_urls.append(attachment.url)
                     processed_urls.add(attachment.url)
         max_images = self.llm_config.get('max_images', 1)
         for url in source_urls[:max_images]:
-            if image_data := await self._process_image_url(url): image_inputs.append(image_data)
+            if image_data := await self._process_image_url(url):
+                image_inputs.append(image_data)
         if len(source_urls) > max_images:
             logger.info(f"Reached max image limit ({max_images}). Ignoring {len(source_urls) - max_images} images.")
             try:
@@ -143,12 +147,15 @@ class LLMCog(commands.Cog, name="LLM"):
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
-        if message.author.bot or not self.bot.user.mentioned_in(message) or message.mention_everyone: return
-        if (allowed_channels := self.config.get('allowed_channel_ids',
-                                                [])) and message.channel.id not in allowed_channels: return
+        if message.author.bot or not self.bot.user.mentioned_in(message) or message.mention_everyone:
+            return
+        if (
+        allowed_channels := self.config.get('allowed_channel_ids', [])) and message.channel.id not in allowed_channels:
+            return
         if (allowed_roles := self.config.get('allowed_role_ids', [])) and isinstance(message.author,
                                                                                      discord.Member) and not any(
-            role.id in allowed_roles for role in message.author.roles): return
+                role.id in allowed_roles for role in message.author.roles):
+            return
         if not self.main_llm_client:
             await message.reply(self.llm_config.get('error_msg', {}).get('general_error', "LLM client not configured."),
                                 silent=True)
@@ -180,7 +187,8 @@ class LLMCog(commands.Cog, name="LLM"):
         messages_for_api: List[Dict[str, Any]] = [{"role": "system", "content": system_prompt}]
         max_history_entries = self.llm_config.get('max_messages', 10) * 2
         channel_history = self.chat_histories[history_key]
-        if len(channel_history) > max_history_entries: channel_history = channel_history[-max_history_entries:]
+        if len(channel_history) > max_history_entries:
+            channel_history = channel_history[-max_history_entries:]
         messages_for_api.extend(channel_history)
         user_content_parts = [{"type": "text", "text": text_content}] if text_content else []
         user_content_parts.extend(image_contents)
@@ -196,8 +204,8 @@ class LLMCog(commands.Cog, name="LLM"):
                             )
                 self.chat_histories[history_key].append(user_message_for_api)
                 self.chat_histories[history_key].append({"role": "assistant", "content": llm_response})
-                if len(self.chat_histories[history_key]) > max_history_entries: self.chat_histories[history_key] = \
-                self.chat_histories[history_key][-max_history_entries:]
+                if len(self.chat_histories[history_key]) > max_history_entries:
+                    self.chat_histories[history_key] = self.chat_histories[history_key][-max_history_entries:]
                 await self._send_reply_chunks(message, llm_response)
             else:
                 logger.warning(f"Received empty response from LLM | {log_context}")
@@ -205,51 +213,110 @@ class LLMCog(commands.Cog, name="LLM"):
                                                                              "Received an empty response from the AI."),
                                     silent=True)
         except Exception as e:
+            logger.error(f"Error during LLM interaction: {e}", exc_info=True)
             await message.reply(self._handle_llm_exception(e), silent=True)
 
     async def _get_llm_response(self, messages: List[Dict[str, Any]], log_context: str) -> str:
-        current_messages = messages
-        max_iterations = self.llm_config.get('max_tool_iterations', 3)
+        current_messages = messages.copy()
+        max_iterations = self.llm_config.get('max_tool_iterations', 5)
         extra_params = self.llm_config.get('extra_api_parameters', {})
-        for _ in range(max_iterations):
+
+        for iteration in range(max_iterations):
             tools_def = self.get_tools_definition()
-            api_kwargs = {"model": self.main_llm_client.model_name_for_api_calls, "messages": current_messages,
-                          "temperature": extra_params.get('temperature', 0.7),
-                          "max_tokens": extra_params.get('max_tokens', 4096)}
+            api_kwargs = {
+                "model": self.main_llm_client.model_name_for_api_calls,
+                "messages": current_messages,
+                "temperature": extra_params.get('temperature', 0.7),
+                "max_tokens": extra_params.get('max_tokens', 4096)
+            }
+
             if tools_def:
                 api_kwargs["tools"] = tools_def
                 api_kwargs["tool_choice"] = "auto"
-            response = await self.main_llm_client.chat.completions.create(**api_kwargs)
-            response_message = response.choices[0].message
-            current_messages.append(response_message.model_dump(exclude_none=True))
-            if response_message.tool_calls:
-                if (final_answer := await self._process_tool_calls(response_message.tool_calls, current_messages,
-                                                                   log_context)) is not None:
-                    return final_answer
-                continue
-            else:
-                return response_message.content
+
+            try:
+                response = await self.main_llm_client.chat.completions.create(**api_kwargs)
+                response_message = response.choices[0].message
+
+                # Add assistant message to conversation
+                current_messages.append(response_message.model_dump(exclude_none=True))
+
+                # If there are tool calls, process them
+                if response_message.tool_calls:
+                    logger.info(
+                        f"Processing {len(response_message.tool_calls)} tool call(s) in iteration {iteration + 1}")
+
+                    # Process all tool calls and add their results to the conversation
+                    await self._process_tool_calls(response_message.tool_calls, current_messages, log_context)
+
+                    # Continue the loop to get LLM's response based on tool results
+                    continue
+                else:
+                    # No tool calls, return the final response
+                    return response_message.content or ""
+
+            except Exception as e:
+                logger.error(f"Error during LLM API call in iteration {iteration + 1}: {e}", exc_info=True)
+                raise
+
+        # If we've reached max iterations, return a timeout message
+        logger.warning(f"Tool processing exceeded max iterations ({max_iterations})")
         return self.llm_config.get('error_msg', {}).get('tool_loop_timeout', "Tool processing exceeded max iterations.")
 
-    async def _process_tool_calls(self, tool_calls: List[Any], messages: List[Dict[str, Any]], log_context: str) -> \
-    Optional[str]:
+    async def _process_tool_calls(self, tool_calls: List[Any], messages: List[Dict[str, Any]],
+                                  log_context: str) -> None:
+        """Process tool calls and add their results to the message history."""
         for tool_call in tool_calls:
             function_name = tool_call.function.name
+
             if self.search_agent and function_name == self.search_agent.name:
                 try:
                     function_args = json.loads(tool_call.function.arguments)
                     query_text = function_args.get('query', 'N/A')
                     logger.info(f"Executing SearchAgent | {log_context} | query='{query_text}'")
-                    return await self.search_agent.run(arguments=function_args, bot=self.bot)
+
+                    # Execute the search agent and get results
+                    search_results = await self.search_agent.run(arguments=function_args, bot=self.bot)
+
+                    # Add tool response to conversation
+                    tool_response = {
+                        "tool_call_id": tool_call.id,
+                        "role": "tool",
+                        "name": function_name,
+                        "content": str(search_results)
+                    }
+                    messages.append(tool_response)
+
+                    logger.info(f"SearchAgent completed | {log_context} | result_length={len(str(search_results))}")
+
+                except json.JSONDecodeError as e:
+                    logger.error(f"Error parsing tool arguments: {e}")
+                    error_response = {
+                        "tool_call_id": tool_call.id,
+                        "role": "tool",
+                        "name": function_name,
+                        "content": f"Error: Invalid JSON arguments - {str(e)}"
+                    }
+                    messages.append(error_response)
+
                 except Exception as e:
                     logger.error(f"Error executing SearchAgent: {e}", exc_info=True)
-                    tool_output = f"[Tool Execution Error] Failed to run '{function_name}': {e}"
+                    error_response = {
+                        "tool_call_id": tool_call.id,
+                        "role": "tool",
+                        "name": function_name,
+                        "content": f"Error executing search: {str(e)}"
+                    }
+                    messages.append(error_response)
             else:
                 logger.warning(f"Received a call for an unsupported tool: {function_name} | {log_context}")
-                tool_output = f"[Tool Execution Error] Tool '{function_name}' is not available."
-            messages.append(
-                {"tool_call_id": tool_call.id, "role": "tool", "name": function_name, "content": str(tool_output)})
-        return None
+                error_response = {
+                    "tool_call_id": tool_call.id,
+                    "role": "tool",
+                    "name": function_name,
+                    "content": f"Error: Tool '{function_name}' is not available."
+                }
+                messages.append(error_response)
 
     def _handle_llm_exception(self, e: Exception) -> str:
         if isinstance(e, openai.RateLimitError):
@@ -268,7 +335,8 @@ class LLMCog(commands.Cog, name="LLM"):
             return self.llm_config.get('error_msg', {}).get('general_error', "An unexpected error occurred.")
 
     async def _send_reply_chunks(self, message: discord.Message, text_content: str):
-        if not text_content: return
+        if not text_content:
+            return
         chunks = self._split_message(text_content, DISCORD_MESSAGE_MAX_LENGTH)
         first_chunk = chunks.pop(0) if chunks else ""
         try:
@@ -280,17 +348,20 @@ class LLMCog(commands.Cog, name="LLM"):
             await message.channel.send(chunk, silent=True)
 
     def _split_message(self, text_content: str, max_length: int) -> List[str]:
-        if not text_content: return []
+        if not text_content:
+            return []
         chunks, current_chunk = [], io.StringIO()
         for line in text_content.splitlines(keepends=True):
             if current_chunk.tell() + len(line) > max_length:
-                if chunk_val := current_chunk.getvalue(): chunks.append(chunk_val)
+                if chunk_val := current_chunk.getvalue():
+                    chunks.append(chunk_val)
                 current_chunk = io.StringIO()
                 while len(line) > max_length:
-                    chunks.append(line[:max_length]);
+                    chunks.append(line[:max_length])
                     line = line[max_length:]
             current_chunk.write(line)
-        if final_chunk := current_chunk.getvalue(): chunks.append(final_chunk)
+        if final_chunk := current_chunk.getvalue():
+            chunks.append(final_chunk)
         return chunks
 
     @app_commands.command(name="llm_help", description="LLM (AI対話) 機能に関する詳細なヘルプを表示します。")
@@ -311,11 +382,17 @@ class LLMCog(commands.Cog, name="LLM"):
                   f"• 他の人のメッセージに返信する形でメンションすると、引用元の画像も認識します。",
             inline=False
         )
+
+        # Show active tools information
+        active_tools = self.llm_config.get('active_tools', [])
+        tools_info = "• なし" if not active_tools else "• " + ", ".join(active_tools)
+
         embed.add_field(
             name="現在のAI設定",
             value=f"• **使用モデル:** `{self.llm_config.get('model', '未設定')}`\n"
                   f"• **会話履歴の最大保持数:** {self.llm_config.get('max_messages', '未設定')} ペア\n"
-                  f"• **一度に処理できる最大画像枚数:** {self.llm_config.get('max_images', '未設定')} 枚",
+                  f"• **一度に処理できる最大画像枚数:** {self.llm_config.get('max_images', '未設定')} 枚\n"
+                  f"• **利用可能なツール:** {tools_info}",
             inline=False
         )
         embed.add_field(
@@ -355,10 +432,16 @@ class LLMCog(commands.Cog, name="LLM"):
                   f"• If you reply to another message while mentioning the bot, it will also see the images in the replied-to message.",
             inline=False
         )
+
+        # Show active tools information
+        active_tools = self.llm_config.get('active_tools', [])
+        tools_info = "• None" if not active_tools else "• " + ", ".join(active_tools)
+
         settings_value = (
             f"• **Model in Use:** `{self.llm_config.get('model', 'Not set')}`\n"
             f"• **Max Conversation History:** {self.llm_config.get('max_messages', 'Not set')} pairs\n"
-            f"• **Max Images Processed at Once:** {self.llm_config.get('max_images', 'Not set')} image(s)"
+            f"• **Max Images Processed at Once:** {self.llm_config.get('max_images', 'Not set')} image(s)\n"
+            f"• **Available Tools:** {tools_info}"
         )
         embed.add_field(name="Current AI Settings", value=settings_value, inline=False)
         embed.add_field(
@@ -377,6 +460,16 @@ class LLMCog(commands.Cog, name="LLM"):
         )
         embed.set_footer(text="By using this feature, you agree to these terms.")
         await interaction.followup.send(embed=embed, ephemeral=False)
+
+    @app_commands.command(name="clear_history", description="現在のチャンネルの会話履歴をクリアします。")
+    async def clear_history_slash(self, interaction: discord.Interaction):
+        """Clear the conversation history for the current channel."""
+        history_key = interaction.channel_id
+        if history_key in self.chat_histories:
+            del self.chat_histories[history_key]
+            await interaction.response.send_message("✅ このチャンネルの会話履歴をクリアしました。", ephemeral=True)
+        else:
+            await interaction.response.send_message("ℹ️ このチャンネルには会話履歴がありません。", ephemeral=True)
 
 
 async def setup(bot: commands.Bot):
