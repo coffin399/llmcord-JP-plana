@@ -11,3 +11,5 @@ google-generativeai
 yt-dlp
 pycryptodomex
 ffmpeg
+mistralai
+mistralai[async]

@@ -23,7 +23,7 @@ help_message: ""
 llm:
   max_text: 100000
   max_images: 20
-  max_messages: 50 # LLMの会話履歴の最大メッセージ数
+  max_messages: 100 # LLMの会話履歴の最大メッセージ数
 
   providers:
     openai:
@@ -102,10 +102,9 @@ llm:
   active_tools: [search] # 有効にするツールのリスト
   max_tool_iterations: 3 # ツール呼び出しの最大反復回数
 
-  search_agent: # SearchAgent用の設定
-    model: "gemini-2.5-flash-preview-05-20" # Google Search (AIAgent) が使用するモデル (例: gemini-1.0-pro, gemini-1.5-flash など)
-    api_key: YOUR_GOOGLE_AI_STUDIO_API_KEY_HERE # Google AI Studio (Gemini) のAPIキー
-    format_control: "The research should be comprehensive and high detail and the information should be presented in a formal report format; the report should be in English, queries too"
+  search_agent: # SearchAgent用の設定 (Mistral AI Search Tool に変更)
+    model: "mistral-large-latest"
+    api_key: YOUR_MISTRAL_API_KEY_HERE
 
   # LLM Cog 用のコマンドメッセージやエラーメッセージ
   help_message: "このボットは、Discord上でLLMと対話するためのボットです。\n 以下のコマンドを使用できます:\n - `planahelp`: LLM機能のヘルプを表示します。\n - @PLANAでメンションをつけて、テキストメッセージを送信すると、ボットが応答します。\n https://imgur.com/p6jHitD"
@@ -128,14 +127,11 @@ enabled_cogs:
   - image_commands_cog
 
 # Music Cog Settings
-
-# Music Cog Settings
 music:
   default_volume: 50 # デフォルト音量 (0-200 の入力だが、内部では 0.0-2.0 で扱う)
   max_queue_size: 10000
   auto_leave_timeout: 60 # ユーザー不在時の自動退出までの秒数
   log_level: "INFO" # Music Cogのログレベル (DEBUG, INFO, WARNING, ERROR)
-  bot_activity_playing: "/music_help 音楽再生機能追加♪"
   max_playlist_items: 10000 # プレイリストから一度に読み込む最大曲数
 
   # FFmpeg settings

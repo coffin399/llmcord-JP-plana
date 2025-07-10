@@ -144,7 +144,9 @@ class Shittim(commands.Bot):
         # config.yamlからステータスのリストを取得、なければデフォルト値を使用
         self.status_templates = self.config.get('status_rotation', [
             "plz type /help",
-            "operating on {guild_count} servers"
+            "operating on {guild_count} servers",
+            "評価テスト中...",
+            "In the testing phase..."
         ])
 
         # ステータスローテーションタスクを開始
