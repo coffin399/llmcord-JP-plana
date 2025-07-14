@@ -42,7 +42,7 @@ class GuildState:
         self.bot = bot
         self.guild_id = guild_id
         self.voice_client: Optional[discord.VoiceClient] = None
-        self.current_track: Optional[Track] = None  # Trackにはrequester_idが保存される
+        self.current_track: Optional[Track] = None
         self.queue: asyncio.Queue[Track] = asyncio.Queue()
         self.volume: float = cog_config.get('music', {}).get('default_volume', 50) / 100.0
         self.loop_mode: LoopMode = LoopMode.OFF
@@ -92,8 +92,8 @@ class MusicCog(commands.Cog, name="音楽"):
         self.ffmpeg_before_options = self.music_config.get('ffmpeg_before_options',
                                                            "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5")
         self.ffmpeg_options = self.music_config.get('ffmpeg_options', "-vn")
-        self.auto_leave_timeout = self.music_config.get('auto_leave_timeout', 60)
-        self.max_queue_size = self.music_config.get('max_queue_size', 100)
+        self.auto_leave_timeout = self.music_config.get('auto_leave_timeout', 10)
+        self.max_queue_size = self.music_config.get('max_queue_size', 9000)
 
     def _load_bot_config(self) -> dict:
         if hasattr(self.bot, 'config') and self.bot.config: return self.bot.config
@@ -117,7 +117,9 @@ class MusicCog(commands.Cog, name="音楽"):
 
     def _get_message(self, key: str, **kwargs) -> str:
         messages_dict = self.music_config.get('messages', {})
-        template = messages_dict.get(key, f"Queue")
+        template = messages_dict.get(key, f"Message key '{key}' not found.")
+        if key == "leaving_channel_queue_empty" and template == f"Message key '{key}' not found.":
+            template = "キューの再生が終了したため、ボイスチャンネルから退出します。"
         prefix_val = DEFAULT_PREFIX
         if hasattr(self.bot, 'command_prefix'):
             prefix = self.bot.command_prefix
@@ -155,9 +157,10 @@ class MusicCog(commands.Cog, name="音楽"):
             if connect_if_not_in:
                 try:
                     state.voice_client = await ctx.author.voice.channel.connect(timeout=15.0,
-                                                                                reconnect=True);
+                                                                                reconnect=True)
+                    await ctx.guild.me.edit(deafen=True)
                     logger.info(
-                        f"ギルド {ctx.guild.name} のVC {state.voice_client.channel.name} に接続。")
+                        f"ギルド {ctx.guild.name} のVC {state.voice_client.channel.name} に接続し、スピーカーミュートにしました。")
                 except asyncio.TimeoutError:
                     logger.error(f"ギルド {ctx.guild.name} VC接続タイムアウト。");
                     await self._send_msg(ctx.channel,
@@ -195,23 +198,18 @@ class MusicCog(commands.Cog, name="音楽"):
             track_to_play = state.current_track
         else:
             if state.queue.empty():
-                old_current_track = state.current_track;
+                logger.info(f"ギルドID {guild_id}: キューが空になりました。VCから退出処理を開始します。")
                 state.current_track = None;
                 state.is_playing = False
                 if state.last_text_channel_id:
                     channel = self.bot.get_channel(state.last_text_channel_id)
-                    if channel: await self._send_msg(channel, "queue_ended")
-                if old_current_track and state.loop_mode == LoopMode.ALL:
-                    await state.queue.put(old_current_track)
-                    if not state.queue.empty():
-                        track_to_play = await state.queue.get();
-                        state.queue.task_done()
-                    else:
-                        self._schedule_auto_leave(guild_id);
-                        return
-                else:
-                    self._schedule_auto_leave(guild_id);
-                    return
+                    if channel:
+                        await self._send_msg(channel, "queue_ended")
+                        await self._send_msg(channel, "leaving_channel_queue_empty")
+                if state.voice_client and state.voice_client.is_connected():
+                    await state.voice_client.disconnect()
+                return
+
             else:
                 track_to_play = await state.queue.get();
                 state.queue.task_done()
@@ -301,42 +299,44 @@ class MusicCog(commands.Cog, name="音楽"):
 
     def _song_finished_callback(self, error: Optional[Exception], guild_id: int):
         state = self._get_guild_state(guild_id)
-        finished_track = state.current_track;
+        finished_track = state.current_track
         state.is_playing = False
+        state.current_track = None
+
         if error:
             logger.error(f"ギルドID {guild_id}: 再生エラー (after): {error}")
             if state.last_text_channel_id:
                 text_channel = self.bot.get_channel(state.last_text_channel_id)
-                if text_channel: asyncio.run_coroutine_threadsafe(
-                    self._send_msg(text_channel, "error_playing", error=str(error)), self.bot.loop)
-        if finished_track and state.loop_mode == LoopMode.ALL:
-            async def _add_finished_to_queue():
-                if finished_track: await state.queue.put(finished_track)
+                if text_channel:
+                    asyncio.run_coroutine_threadsafe(
+                        self._send_msg(text_channel, "error_playing", error=str(error)), self.bot.loop)
 
-            asyncio.run_coroutine_threadsafe(_add_finished_to_queue(), self.bot.loop)
+        if finished_track and state.loop_mode == LoopMode.ALL:
+            asyncio.run_coroutine_threadsafe(state.queue.put(finished_track), self.bot.loop)
+
         coro = self._play_next_song(guild_id)
         asyncio.run_coroutine_threadsafe(coro, self.bot.loop)
 
     def _schedule_auto_leave(self, guild_id: int):
         state = self._get_guild_state(guild_id)
-        if state.auto_leave_task and not state.auto_leave_task.done(): state.auto_leave_task.cancel(); state.auto_leave_task = None
-        if not state.is_playing and not state.is_paused and state.queue.empty() and not state.current_track:
-            if state.voice_client and state.voice_client.is_connected():
-                human_members = [m for m in state.voice_client.channel.members if not m.bot]
-                if not human_members:
-                    logger.info(
-                        f"ギルドID {guild_id}: 自動退出タイマー開始 ({self.auto_leave_timeout}秒)。"); state.auto_leave_task = asyncio.create_task(
-                        self._auto_leave_coroutine(guild_id))
-                else:
-                    logger.debug(f"ギルドID {guild_id}: ユーザーがいるため自動退出タイマー開始せず。")
-            else:
-                logger.debug(f"ギルドID {guild_id}: VC未接続のため自動退出タイマー開始せず。")
+        # 既にタスクが実行中の場合はキャンセルして再スケジュール
+        if state.auto_leave_task and not state.auto_leave_task.done():
+            state.auto_leave_task.cancel()
+
+        if state.voice_client and state.voice_client.is_connected():
+            logger.info(
+                f"ギルドID {guild_id}: 自動退出タイマー開始 ({self.auto_leave_timeout}秒)。")
+            state.auto_leave_task = asyncio.create_task(
+                self._auto_leave_coroutine(guild_id))
+        else:
+            logger.debug(f"ギルドID {guild_id}: VC未接続のため自動退出タイマー開始せず。")
 
     async def _auto_leave_coroutine(self, guild_id: int):
         state = self._get_guild_state(guild_id)
         await asyncio.sleep(self.auto_leave_timeout)
-        if state.voice_client and state.voice_client.is_connected() and \
-                not state.is_playing and not state.is_paused and state.queue.empty() and not state.current_track:
+
+        # タイムアウト後、VCに接続されているか、かつ人間がいないかを再度確認
+        if state.voice_client and state.voice_client.is_connected():
             human_members = [m for m in state.voice_client.channel.members if not m.bot]
             if not human_members:
                 logger.info(f"ギルドID {guild_id}: タイムアウト。VCから自動退出。")
@@ -345,7 +345,7 @@ class MusicCog(commands.Cog, name="音楽"):
                     if channel: await self._send_msg(channel, "auto_left_empty_channel")
                 await state.voice_client.disconnect()
             else:
-                logger.info(f"ギルドID {guild_id}: 自動退出キャンセル (ユーザー再参加/再生開始)。")
+                logger.info(f"ギルドID {guild_id}: 自動退出キャンセル (ユーザー再参加)。")
         else:
             logger.info(f"ギルドID {guild_id}: 自動退出処理中に状態変化、退出中止。")
 
@@ -382,21 +382,24 @@ class MusicCog(commands.Cog, name="音楽"):
         if guild_id not in self.guild_states: return
         state = self._get_guild_state(guild_id)
         if not state.voice_client or not state.voice_client.is_connected(): return
+
         if member.id == self.bot.user.id and before.channel and not after.channel:
             logger.info(f"ギルドID {guild_id}: ボットがVC {before.channel.name} から切断。状態クリーンアップ。");
             await self._cleanup_guild_state(guild_id);
             return
-        if state.voice_client.channel != before.channel and state.voice_client.channel != after.channel:
-            if before.channel == state.voice_client.channel:
-                human_members_in_old_channel = [m for m in before.channel.members if not m.bot]
-                if not human_members_in_old_channel and not state.is_playing and not state.is_paused:
-                    if not state.auto_leave_task or state.auto_leave_task.done(): self._schedule_auto_leave(guild_id)
-            return
+
         current_vc_channel = state.voice_client.channel
+
+        # イベントがボットのいるチャンネルと無関係なら無視
+        if before.channel != current_vc_channel and after.channel != current_vc_channel:
+            return
+
         human_members_in_vc = [m for m in current_vc_channel.members if not m.bot]
+
         if not human_members_in_vc:
-            if not state.is_playing and not state.is_paused:
-                if not state.auto_leave_task or state.auto_leave_task.done(): self._schedule_auto_leave(guild_id)
+            # VCが空になったら、再生状態に関わらず自動退出タイマーを開始する
+            if not state.auto_leave_task or state.auto_leave_task.done():
+                self._schedule_auto_leave(guild_id)
         else:
             if state.auto_leave_task and not state.auto_leave_task.done():
                 logger.info(f"ギルドID {guild_id}: ユーザーVC参加/残存のため自動退出タイマーキャンセル。");
@@ -413,24 +416,33 @@ class MusicCog(commands.Cog, name="音楽"):
             if state.voice_client.channel == target_channel: await self._send_msg(ctx.channel,
                                                                                   "already_connected"); return
             try:
-                await state.voice_client.move_to(target_channel); logger.info(
-                    f"ギルド {ctx.guild.name}: VCを {target_channel.name} に移動。"); await ctx.message.add_reaction("✅")
+                await state.voice_client.move_to(target_channel)
+                await ctx.guild.me.edit(deafen=True)
+                logger.info(
+                    f"ギルド {ctx.guild.name}: VCを {target_channel.name} に移動し、スピーカーミュートにしました。");
+                await ctx.message.add_reaction("✅")
             except Exception as e:
-                logger.error(f"チャンネル移動エラー: {e}", exc_info=True); await self._send_msg(ctx.channel,
-                                                                                                "error_playing",
-                                                                                                error=f"チャンネル移動失敗 ({type(e).__name__})")
+                logger.error(f"チャンネル移動エラー: {e}", exc_info=True);
+                await self._send_msg(ctx.channel,
+                                     "error_playing",
+                                     error=f"チャンネル移動失敗 ({type(e).__name__})")
         else:
             try:
-                state.voice_client = await target_channel.connect(timeout=15.0, reconnect=True); logger.info(
-                    f"ギルド {ctx.guild.name}: VC {target_channel.name} に接続。"); await ctx.message.add_reaction("✅")
+                state.voice_client = await target_channel.connect(timeout=15.0, reconnect=True)
+                await ctx.guild.me.edit(deafen=True)
+                logger.info(
+                    f"ギルド {ctx.guild.name}: VC {target_channel.name} に接続し、スピーカーミュートにしました。");
+                await ctx.message.add_reaction("✅")
             except asyncio.TimeoutError:
-                logger.error(f"ギルド {ctx.guild.name}: VC接続タイムアウト。"); await self._send_msg(ctx.channel,
-                                                                                                    "error_playing",
-                                                                                                    error="VC接続タイムアウト。")
+                logger.error(f"ギルド {ctx.guild.name}: VC接続タイムアウト。");
+                await self._send_msg(ctx.channel,
+                                     "error_playing",
+                                     error="VC接続タイムアウト。")
             except Exception as e:
-                logger.error(f"チャンネル接続エラー: {e}", exc_info=True); await self._send_msg(ctx.channel,
-                                                                                                "error_playing",
-                                                                                                error=f"チャンネル接続失敗 ({type(e).__name__})")
+                logger.error(f"チャンネル接続エラー: {e}", exc_info=True);
+                await self._send_msg(ctx.channel,
+                                     "error_playing",
+                                     error=f"チャンネル接続失敗 ({type(e).__name__})")
 
     @commands.command(name="leave", aliases=["disconnect", "dc", "bye"], help="ボットをVCから切断。")
     async def leave_command(self, ctx: commands.Context):
@@ -522,7 +534,7 @@ class MusicCog(commands.Cog, name="音楽"):
         if not state.current_track and state.queue.empty(): await self._send_msg(ctx.channel, "nothing_to_skip"); return
         if not state.is_playing and not state.is_paused and not state.current_track: await self._send_msg(ctx.channel,
                                                                                                           "nothing_to_skip"); return
-        skipped_title = state.current_track.title if state.current_track else "キューの次の曲"
+        skipped_title = state.current_track.title if state.current_track else "現在の曲"
         logger.info(f"ギルド {ctx.guild.name}: {ctx.author.name} により {skipped_title} をスキップ。");
         await self._send_msg(ctx.channel, "skipped_song", title=skipped_title);
         state.voice_client.stop()
@@ -536,8 +548,12 @@ class MusicCog(commands.Cog, name="音楽"):
         await self._send_msg(ctx.channel, "stopped_playback")
         state.loop_mode = LoopMode.OFF;
         await state.clear_queue();
-        state.current_track = None
-        if state.voice_client and state.voice_client.is_playing(): state.voice_client.stop()
+
+        if state.voice_client and state.voice_client.is_playing():
+            state.voice_client.stop()
+        else:
+            asyncio.create_task(self._play_next_song(ctx.guild.id))
+
         state.is_playing = False;
         state.is_paused = False
         if state.now_playing_message:
@@ -546,7 +562,6 @@ class MusicCog(commands.Cog, name="音楽"):
             except:
                 pass
             state.now_playing_message = None
-        self._schedule_auto_leave(ctx.guild.id)
 
     @commands.command(name="pause", help="再生を一時停止。")
     async def pause_command(self, ctx: commands.Context):
@@ -609,7 +624,8 @@ class MusicCog(commands.Cog, name="音楽"):
                 else:
                     try:
                         user_np = await self.bot.fetch_user(
-                            track.requester_id); display_name_now_playing = user_np.display_name
+                            track.requester_id);
+                        display_name_now_playing = user_np.display_name
                     except:
                         pass
 
@@ -636,7 +652,8 @@ class MusicCog(commands.Cog, name="音楽"):
                 else:
                     try:
                         user_q = await self.bot.fetch_user(
-                            track_in_q.requester_id); display_name_queued = user_q.display_name
+                            track_in_q.requester_id);
+                        display_name_queued = user_q.display_name
                     except:
                         pass
             description_lines.append(
@@ -722,11 +739,14 @@ class MusicCog(commands.Cog, name="音楽"):
                                                                               f"現在のループモード: {state.loop_mode.name.lower()}")); return
         mode_lower = mode.lower()
         if mode_lower in ["off", "none"]:
-            state.loop_mode = LoopMode.OFF; await self._send_msg(ctx.channel, "loop_off")
+            state.loop_mode = LoopMode.OFF;
+            await self._send_msg(ctx.channel, "loop_off")
         elif mode_lower in ["one", "song", "track"]:
-            state.loop_mode = LoopMode.ONE; await self._send_msg(ctx.channel, "loop_one")
+            state.loop_mode = LoopMode.ONE;
+            await self._send_msg(ctx.channel, "loop_one")
         elif mode_lower in ["all", "queue"]:
-            state.loop_mode = LoopMode.ALL; await self._send_msg(ctx.channel, "loop_all")
+            state.loop_mode = LoopMode.ALL;
+            await self._send_msg(ctx.channel, "loop_all")
         else:
             await self._send_msg(ctx.channel, "invalid_loop_option")
 
@@ -775,8 +795,9 @@ class MusicCog(commands.Cog, name="音楽"):
                  "desc_en": "Pauses the currently playing song."},
                 {"name": "resume", "args_ja": "", "args_en": "", "desc_ja": "一時停止中の曲の再生を再開します。",
                  "desc_en": "Resumes playback of a paused song."},
-                {"name": "stop", "args_ja": "", "args_en": "", "desc_ja": "再生を完全に停止し、キューをクリアします。",
-                 "desc_en": "Completely stops playback and clears the queue."},
+                {"name": "stop", "args_ja": "", "args_en": "",
+                 "desc_ja": "再生を完全に停止し、キューをクリアしてVCから退出します。",
+                 "desc_en": "Completely stops playback, clears the queue, and leaves the VC."},
                 {"name": "skip", "args_ja": "", "args_en": "",
                  "desc_ja": "現在再生中の曲をスキップして次の曲を再生します。",
                  "desc_en": "Skips the currently playing song and plays the next one in the queue."},

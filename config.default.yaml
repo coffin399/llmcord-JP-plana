@@ -130,7 +130,7 @@ enabled_cogs:
 music:
   default_volume: 50 # デフォルト音量 (0-200 の入力だが、内部では 0.0-2.0 で扱う)
   max_queue_size: 10000
-  auto_leave_timeout: 60 # ユーザー不在時の自動退出までの秒数
+  auto_leave_timeout: 10 # ユーザー不在時の自動退出までの秒数
   log_level: "INFO" # Music Cogのログレベル (DEBUG, INFO, WARNING, ERROR)
   max_playlist_items: 10000 # プレイリストから一度に読み込む最大曲数
 
