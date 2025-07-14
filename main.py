@@ -192,6 +192,16 @@ class Shittim(commands.Bot):
 
 
 if __name__ == "__main__":
+    plana_art = r"""
+██████╗ ██╗      █████╗ ███╗   ██╗ █████╗ 
+██╔══██╗██║     ██╔══██╗████╗  ██║██╔══██╗
+██████╔╝██║     ███████║██╔██╗ ██║███████║
+██╔═══╝ ██║     ██╔══██║██║╚██╗██║██╔══██║
+██║     ███████╗██║  ██║██║ ╚████║██║  ██║
+╚═╝     ╚══════╝╚═╝  ╚═╝╚═╝  ╚═══╝╚═╝  ╚═╝
+    """
+    print(plana_art)
+
     initial_config = {}
     try:
         if not os.path.exists(CONFIG_FILE) and os.path.exists(DEFAULT_CONFIG_FILE):
