@@ -4,6 +4,7 @@ from discord.ext import commands
 import logging
 import datetime
 from typing import Optional
+import random  # ガチャ機能のために追加
 
 logger = logging.getLogger(__name__)
 
@@ -11,30 +12,96 @@ logger = logging.getLogger(__name__)
 class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-        # configから必要な値を取得 (Botインスタンスにconfigがロードされている前提)
+        # configから必要な値を取得
         self.arona_repository = self.bot.config.get("arona_repository_url", "")
         self.plana_repository = self.bot.config.get("plana_repository_url", "")
         self.support_server_invite = self.bot.config.get("support_server_invite_url", "")
-
         self.bot_invite_url = self.bot.config.get("bot_invite_url")
+
         if not self.bot_invite_url:
             logger.error(
                 "CRITICAL: config.yaml に 'bot_invite_url' が設定されていません。/invite コマンドは機能しません。")
-        elif self.bot_invite_url in ["YOUR_BOT_INVITE_LINK_HERE", "HOGE_FUGA_PIYO"]:  # プレースホルダのチェック
+        elif self.bot_invite_url in ["YOUR_BOT_INVITE_LINK_HERE", "HOGE_FUGA_PIYO"]:
             logger.error(
                 "CRITICAL: 'bot_invite_url' がプレースホルダのままです。/invite コマンドは正しく機能しません。config.yamlを確認してください。")
 
-        # config.yaml から日本語と英語の汎用ヘルプメッセージを取得
-        self.generic_help_message_text_ja = self.bot.config.get("generic_help_message_ja","ヘルプ")
-        self.generic_help_message_text_en = self.bot.config.get("generic_help_message_en","Help")
+        self.generic_help_message_text_ja = self.bot.config.get("generic_help_message_ja", "ヘルプ")
+        self.generic_help_message_text_en = self.bot.config.get("generic_help_message_en", "Help")
 
     async def get_prefix_from_config(self) -> str:
-        prefix = "!!"  # デフォルト
+        prefix = "!!"
         if hasattr(self.bot, 'config') and self.bot.config:
             cfg_prefix = self.bot.config.get('prefix')
             if isinstance(cfg_prefix, str) and cfg_prefix:
                 prefix = cfg_prefix
         return prefix
+
+    def _get_single_recruit(self, guaranteed_star2: bool = False) -> int:
+        """
+        1回分の募集処理を行い、レアリティを返す。
+        """
+        if guaranteed_star2:
+            rarity_roll = random.uniform(0, 21.5)
+            return 3 if rarity_roll < 3.0 else 2
+        else:
+            rarity_roll = random.uniform(0, 100)
+            if rarity_roll < 3.0:
+                return 3
+            elif rarity_roll < 21.5:
+                return 2
+            else:
+                return 1
+
+    @app_commands.command(name="gacha",
+                          description="ブルーアーカイブ風の生徒募集（ガチャ）を行います。/ Recruits students like in Blue Archive.")
+    @app_commands.describe(rolls="募集回数を選択します。/ Select the number of recruitments.")
+    @app_commands.choices(rolls=[
+        app_commands.Choice(name="10回募集 (10 Rolls)", value=10),
+        app_commands.Choice(name="1回募集 (1 Roll)", value=1),
+    ])
+    async def gacha(self, interaction: discord.Interaction, rolls: app_commands.Choice[int]):
+        await interaction.response.defer(ephemeral=False)
+
+        num_rolls = rolls.value
+        results = []  # レアリティ(int)のリストを格納
+
+        # 募集処理
+        if num_rolls == 10:
+            for _ in range(9):
+                results.append(self._get_single_recruit())
+            results.append(self._get_single_recruit(guaranteed_star2=True))
+        else:
+            results.append(self._get_single_recruit())
+
+        # レアリティの存在チェック
+        has_star_3 = 3 in results
+
+        # Embedの色を設定
+        embed_color = discord.Color.purple() if has_star_3 else discord.Color.gold()
+
+        # レアリティを絵文字に変換
+        rarity_to_emoji = {1: "🟦", 2: "🟨", 3: "🟪"}
+        emoji_results = [rarity_to_emoji[r] for r in results]
+
+        # 絵文字を文字列に整形 (10回の場合は5個で改行)
+        if num_rolls == 10:
+            result_text = "".join(emoji_results[:5]) + "\n" + "".join(emoji_results[5:])
+        else:
+            result_text = emoji_results[0]
+
+        # Embedを作成
+        embed = discord.Embed(
+            title="生徒募集 結果 / Recruitment Results",
+            description=f"{interaction.user.mention} 先生の募集結果です。",
+            color=embed_color
+        )
+
+        embed.add_field(name="ガチャ結果/Gacha results", value=result_text,
+                        inline=False)
+        embed.set_footer(text="提供割合: 🟪(☆3): 3.0%, 🟨(☆2): 18.5%, 🟦(☆1): 78.5%")
+
+        await interaction.followup.send(embed=embed)
+        logger.info(f"/gacha ({num_rolls}回) が実行されました。 (User: {interaction.user.id})")
 
     @app_commands.command(name="ping",
                           description="Botの現在のレイテンシを表示します。/ Shows the bot's current latency.")
@@ -67,7 +134,7 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
         owner_display = "不明 / Unknown"
         if guild.owner:
             owner_display = guild.owner.mention
-        elif guild.owner_id:  # オーナーIDだけでも取得できれば
+        elif guild.owner_id:
             try:
                 owner_user = await self.bot.fetch_user(guild.owner_id)
                 owner_display = owner_user.mention if owner_user else f"ID: {guild.owner_id}"
@@ -86,10 +153,9 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
         created_at_text = discord.utils.format_dt(guild.created_at, style='F')
         embed.add_field(name="作成日時 / Created At", value=created_at_text, inline=False)
 
-        verification_level_str_ja = str(guild.verification_level).capitalize()  # これは日本語のEnum名ではない
-        verification_level_str_en = guild.verification_level.name.replace('_', ' ').capitalize()  # Enumの .name から取得
+        verification_level_str_en = guild.verification_level.name.replace('_', ' ').capitalize()
         embed.add_field(name="認証レベル / Verification Level",
-                        value=f"{verification_level_str_en}", inline=True)  # 英語ベースで表示
+                        value=f"{verification_level_str_en}", inline=True)
 
         if guild.features:
             features_str = ", ".join(f"`{f.replace('_', ' ').title()}`" for f in guild.features)
@@ -121,7 +187,7 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
         embed.add_field(name="アカウント作成日時 / Account Created", value=created_at_text, inline=False)
 
         if interaction.guild and isinstance(target_user, discord.Member):
-            member: discord.Member = target_user  # メンバーオブジェクトであることを明示
+            member: discord.Member = target_user
 
             joined_at_text = "不明 / Unknown"
             if member.joined_at:
@@ -143,7 +209,7 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
             if member.nick:
                 embed.add_field(name="ニックネーム / Nickname", value=member.nick, inline=True)
             if member.premium_since:
-                premium_text = discord.utils.format_dt(member.premium_since, style='R')  # 相対時間
+                premium_text = discord.utils.format_dt(member.premium_since, style='R')
                 embed.add_field(name="サーバーブースト開始 / Server Boosting Since", value=premium_text, inline=True)
 
         await interaction.response.send_message(embed=embed, ephemeral=False)
@@ -259,7 +325,6 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
         if bot_avatar_url:
             embed.set_thumbnail(url=bot_avatar_url)
 
-        # 詳細ヘルプへの誘導 (日英併記)
         desc_ja_detail = "より詳細な情報は、以下のコマンドで確認できます。"
         desc_en_detail = "For more detailed information, please check the following commands:"
         llm_help_cmd_ja = "• **AI対話機能:** `/llm_help` (または `/llm_help_en`)"
@@ -281,13 +346,13 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
         main_features_ja_val = (
             "- **AIとの対話 (LLM):** メンションで話しかけるとAIが応答します。画像も認識可能です。\n"
             "- **音楽再生:** ボイスチャンネルで音楽を再生、キュー管理、各種操作ができます。\n"
-            "- **画像検索:** 猫の画像や、Yande.reから指定タグの画像を表示できます。\n"
+            "- **画像検索:** 猫の画像を表示できます。\n"
             "- **情報表示:** サーバー情報、ユーザー情報、Botのレイテンシなどを表示します。"
         )
         main_features_en_val = (
             "- **AI Chat (LLM):** Mention the bot to talk with AI. It can also recognize images (if model supports).\n"
             "- **Music Playback:** Play music in voice channels, manage queues, and perform various operations.\n"
-            "- **Image Search:** Display cat pictures or images from Yande.re for specified tags.\n"
+            "- **Image Search:** Display cat pictures.\n"
             "- **Information Display:** Show server info, user info, bot latency, etc."
         )
         embed.add_field(
@@ -298,22 +363,22 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
 
         utility_title_ja = "便利なコマンド"
         utility_cmds_ja = [
+            f"`/gacha` - ブルーアーカイブ風の募集（ガチャ）をシミュレートします。",
             f"`/ping` - Botの応答速度を確認",
             f"`/serverinfo` - サーバー情報を表示",
             f"`/userinfo [ユーザー]` - ユーザー情報を表示",
             f"`/avatar [ユーザー]` - アバター画像を表示",
             f"`/invite` - Botの招待リンクを表示",
             f"`/meow` - ランダムな猫の画像を表示",
-            f"`/yandere [タグ]` - Yande.reから画像を表示 (NSFWチャンネルのみ)"
         ]
         utility_cmds_en = [
+            f"`/gacha` - Simulates student recruitment (gacha) like in Blue Archive.",
             f"`/ping` - Check bot's latency",
             f"`/serverinfo` - Display server info",
             f"`/userinfo [user]` - Display user info",
             f"`/avatar [user]` - Display avatar",
             f"`/invite` - Display bot invite link",
             f"`/meow` - Displays a random cat picture",
-            f"`/yandere [tags]` - Shows an image from Yande.re (NSFW channels only)"
         ]
 
         if self.support_server_invite and self.support_server_invite != "https://discord.gg/HogeFugaPiyo":
@@ -323,7 +388,7 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
             utility_cmds_ja.append(f"`/plana` - Plana (Bot)リポジトリ")
             utility_cmds_en.append(f"`/plana` - Plana (Bot) repository")
         if self.arona_repository:
-            utility_cmds_ja.append(f"`/arona` - Arona (Music)リポジトリ")  # Aronaのリポジトリも追加する場合
+            utility_cmds_ja.append(f"`/arona` - Arona (Music)リポジトリ")
             utility_cmds_en.append(f"`/arona` - Arona (Music) repository")
 
         embed.add_field(
@@ -349,6 +414,8 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
             await interaction.followup.send(embed=embed, ephemeral=False)
 
         logger.info(f"/help (概要) が実行されました。 (User: {interaction.user.id})")
+
+
 async def setup(bot: commands.Bot):
     if not hasattr(bot, 'config') or not bot.config:
         logger.error("SlashCommandsCog: Botインスタンスに 'config' 属性が見つからないか空です。Cogをロードできません。")
