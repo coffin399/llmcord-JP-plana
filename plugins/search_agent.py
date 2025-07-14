@@ -25,16 +25,6 @@ except ImportError:
 
 
 class SearchAgent:
-    """
-    An agent that uses the Mistral AI's native search tool to answer queries.
-    This implementation leverages the `tool_choice="search"` feature available
-    in specific Mistral models like mistral-large-latest.
-
-    Supported models with search capability:
-    - mistral-large-latest
-    - mistral-large-2407
-    - mistral-large-2411
-    """
 
     name = "search"
     tool_spec = {
@@ -59,7 +49,8 @@ class SearchAgent:
     SUPPORTED_MODELS = [
         "mistral-large-latest",
         "mistral-large-2407",
-        "mistral-large-2411"
+        "mistral-large-2411",
+        "mistral-medium-2505"
     ]
 
     def __init__(self, bot) -> None:
@@ -70,16 +61,6 @@ class SearchAgent:
         self.base_delay = 1.0
         self.timeout = 30.0
         self.initialization_error = None
-
-        # 診断情報の初期化
-        logger.info("=== SearchAgent Initialization Started ===")
-
-        # MistralAsyncClientが利用可能かチェック
-        if MistralAsyncClient is None:
-            error_msg = "MistralAsyncClient is not available. Please install mistralai library with: pip install mistralai"
-            logger.error(error_msg)
-            self.initialization_error = error_msg
-            return
 
         try:
             # config.yamlのキー 'search_agent' を参照します
@@ -94,8 +75,8 @@ class SearchAgent:
                 logger.error(error_msg)
                 logger.error("Please add the following to your config.yaml:")
                 logger.error("search_agent:")
-                logger.error("  api_key: 'your_mistral_api_key_here'")
-                logger.error("  model: 'mistral-large-latest'")
+                logger.error("api_key: 'your_mistral_api_key_here'")
+                logger.error("model: 'mistral-large-latest'")
                 self.initialization_error = error_msg
                 return
 
@@ -115,32 +96,14 @@ class SearchAgent:
             self.base_delay = mcfg.get("base_delay", 1.0)
             self.timeout = mcfg.get("timeout", 30.0)
 
-            logger.info(f"Configuration: model={self.model}, max_retries={self.max_retries}, timeout={self.timeout}")
-
-            # クライアントの初期化
-            logger.info("Initializing MistralAsyncClient...")
-            self.client = MistralAsyncClient(api_key=api_key)
-            logger.info(f"MistralAsyncClient for SearchAgent initialized successfully with model: {self.model}")
-
         except Exception as e:
             error_msg = f"Failed to initialize MistralAsyncClient for SearchAgent: {e}"
             logger.error(error_msg, exc_info=True)
             self.initialization_error = error_msg
             self.client = None
 
-        logger.info("=== SearchAgent Initialization Completed ===")
-        logger.info(f"Status: {'Success' if self.client else 'Failed'}")
-
     async def _mistral_search(self, query: str) -> str:
-        """
-        Performs a web search using the Mistral AI API with the 'search' tool.
 
-        Args:
-            query: The search query string
-
-        Returns:
-            str: The search results or error message
-        """
         if not self.client:
             error_details = []
             error_details.append("API client is not initialized. Check configuration and logs.")
@@ -358,9 +321,9 @@ class SearchAgent:
         lines.append("=== Required Setup ===")
         lines.append("1. Install MistralAI library: pip install mistralai")
         lines.append("2. Add to config.yaml:")
-        lines.append("   search_agent:")
-        lines.append("     api_key: 'your_mistral_api_key'")
-        lines.append("     model: 'mistral-large-latest'")
+        lines.append("  search_agent:")
+        lines.append("  api_key: 'your_mistral_api_key'")
+        lines.append("  model: 'mistral-large-latest'")
         lines.append("3. Get API key from: https://console.mistral.ai/")
 
         return "\n".join(lines)
