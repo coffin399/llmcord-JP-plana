@@ -598,74 +598,119 @@ class MusicCog(commands.Cog, name="音楽"):
                                                                            discord.PCMVolumeTransformer): state.voice_client.source.volume = state.volume
         await self._send_msg(ctx.channel, "volume_set", volume=volume)
 
-    @commands.command(name="queue", aliases=["q", "list"], help="現在の再生キュー表示。")
-    async def queue_command(self, ctx: commands.Context, page: int = 1):
-        state = self._get_guild_state(ctx.guild.id);
+    @commands.command(name="queue", aliases=["q", "list"], help="現在の再生キュー表示。矢印でページ操作可能。")
+    async def queue_command(self, ctx: commands.Context):
+        state = self._get_guild_state(ctx.guild.id)
         state.update_last_text_channel(ctx.channel.id)
-        if state.queue.empty() and not state.current_track: await self._send_msg(ctx.channel, "queue_empty"); return
+
+        if state.queue.empty() and not state.current_track:
+            await self._send_msg(ctx.channel, "queue_empty")
+            return
+
         items_per_page = 10
+        queue_list = list(state.queue._queue)
+        total_items = len(queue_list)
+        total_pages = math.ceil(total_items / items_per_page) if total_items > 0 else 1
 
-        embed = discord.Embed(
-            title=self._get_message("queue_title", count=state.queue.qsize() + (1 if state.current_track else 0)),
-            color=discord.Color.blue()
-        )
-        description_lines = []
-        current_queue_list = list(state.queue._queue)
-
-        if page == 1 and state.current_track:
-            track = state.current_track
-            prefix_char = ":arrow_forward:" if state.is_playing else (
-                ":pause_button:" if state.is_paused else ":musical_note:")
-            display_name_now_playing = "不明"
-            if track.requester_id:
-                member_np = ctx.guild.get_member(track.requester_id) if ctx.guild else None
-                if member_np:
-                    display_name_now_playing = member_np.display_name
-                else:
-                    try:
-                        user_np = await self.bot.fetch_user(
-                            track.requester_id);
-                        display_name_now_playing = user_np.display_name
-                    except:
-                        pass
-
-            description_lines.append(
-                f"**{prefix_char} {track.title}** (`{format_duration(track.duration)}`) - リクエスト: **{display_name_now_playing}**"
+        async def get_page_embed(page_num: int):
+            embed = discord.Embed(
+                title=self._get_message("queue_title", count=total_items + (1 if state.current_track else 0)),
+                color=discord.Color.blue()
             )
+            lines = []
 
-        total_queued_items = len(current_queue_list)
-        total_pages = math.ceil(total_queued_items / items_per_page) if total_queued_items > 0 else 1
-        if page < 1 or (page > total_pages and total_pages > 0):
-            await ctx.send(self._get_message("error_playing",
-                                             error=f"無効なページ番号。最大ページ: {total_pages if total_pages > 0 else 1}"));
+            # 1ページ目に再生中の曲を表示
+            if page_num == 1 and state.current_track:
+                track = state.current_track
+                prefix = "▶️" if state.is_playing else "⏸️"
+                requester_name = "不明"
+                if track.requester_id:
+                    member = ctx.guild.get_member(track.requester_id)
+                    if member:
+                        requester_name = member.display_name
+                    else:
+                        try:
+                            user = await self.bot.fetch_user(track.requester_id)
+                            requester_name = user.display_name
+                        except:
+                            pass
+                lines.append(
+                    f"**{prefix} {track.title}** (`{format_duration(track.duration)}`) - Req: **{requester_name}**\n")
+
+            # キューの曲を表示
+            start_index = (page_num - 1) * items_per_page
+            end_index = start_index + items_per_page
+
+            for i, track in enumerate(queue_list[start_index:end_index], start=start_index + 1):
+                requester_name = "不明"
+                if track.requester_id:
+                    member = ctx.guild.get_member(track.requester_id)
+                    if member:
+                        requester_name = member.display_name
+                    else:
+                        try:
+                            user = await self.bot.fetch_user(track.requester_id)
+                            requester_name = user.display_name
+                        except:
+                            pass
+                lines.append(
+                    f"`{i}.` **{track.title}** (`{format_duration(track.duration)}`) - Req: **{requester_name}**")
+
+            if not lines:
+                embed.description = "キューは空です。"
+            else:
+                embed.description = "\n".join(lines)
+
+            if total_pages > 1:
+                embed.set_footer(text=f"ページ {page_num}/{total_pages}")
+
+            return embed
+
+        current_page = 1
+        message = await ctx.send(embed=await get_page_embed(current_page))
+
+        if total_pages <= 1:
             return
 
-        q_start_index = (page - 1) * items_per_page
-        q_end_index = q_start_index + items_per_page
+        controls = ["⏪", "◀️", "▶️", "⏩", "⏹️"]
+        for control in controls:
+            await message.add_reaction(control)
 
-        for i, track_in_q in enumerate(current_queue_list[q_start_index:q_end_index], start=q_start_index + 1):
-            display_name_queued = "不明"
-            if track_in_q.requester_id:
-                member_q = ctx.guild.get_member(track_in_q.requester_id) if ctx.guild else None
-                if member_q:
-                    display_name_queued = member_q.display_name
-                else:
-                    try:
-                        user_q = await self.bot.fetch_user(
-                            track_in_q.requester_id);
-                        display_name_queued = user_q.display_name
-                    except:
-                        pass
-            description_lines.append(
-                f"`{i}.` **{track_in_q.title}** (`{format_duration(track_in_q.duration)}`) - リクエスト: **{display_name_queued}**")
+        def check(reaction, user):
+            return user == ctx.author and str(reaction.emoji) in controls and reaction.message.id == message.id
 
-        if not description_lines and not (page == 1 and state.current_track):
-            await self._send_msg(ctx.channel, "queue_empty");
-            return
+        while True:
+            try:
+                reaction, user = await self.bot.wait_for("reaction_add", timeout=60.0, check=check)
 
-        embed.description = "\n".join(description_lines) if description_lines else "キューは空です。"
-        if total_pages > 1: embed.set_footer(text=f"ページ {page}/{total_pages}")
-        await ctx.send(embed=embed)
+                new_page = current_page
+                if str(reaction.emoji) == "⏪":
+                    new_page = 1
+                elif str(reaction.emoji) == "◀️":
+                    new_page = max(1, current_page - 1)
+                elif str(reaction.emoji) == "▶️":
+                    new_page = min(total_pages, current_page + 1)
+                elif str(reaction.emoji) == "⏩":
+                    new_page = total_pages
+                elif str(reaction.emoji) == "⏹️":
+                    await message.clear_reactions()
+                    return
+
+                if new_page != current_page:
+                    current_page = new_page
+                    await message.edit(embed=await get_page_embed(current_page))
+
+                try:
+                    await message.remove_reaction(reaction, user)
+                except discord.Forbidden:
+                    pass
+
+            except asyncio.TimeoutError:
+                try:
+                    await message.clear_reactions()
+                except (discord.Forbidden, discord.HTTPException):
+                    pass  # 権限がない場合やメッセージが削除された場合は無視
+                break
 
     @commands.command(name="shuffle", aliases=["sh"], help="再生キューをシャッフル。")
     async def shuffle_command(self, ctx: commands.Context):
@@ -806,9 +851,9 @@ class MusicCog(commands.Cog, name="音楽"):
                  "desc_en": "Changes the playback volume. Shows current volume if no argument is given."},
             ],
             "💿 キュー管理 / Queue Management": [
-                {"name": "queue", "args_ja": "[ページ番号]", "args_en": "[page number]",
-                 "desc_ja": "現在の再生キュー（順番待ちリスト）を表示します。",
-                 "desc_en": "Displays the current song queue."},
+                {"name": "queue", "args_ja": "", "args_en": "",
+                 "desc_ja": "現在の再生キュー（順番待ちリスト）を表示します。矢印リアクションでページをめくれます。",
+                 "desc_en": "Displays the current song queue. You can turn pages with arrow reactions."},
                 {"name": "nowplaying", "args_ja": "", "args_en": "", "desc_ja": "現在再生中の曲の情報を表示します。",
                  "desc_en": "Shows information about the currently playing song."},
                 {"name": "shuffle", "args_ja": "", "args_en": "",
