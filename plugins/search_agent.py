@@ -141,7 +141,7 @@ class SearchAgent:
                 self.client.chat.complete_async(
                     model=self.model,
                     messages=messages,
-                    tools="search",  # 新しいAPIでは文字列形式
+                    tools=[{"type": "web_search"}],
                     temperature=0.1,
                     max_tokens=4000,
                 ),
