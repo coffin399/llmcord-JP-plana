@@ -308,9 +308,13 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
             logger.error(
                 f"/invite が実行されましたが、招待URLがconfig.yamlに未設定またはプレースホルダです。 (User: {interaction.user.id})")
 
-    @app_commands.command(name="help", description="Botのヘルプ情報を表示します。/ Displays bot help information.")
+    # ================================================================
+    # ▼▼▼ 統合されたヘルプコマンド ▼▼▼
+    # ================================================================
+    @app_commands.command(name="help",
+                          description="Botのヘルプ情報とAI利用ガイドラインを表示します。/ Displays help and AI usage guidelines.")
     async def help_slash_command(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=False)
+        await interaction.response.defer(ephemeral=False)  # 誰でも見れるようにephemeralはFalse
 
         bot_name_ja = self.bot.user.name if self.bot.user else "当Bot"
         bot_name_en = self.bot.user.name if self.bot.user else "This Bot"
@@ -318,13 +322,14 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
         prefix = await self.get_prefix_from_config()
 
         embed = discord.Embed(
-            title=f"{bot_name_ja} ヘルプ / {bot_name_en} Help",
+            title=f"📜 {bot_name_ja} ヘルプ＆ガイドライン / {bot_name_en} Help & Guidelines",
             description=f"{self.generic_help_message_text_ja}\n\n{self.generic_help_message_text_en}",
             color=discord.Color.teal()
         )
         if bot_avatar_url:
             embed.set_thumbnail(url=bot_avatar_url)
 
+        # --- 1. 基本的な使い方 ---
         desc_ja_detail = "より詳細な情報は、以下のコマンドで確認できます。"
         desc_en_detail = "For more detailed information, please check the following commands:"
         llm_help_cmd_ja = "• **AI対話機能:** `/llm_help` (または `/llm_help_en`)"
@@ -336,7 +341,7 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
         prefix_info_en = f"(Prefix commands are also available. Current prefix: `{prefix}` )"
 
         embed.add_field(
-            name="詳細情報 / More Information",
+            name="基本情報 / Basic Information",
             value=f"{desc_ja_detail}\n{llm_help_cmd_ja}\n{music_help_cmd_ja}\n{prefix_info_ja}\n\n"
                   f"{desc_en_detail}\n{llm_help_cmd_en}\n{music_help_cmd_en}\n{prefix_info_en}",
             inline=False
@@ -361,6 +366,70 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
             inline=False
         )
 
+        # --- 2. AI利用ガイドライン ---
+        embed.add_field(
+            name="--- 📜 AI利用ガイドライン / AI Usage Guidelines ---",
+            value="AI機能を安全にご利用いただくため、以下の内容を必ずご確認ください。\n*Please review the following to ensure safe use of the AI features.*",
+            inline=False
+        )
+
+        # ガイドラインの目的と構成
+        embed.add_field(
+            name="1. 目的と対象AI / Purpose & Target AI",
+            value=(
+                "**【目的】** 本ガイドラインは、BotのAI機能を安全にご利用いただくために、技術的・法的リスクを低減させることを目的とします。\n"
+                "*Purpose: This guideline aims to reduce technical and legal risks to ensure the safe use of the bot's AI features.*\n\n"
+                "**【対象AI】** 本Botは、内部的にMistral AIやGoogle Geminiなどのサードパーティ製生成AIモデルを利用しています。\n"
+                "*Target AI: This bot internally uses third-party generative AI models such as Mistral AI and Google Gemini.*"
+            ),
+            inline=False
+        )
+
+        # データ入力時の注意
+        embed.add_field(
+            name="⚠️ 2. データ入力時の注意 / Precautions for Data Input",
+            value=(
+                "以下の情報は、AIの学習や意図しない漏洩に繋がる危険性があるため、**絶対に入力しないでください。**\n"
+                "***NEVER input the following information**, as it poses a risk of being used for AI training or unintentional leakage.*\n\n"
+                "1. **個人情報・秘密情報:** 氏名、連絡先、NDA対象情報、自組織の機密情報など\n"
+                "   *Personal/Confidential Info: Name, contact details, NDA-protected info, your organization's sensitive data, etc.*\n"
+                "2. **第三者の知的財産:** 許可のない著作物(文章,コード等)、登録商標、意匠(ロゴ,デザイン)など\n"
+                "   *Third-Party IP: Copyrighted works (text, code), trademarks, or designs without permission.*"
+            ),
+            inline=False
+        )
+
+        # 生成物利用時の注意
+        embed.add_field(
+            name="✅ 3. 生成物利用時の注意 / Precautions for Using Generated Output",
+            value=(
+                "1. **内容の不正確さ:** 生成物には虚偽や偏見が含まれる可能性があります。**必ずファクトチェックを行い、自己の責任で利用してください。**\n"
+                "   *Inaccuracy: The output may contain falsehoods. **Always fact-check and use it at your own risk.***\n"
+                "2. **権利侵害リスク:** 生成物が意図せず既存の著作物等と類似し、第三者の権利を侵害する可能性があります。\n"
+                "   *Rights Infringement Risk: The output may unintentionally resemble existing works, potentially infringing on third-party rights.*\n"
+                "3. **著作権の不発生:** AIによる生成物に著作権は発生しない、または権利が限定的となる可能性があります。\n"
+                "   *No Copyright: Copyright may not apply to AI-generated output, or rights may be limited.*\n"
+                "4. **AIポリシーの遵守:** 基盤となるAI（Mistral AI, Gemini等）の利用規約やポリシーも適用されます。\n"
+                "   *Adherence to Policies: The terms of the underlying AI (e.g., Mistral AI, Gemini) also apply.*"
+            ),
+            inline=False
+        )
+
+        # 禁止事項
+        embed.add_field(
+            name="🚫 4. 禁止事項と同意 / Prohibited Uses & Agreement",
+            value=(
+                "法令や公序良俗に反する利用、他者の権利を侵害する利用、差別的・暴力的・性的なコンテンツの生成は固く禁じます。\n"
+                "*Use that violates laws, infringes on rights, or generates discriminatory, violent, or explicit content is strictly prohibited.*\n\n"
+                "**本Botの利用をもって、本ガイドラインに同意したものとみなします。**\n"
+                "***By using this bot, you are deemed to have agreed to these guidelines.***"
+            ),
+            inline=False
+        )
+
+        embed.add_field(name="--- ガイドラインここまで / End of Guidelines ---", value="\u200b", inline=False)
+
+        # --- 3. その他の便利なコマンド ---
         utility_title_ja = "便利なコマンド"
         utility_cmds_ja = [
             f"`/gacha` - ブルーアーカイブ風の募集（ガチャ）をシミュレートします。",
@@ -397,8 +466,8 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
             inline=False
         )
 
-        footer_ja = "<> は必須引数、[] は任意引数を表します。"
-        footer_en = "<> denotes a required argument, [] denotes an optional argument."
+        footer_ja = "<> は必須引数、[] は任意引数を表します。ガイドラインは予告なく変更される場合があります。"
+        footer_en = "<> denotes a required argument, [] denotes an optional argument. Guidelines are subject to change."
         embed.set_footer(text=f"{footer_ja}\n{footer_en}")
 
         view_items = []
@@ -413,7 +482,7 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
         else:
             await interaction.followup.send(embed=embed, ephemeral=False)
 
-        logger.info(f"/help (概要) が実行されました。 (User: {interaction.user.id})")
+        logger.info(f"/help (統合版) が実行されました。 (User: {interaction.user.id})")
 
 
 async def setup(bot: commands.Bot):

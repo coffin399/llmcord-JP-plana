@@ -150,11 +150,12 @@ class LLMCog(commands.Cog, name="LLM"):
         if message.author.bot or not self.bot.user.mentioned_in(message) or message.mention_everyone:
             return
         if (
-        allowed_channels := self.config.get('allowed_channel_ids', [])) and message.channel.id not in allowed_channels:
+                allowed_channels := self.config.get('allowed_channel_ids',
+                                                    [])) and message.channel.id not in allowed_channels:
             return
         if (allowed_roles := self.config.get('allowed_role_ids', [])) and isinstance(message.author,
                                                                                      discord.Member) and not any(
-                role.id in allowed_roles for role in message.author.roles):
+            role.id in allowed_roles for role in message.author.roles):
             return
         if not self.main_llm_client:
             await message.reply(self.llm_config.get('error_msg', {}).get('general_error', "LLM client not configured."),
@@ -179,7 +180,7 @@ class LLMCog(commands.Cog, name="LLM"):
         log_text_summary = text_content.replace('\n', ' ')[:150]
         logger.info(
             f"Received LLM request | {log_context} | image_count={len(image_contents)} | text='{log_text_summary}...'"
-            )
+        )
 
         history_key = message.channel.id
         self.chat_histories.setdefault(history_key, [])
@@ -364,13 +365,13 @@ class LLMCog(commands.Cog, name="LLM"):
             chunks.append(final_chunk)
         return chunks
 
-    @app_commands.command(name="llm_help", description="LLM (AI対話) 機能に関する詳細なヘルプを表示します。")
+    @app_commands.command(name="llm_help", description="LLM (AI対話) 機能のヘルプと利用ガイドラインを表示します。")
     async def llm_help_slash(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=False)
         bot_user = self.bot.user or interaction.client.user
         bot_name = bot_user.name if bot_user else "当Bot"
-        embed = discord.Embed(title="💡 LLM (AI対話) 機能 ヘルプ",
-                              description=f"{bot_name}のAI対話機能についての説明です。",
+        embed = discord.Embed(title=f"💡 {bot_name} AI対話機能ヘルプ＆ガイドライン",
+                              description=f"{bot_name}のAI対話機能についての説明と利用規約です。",
                               color=discord.Color.purple())
         if bot_user and bot_user.avatar:
             embed.set_thumbnail(url=bot_user.avatar.url)
@@ -383,10 +384,8 @@ class LLMCog(commands.Cog, name="LLM"):
             inline=False
         )
 
-        # Show active tools information
         active_tools = self.llm_config.get('active_tools', [])
         tools_info = "• なし" if not active_tools else "• " + ", ".join(active_tools)
-
         embed.add_field(
             name="現在のAI設定",
             value=f"• **使用モデル:** `{self.llm_config.get('model', '未設定')}`\n"
@@ -395,32 +394,64 @@ class LLMCog(commands.Cog, name="LLM"):
                   f"• **利用可能なツール:** {tools_info}",
             inline=False
         )
+
+        # --- AI利用ガイドライン ---
         embed.add_field(
-            name="免責事項と注意点",
-            value="• AIが生成した内容は不正確、または不適切な場合があります。生成された情報を利用する際は、必ずご自身で内容を確認し、その責任を負うものとします。\n"
-                  "• 会話はチャンネルごとに記憶されますが、永続的なものではありません。",
+            name="--- 📜 AI利用ガイドライン ---",
+            value="AI機能を安全にご利用いただくため、以下の内容を必ずご確認ください。",
             inline=False
         )
+
         embed.add_field(
-            name="ユーザーの責任と禁止事項",
-            value="• **個人情報や機密情報を入力しないでください。** (例: 本名、住所、電話番号、パスワード、APIキー等)\n"
-                  "• 法令に違反する、または他者の権利を侵害するコンテンツの生成を指示する行為を禁止します。\n"
-                  "• 嫌がらせ、差別的、暴力的な目的での利用を禁止します。\n"
-                  "• Botの脆弱性を突く試みや、スパムなど意図的に高負荷をかける行為を禁止します。",
+            name="1. 目的と対象AI",
+            value=(
+                "**【目的】** 本ガイドラインは、BotのAI機能を安全にご利用いただくために、技術的・法的リスクを低減させることを目的とします。\n"
+                "**【対象AI】** 本Botは、内部的にMistral AIやGoogle Geminiなどのサードパーティ製生成AIモデルを利用しています。"
+            ),
             inline=False
         )
-        embed.set_footer(text="本機能の利用は、これらの事項に同意したものとみなします。")
+
+        embed.add_field(
+            name="⚠️ 2. データ入力時の注意",
+            value=(
+                "以下の情報は、AIの学習や意図しない漏洩に繋がる危険性があるため、**絶対に入力しないでください。**\n"
+                "1. **個人情報・秘密情報:** 氏名、連絡先、NDA対象情報、自組織の機密情報など\n"
+                "2. **第三者の知的財産:** 許可のない著作物(文章,コード等)、登録商標、意匠(ロゴ,デザイン)など"
+            ),
+            inline=False
+        )
+
+        embed.add_field(
+            name="✅ 3. 生成物利用時の注意",
+            value=(
+                "1. **内容の不正確さ:** 生成物には虚偽や偏見が含まれる可能性があります。**必ずファクトチェックを行い、自己の責任で利用してください。**\n"
+                "2. **権利侵害リスク:** 生成物が意図せず既存の著作物等と類似し、第三者の権利を侵害する可能性があります。\n"
+                "3. **著作権の不発生:** AIによる生成物に著作権は発生しない、または権利が限定的となる可能性があります。\n"
+                "4. **AIポリシーの遵守:** 基盤となるAI（Mistral AI, Gemini等）の利用規約やポリシーも適用されます。"
+            ),
+            inline=False
+        )
+
+        embed.add_field(
+            name="🚫 4. 禁止事項と同意",
+            value=(
+                "法令や公序良俗に反する利用、他者の権利を侵害する利用、差別的・暴力的・性的なコンテンツの生成は固く禁じます。\n\n"
+                "**本Botの利用をもって、本ガイドラインに同意したものとみなします。**"
+            ),
+            inline=False
+        )
+        embed.set_footer(text="ガイドラインは予告なく変更される場合があります。")
         await interaction.followup.send(embed=embed, ephemeral=False)
 
     @app_commands.command(name="llm_help_en",
-                          description="Displays detailed help for LLM (AI Chat) features in English.")
+                          description="Displays help and usage guidelines for LLM (AI Chat) features.")
     async def llm_help_en_slash(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=False)
         bot_user = self.bot.user or interaction.client.user
         bot_name = bot_user.name if bot_user else "This Bot"
 
-        embed = discord.Embed(title="💡 LLM (AI Chat) Feature Help",
-                              description=f"This is an explanation of the AI chat features for {bot_name}.",
+        embed = discord.Embed(title=f"💡 {bot_name} AI Chat Help & Guidelines",
+                              description=f"Explanation and terms of use for the AI chat features of {bot_name}.",
                               color=discord.Color.purple())
         if bot_user and bot_user.avatar:
             embed.set_thumbnail(url=bot_user.avatar.url)
@@ -433,10 +464,8 @@ class LLMCog(commands.Cog, name="LLM"):
             inline=False
         )
 
-        # Show active tools information
         active_tools = self.llm_config.get('active_tools', [])
         tools_info = "• None" if not active_tools else "• " + ", ".join(active_tools)
-
         settings_value = (
             f"• **Model in Use:** `{self.llm_config.get('model', 'Not set')}`\n"
             f"• **Max Conversation History:** {self.llm_config.get('max_messages', 'Not set')} pairs\n"
@@ -444,21 +473,54 @@ class LLMCog(commands.Cog, name="LLM"):
             f"• **Available Tools:** {tools_info}"
         )
         embed.add_field(name="Current AI Settings", value=settings_value, inline=False)
+
+        # --- AI Usage Guidelines ---
         embed.add_field(
-            name="Disclaimer & Important Notes",
-            value="• Content generated by the AI may be inaccurate or inappropriate. You are solely responsible for verifying and using the generated information.\n"
-                  "• Conversations are remembered per channel but are not permanent.",
+            name="--- 📜 AI Usage Guidelines ---",
+            value="Please review the following to ensure safe use of the AI features.",
             inline=False
         )
+
         embed.add_field(
-            name="User Responsibilities & Prohibited Conduct",
-            value="• **Do not input sensitive or personal information** (e.g., real name, address, phone number, passwords, API keys).\n"
-                  "• Do not instruct the bot to generate content that violates laws or infringes on the rights of others.\n"
-                  "• Do not use this feature for harassment, discrimination, or violent purposes.\n"
-                  "• Do not attempt to exploit vulnerabilities or intentionally cause high load (e.g., spamming).",
+            name="1. Purpose & Target AI",
+            value=(
+                "**Purpose:** This guideline aims to reduce technical and legal risks to ensure the safe use of the bot's AI features.\n"
+                "**Target AI:** This bot internally uses third-party generative AI models such as Mistral AI and Google Gemini."
+            ),
             inline=False
         )
-        embed.set_footer(text="By using this feature, you agree to these terms.")
+
+        embed.add_field(
+            name="⚠️ 2. Precautions for Data Input",
+            value=(
+                "**NEVER input the following information**, as it poses a risk of being used for AI training or unintentional leakage.\n"
+                "1. **Personal/Confidential Info:** Name, contact details, NDA-protected info, your organization's sensitive data, etc.\n"
+                "2. **Third-Party IP:** Copyrighted works (text, code), trademarks, or designs without permission."
+            ),
+            inline=False
+        )
+
+        embed.add_field(
+            name="✅ 3. Precautions for Using Generated Output",
+            value=(
+                "1. **Inaccuracy:** The output may contain falsehoods. **Always fact-check and use it at your own risk.**\n"
+                "2. **Rights Infringement Risk:** The output may unintentionally resemble existing works, potentially infringing on third-party rights.\n"
+                "3. **No Copyright:** Copyright may not apply to AI-generated output, or rights may be limited.\n"
+                "4. **Adherence to Policies:** The terms of the underlying AI (e.g., Mistral AI, Gemini) also apply."
+            ),
+            inline=False
+        )
+
+        embed.add_field(
+            name="🚫 4. Prohibited Uses & Agreement",
+            value=(
+                "Use that violates laws, infringes on rights, or generates discriminatory, violent, or explicit content is strictly prohibited.\n\n"
+                "**By using this bot, you are deemed to have agreed to these guidelines.**"
+            ),
+            inline=False
+        )
+
+        embed.set_footer(text="These guidelines are subject to change without notice.")
         await interaction.followup.send(embed=embed, ephemeral=False)
 
     @app_commands.command(name="clear_history", description="現在のチャンネルの会話履歴をクリアします。")
