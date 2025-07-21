@@ -216,7 +216,7 @@ class Shittim(commands.Bot):
 ===================%===+++@++++@++++===+======@==%====@#@@#####+++@%@===+++++++++++++++++++++++++===
 =======================+==+++++=@+=&===+=====+@=&==@%%++######=+++&@&@@==++@++++++++++++++++++++====
 =======================++++++++++@+++==@++=+@+&++++++++++#%%%@++++&&====+@+&++++++++++++++++++=+====
-=======================+=+++&@====@@=++++++++++++++++++++++++++++@+======++++++++++++++++++++=======
+=======================+++++&@====@@=++++++++++++++++++++++++++++@+======++++++++++++++++++++=======
 =======================+++++=@#&@===#%++++++++++++++++++++++++++@+&=====++#+++++++++++++++++++======
 =======================@++++=%@==&&&&#++&@&+++++++++++++++++@&&+++%====@#+&++++++++++++++++++++=====
 ========================@+=+++++==+=@++==++++++@##@##%&&&&&&&&&&+&====%++++++++++++++++++++++++=====
@@ -273,21 +273,29 @@ if __name__ == "__main__":
         logging.critical(f"メイン実行: {CONFIG_FILE} の読み込みまたは解析中にエラー: {e_main}。")
         exit(1)
 
-    bot_prefix_val = initial_config.get('prefix', '!!')
-
     bot_token_val = initial_config.get('bot_token')
     if not bot_token_val or bot_token_val == "YOUR_BOT_TOKEN_HERE":
         logging.critical(f"{CONFIG_FILE}にbot_tokenが未設定か無効、またはプレースホルダのままです。")
         exit(1)
 
+    # デフォルトのインテント設定から開始
     intents = discord.Intents.default()
-    intents.message_content = True
+
+    # サーバーに関する基本的なイベントを取得するために必要
+    intents.guilds = False
+
+    # ボイスチャット機能用のインテントを有効に保ちます
     intents.voice_states = True
-    intents.guilds = True
+
+    # 特権インテントであるメッセージコンテントインテントを明確に「無効」にします
+    intents.message_content = False
 
     allowed_mentions = discord.AllowedMentions(everyone=False, users=True, roles=False, replied_user=True)
+
+    # コマンドのトリガーを「メンションのみ」に限定します
+    # これにより、テキストプレフィックスを監視する必要がなくなり、メッセージコンテントインテントが不要になります
     bot_instance = Shittim(
-        command_prefix=commands.when_mentioned_or(bot_prefix_val),
+        command_prefix=commands.when_mentioned,
         intents=intents,
         help_command=None,
         allowed_mentions=allowed_mentions
