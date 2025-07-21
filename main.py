@@ -293,7 +293,7 @@ if __name__ == "__main__":
     allowed_mentions = discord.AllowedMentions(everyone=False, users=True, roles=False, replied_user=True)
 
     # コマンドのトリガーを「メンションのみ」に限定します
-    # これにより、テキストプレフィックスを監視する必要がなくなり、メッセージコンテントインテントが不要になります
+    # スラッシュコマンドとLLM(メンション)がメインなので、プレフィックスはメンションのみでOK
     bot_instance = Shittim(
         command_prefix=commands.when_mentioned,
         intents=intents,
