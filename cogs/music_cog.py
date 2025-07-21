@@ -759,9 +759,11 @@ class MusicCog(commands.Cog, name="音楽"):
 
         embed = discord.Embed(
             title=f"{status_icon} {track.title}",
+            url=track.url,  # 変更点: titleをクリック可能にするためURLを設定
             description=(
                 f"長さ: `{format_duration(track.duration)}`\n"
                 f"リクエスト: **{requester_display_name}**\n"
+                f"URL: {track.url}\n"  # 変更点: URLをテキストで表示
                 f"ループモード: `{state.loop_mode.name.lower()}`"
             ),
             color=discord.Color.green() if state.is_playing else (
