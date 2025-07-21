@@ -147,16 +147,33 @@ class LLMCog(commands.Cog, name="LLM"):
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
-        if message.author.bot or not self.bot.user.mentioned_in(message) or message.mention_everyone:
+        # Botのメッセージは無視
+        if message.author.bot:
             return
+
+        # メンションされているか、またはBotのメッセージへの返信かをチェック
+        is_mentioned = self.bot.user.mentioned_in(message) and not message.mention_everyone
+        is_reply_to_bot = (
+                message.reference and
+                isinstance(message.reference.resolved, discord.Message) and
+                message.reference.resolved.author == self.bot.user
+        )
+
+        # どちらでもない場合は無視
+        if not (is_mentioned or is_reply_to_bot):
+            return
+
+        # チャンネル制限のチェック
         if (
-                allowed_channels := self.config.get('allowed_channel_ids',
-                                                    [])) and message.channel.id not in allowed_channels:
+        allowed_channels := self.config.get('allowed_channel_ids', [])) and message.channel.id not in allowed_channels:
             return
+
+        # ロール制限のチェック
         if (allowed_roles := self.config.get('allowed_role_ids', [])) and isinstance(message.author,
                                                                                      discord.Member) and not any(
-            role.id in allowed_roles for role in message.author.roles):
+                role.id in allowed_roles for role in message.author.roles):
             return
+
         if not self.main_llm_client:
             await message.reply(self.llm_config.get('error_msg', {}).get('general_error', "LLM client not configured."),
                                 silent=True)
@@ -165,10 +182,17 @@ class LLMCog(commands.Cog, name="LLM"):
         image_contents, text_content = await self._prepare_multimodal_content(message)
         text_content = text_content.replace(f'<@!{self.bot.user.id}>', '').replace(f'<@{self.bot.user.id}>', '').strip()
 
+        # リプライのみの場合でもテキストが空の場合は、エラーメッセージを返す
         if not text_content and not image_contents:
-            await message.reply(
-                self.llm_config.get('error_msg', {}).get('empty_mention_reply', "Yes? How can I help you?"),
-                silent=True)
+            # リプライのみの場合は別のメッセージを返す
+            if is_reply_to_bot and not is_mentioned:
+                await message.reply(
+                    self.llm_config.get('error_msg', {}).get('empty_reply', "何かお話しください。"),
+                    silent=True)
+            else:
+                await message.reply(
+                    self.llm_config.get('error_msg', {}).get('empty_mention_reply', "Yes? How can I help you?"),
+                    silent=True)
             return
 
         guild_log = f"guild='{message.guild.name}({message.guild.id})'" if message.guild else "guild='DM'"
@@ -179,7 +203,7 @@ class LLMCog(commands.Cog, name="LLM"):
 
         log_text_summary = text_content.replace('\n', ' ')[:150]
         logger.info(
-            f"Received LLM request | {log_context} | image_count={len(image_contents)} | text='{log_text_summary}...'"
+            f"Received LLM request | {log_context} | image_count={len(image_contents)} | text='{log_text_summary}...' | is_reply={is_reply_to_bot}"
         )
 
         history_key = message.channel.id
@@ -379,6 +403,7 @@ class LLMCog(commands.Cog, name="LLM"):
         embed.add_field(
             name="基本的な使い方",
             value=f"• Botにメンション (`@{bot_name}`) して話しかけると、AIが応答します。\n"
+                  f"• **Botのメッセージに返信することでも会話を続けられます（メンション不要）。**\n"
                   f"• メッセージと一緒に画像を添付、または画像URLを貼り付けると、AIが画像の内容も理解しようとします。\n"
                   f"• 他の人のメッセージに返信する形でメンションすると、引用元の画像も認識します。",
             inline=False
@@ -459,6 +484,7 @@ class LLMCog(commands.Cog, name="LLM"):
         embed.add_field(
             name="Basic Usage",
             value=f"• Mention the bot (`@{bot_name}`) to get a response from the AI.\n"
+                  f"• **You can also continue the conversation by replying to the bot's messages (no mention needed).**\n"
                   f"• Attach images or paste image URLs with your message, and the AI will try to understand them.\n"
                   f"• If you reply to another message while mentioning the bot, it will also see the images in the replied-to message.",
             inline=False
