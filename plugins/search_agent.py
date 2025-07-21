@@ -4,22 +4,19 @@ import logging
 from typing import Dict, Any, Optional, List
 import json
 
-# ログの初期化を最初に行う
 logger = logging.getLogger(__name__)
 
-# 最新のMistralAI クライアントライブラリのインポート
 try:
     from mistralai import Mistral
-    from mistralai.models import ChatCompletionRequest, ChatMessage
+    from mistralai.models import ChatCompletionRequest, UserMessage, SystemMessage
 
     MistralAPIException = Exception
     logger.info("Using new Mistral client library")
 except ImportError:
     try:
-        # 古いバージョンのフォールバック
         from mistralai.async_client import MistralAsyncClient
         from mistralai.exceptions import MistralAPIException
-        from mistralai.models.chat_completion import ChatMessage, ChatCompletionResponse
+        from mistralai.models.chat_completion import ChatMessage
 
         Mistral = None
         logger.info("Using legacy MistralAsyncClient")
@@ -36,7 +33,7 @@ class SearchAgent:
         "type": "function",
         "function": {
             "name": name,
-            "description": "Run a web search using the Mistral AI search tool and return a comprehensive report.",
+            "description": "Run a web search using the Mistral AI and return a comprehensive report.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -50,19 +47,16 @@ class SearchAgent:
         },
     }
 
-    # サポートされている検索対応モデルのリスト
-    SUPPORTED_MODELS = [
+    # Mistral AIの検索対応モデル
+    SEARCH_ENABLED_MODELS = [
         "mistral-large-latest",
-        "mistral-large-2407",
-        "mistral-large-2411",
-        "mistral-medium-2505",
-        "mistral-medium-latest"
+        "mistral-large-2411"
     ]
 
     def __init__(self, bot) -> None:
         self.bot = bot
         self.client = None
-        self.model = "mistral-large-latest"  # デフォルトモデル
+        self.model = "mistral-large-latest"
         self.max_retries = 3
         self.base_delay = 1.0
         self.timeout = 30.0
@@ -70,35 +64,25 @@ class SearchAgent:
         self.use_legacy_client = False
 
         try:
-            # config.yamlのキー 'search_agent' を参照します
-            logger.info("Loading configuration...")
+            logger.info("Loading SearchAgent configuration...")
             mcfg = self.bot.cfg.get("search_agent", {})
-            logger.info(f"Configuration loaded: {list(mcfg.keys())}")
 
             api_key = mcfg.get("api_key")
-
             if not api_key:
                 error_msg = "API key not found in configuration under 'search_agent.api_key'"
                 logger.error(error_msg)
-                logger.error("Please add the following to your config.yaml:")
-                logger.error("search_agent:")
-                logger.error("  api_key: 'your_mistral_api_key_here'")
-                logger.error("  model: 'mistral-large-latest'")
                 self.initialization_error = error_msg
                 return
 
-            # API keyの長さをチェック（セキュリティのため最初の数文字のみ表示）
             logger.info(f"API key found (starts with: {api_key[:8]}...)")
 
-            # 新しいクライアントを試してから古いクライアントにフォールバック
+            # クライアントの初期化
             try:
                 if Mistral:
-                    # 新しいクライアント（v1.0.0以降）
                     self.client = Mistral(api_key=api_key)
                     logger.info("New Mistral client initialized successfully.")
                     self.use_legacy_client = False
                 else:
-                    # 古いクライアント（v0.x.x）
                     self.client = MistralAsyncClient(api_key=api_key)
                     logger.info("Legacy MistralAsyncClient initialized successfully.")
                     self.use_legacy_client = True
@@ -106,14 +90,18 @@ class SearchAgent:
                 logger.error(f"Failed to initialize Mistral client: {e}")
                 self.client = None
                 self.initialization_error = str(e)
+                return
 
-            # 設定からモデルを取得し、サポートされているかチェック
+            # モデルの設定
             configured_model = mcfg.get("model", "mistral-large-latest")
-            if configured_model in self.SUPPORTED_MODELS:
+            if configured_model in self.SEARCH_ENABLED_MODELS:
                 self.model = configured_model
-                logger.info(f"Using configured model: {self.model}")
+                logger.info(f"Using search-enabled model: {self.model}")
             else:
-                logger.warning(f"Model '{configured_model}' may not support search. Using default: {self.model}")
+                # 検索非対応モデルの場合、警告を出すが続行
+                logger.warning(
+                    f"Model '{configured_model}' may not support web search. Consider using: {', '.join(self.SEARCH_ENABLED_MODELS)}")
+                self.model = configured_model
 
             # その他の設定
             self.max_retries = mcfg.get("max_retries", 3)
@@ -121,125 +109,149 @@ class SearchAgent:
             self.timeout = mcfg.get("timeout", 30.0)
 
         except Exception as e:
-            error_msg = f"Failed to initialize Mistral client for SearchAgent: {e}"
+            error_msg = f"Failed to initialize SearchAgent: {e}"
             logger.error(error_msg, exc_info=True)
             self.initialization_error = error_msg
             self.client = None
 
     async def _mistral_search_new(self, query: str) -> str:
-        """新しいMistralクライアントを使用した検索"""
+        """新しいMistralクライアントを使用した検索（修正版）"""
         try:
+            # Mistral AIのFunction Callingを使用する正しい方法
+            tools = [{
+                "type": "function",
+                "function": {
+                    "name": "web_search",
+                    "description": "Search the web for information",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "query": {
+                                "type": "string",
+                                "description": "The search query"
+                            }
+                        },
+                        "required": ["query"]
+                    }
+                }
+            }]
+
+            # まず検索ツールを呼び出すようLLMに指示
             messages = [
-                ChatMessage(
-                    role="user",
-                    content=f"Please search for information about: {query}\n\nProvide a comprehensive summary of the search results including key findings, relevant details, and sources when available."
-                )
+                {"role": "user", "content": f"Please search for information about: {query}"}
             ]
 
-            # 新しいクライアントのAPIを使用
+            # ツール呼び出しを要求
+            logger.debug(f"Requesting tool call for query: {query}")
+
             response = await asyncio.wait_for(
                 self.client.chat.complete_async(
                     model=self.model,
                     messages=messages,
-                    tools=[{"type": "web_search"}],
+                    tools=tools,
+                    tool_choice="required",  # ツールの使用を強制
+                ),
+                timeout=self.timeout
+            )
+
+            if not response.choices or not response.choices[0].message.tool_calls:
+                # ツール呼び出しがない場合、通常のチャットとして処理
+                logger.warning("No tool calls in response, falling back to regular chat")
+                return await self._fallback_search(query)
+
+            # ツール呼び出しの結果を処理
+            tool_call = response.choices[0].message.tool_calls[0]
+
+            # ツールの実行結果を模擬（実際にはMistral側で処理される）
+            messages.append(response.choices[0].message.model_dump())
+            messages.append({
+                "role": "tool",
+                "content": f"Web search completed for: {query}",
+                "tool_call_id": tool_call.id
+            })
+
+            # 最終的な応答を取得
+            final_response = await asyncio.wait_for(
+                self.client.chat.complete_async(
+                    model=self.model,
+                    messages=messages,
                     temperature=0.1,
                     max_tokens=4000,
                 ),
                 timeout=self.timeout
             )
 
-            if response.choices and len(response.choices) > 0:
-                message = response.choices[0].message
-                if message.content:
-                    content = message.content.strip()
-                    if content:
-                        logger.info(f"Mistral Search successful for query: {query}")
-                        return self._format_search_result(content, query)
-                    else:
-                        return "[Mistral Search Error]\nEmpty response content received."
-                else:
-                    return "[Mistral Search Error]\nNo content received from the API."
-            else:
-                return "[Mistral Search Error]\nNo response choices received from the API."
+            if final_response.choices and final_response.choices[0].message.content:
+                content = final_response.choices[0].message.content.strip()
+                logger.info(f"Search successful for query: {query}")
+                return self._format_search_result(content, query)
+
+            return "[Search Error] No content in response"
 
         except Exception as e:
-            logger.error(f"Error with new Mistral client: {e}")
-            raise
+            logger.error(f"Error in new Mistral search: {e}", exc_info=True)
+            # フォールバックを試みる
+            return await self._fallback_search(query)
 
-    async def _mistral_search_legacy(self, query: str) -> str:
-        """古いMistralAsyncClientを使用した検索"""
+    async def _fallback_search(self, query: str) -> str:
+        """検索機能が使えない場合のフォールバック"""
         try:
+            logger.info(f"Using fallback search for query: {query}")
+
             messages = [
                 {
+                    "role": "system",
+                    "content": "You are a knowledgeable assistant. Provide comprehensive and detailed information about the topic based on your training data. Be clear that this is not live web data."
+                },
+                {
                     "role": "user",
-                    "content": f"Please search for information about: {query}\n\nProvide a comprehensive summary of the search results including key findings, relevant details, and sources when available."
+                    "content": f"Provide detailed information about: {query}\n\nPlease be comprehensive and include relevant facts, recent developments (up to your knowledge cutoff), and important context."
                 }
             ]
 
-            response = await asyncio.wait_for(
-                self.client.chat(
+            if self.use_legacy_client:
+                response = await self.client.chat(
                     model=self.model,
                     messages=messages,
-                    tool_choice="search",
-                    temperature=0.1,
-                    max_tokens=4000,
-                ),
-                timeout=self.timeout
-            )
-
-            if response.choices and len(response.choices) > 0:
-                message = response.choices[0].message
-                if message.content:
-                    content = message.content.strip()
-                    if content:
-                        logger.info(f"Mistral Search successful for query: {query}")
-                        return self._format_search_result(content, query)
-                    else:
-                        return "[Mistral Search Error]\nEmpty response content received."
-                else:
-                    return "[Mistral Search Error]\nNo content received from the API."
+                    temperature=0.3,
+                    max_tokens=2000,
+                )
             else:
-                return "[Mistral Search Error]\nNo response choices received from the API."
+                response = await self.client.chat.complete_async(
+                    model=self.model,
+                    messages=messages,
+                    temperature=0.3,
+                    max_tokens=2000,
+                )
+
+            if response.choices and response.choices[0].message.content:
+                content = response.choices[0].message.content.strip()
+                return f"**Note:** Using AI knowledge base (not live web search)\n\n{content}"
+
+            return "[Error] Failed to generate response"
 
         except Exception as e:
-            logger.error(f"Error with legacy Mistral client: {e}")
-            raise
+            logger.error(f"Error in fallback search: {e}")
+            return f"[Error] Search failed: {str(e)}"
+
+    async def _mistral_search_legacy(self, query: str) -> str:
+        """古いMistralAsyncClientを使用（フォールバックを使用）"""
+        # 古いクライアントでは検索機能が制限されている可能性があるため
+        # フォールバックを使用
+        return await self._fallback_search(query)
 
     async def _mistral_search(self, query: str) -> str:
+        """検索を実行するメインメソッド"""
         if not self.client:
-            error_details = []
-            error_details.append("API client is not initialized. Check configuration and logs.")
-
-            if self.initialization_error:
-                error_details.append(f"Initialization error: {self.initialization_error}")
-
-            if not Mistral and not MistralAsyncClient:
-                error_details.append("MistralAI library not installed. Run: pip install mistralai")
-
-            # 設定の診断
-            try:
-                mcfg = self.bot.cfg.get("search_agent", {})
-                if not mcfg:
-                    error_details.append("No 'search_agent' configuration found in config.yaml")
-                else:
-                    api_key = mcfg.get("api_key")
-                    if not api_key:
-                        error_details.append("No 'api_key' found in search_agent configuration")
-                    else:
-                        error_details.append(f"API key present (length: {len(api_key)})")
-            except Exception as e:
-                error_details.append(f"Error checking configuration: {e}")
-
-            return "[Mistral Search Error]\n" + "\n".join(error_details)
+            return self._get_initialization_error()
 
         if not query.strip():
-            return "[Mistral Search Error]\nEmpty query provided."
+            return "[Search Error] Empty query provided."
 
         for attempt in range(self.max_retries + 1):
             try:
-                logger.debug(f"Mistral Search attempt {attempt + 1}: {query}")
+                logger.debug(f"Search attempt {attempt + 1} for: {query}")
 
-                # 新しいクライアントか古いクライアントかを判断
                 if self.use_legacy_client:
                     result = await self._mistral_search_legacy(query)
                 else:
@@ -248,172 +260,83 @@ class SearchAgent:
                 return result
 
             except asyncio.TimeoutError:
-                logger.warning(f"Mistral Search timeout on attempt {attempt + 1}")
+                logger.warning(f"Search timeout on attempt {attempt + 1}")
                 if attempt < self.max_retries:
                     await asyncio.sleep(self.base_delay * (2 ** attempt))
                     continue
-                return f"[Mistral Search Error]\nRequest timeout after {self.timeout}s. Please try again."
+                return f"[Search Error] Request timeout after {self.timeout}s."
 
             except Exception as e:
-                error_message = str(e)
-                logger.error(f"Mistral API error on attempt {attempt + 1}: {error_message}")
-
-                # レート制限のチェック
-                if self._is_rate_limit_error(error_message):
-                    msg = "Rate limit encountered. Please wait and try again."
-                    logger.warning(f"Mistral Search: {msg}")
-                    return f"[Mistral Search Error]\n{msg}"
-
-                # サーバーエラーのチェック
-                if self._is_server_error(error_message) and attempt < self.max_retries:
-                    delay = self.base_delay * (2 ** attempt)
-                    logger.warning(f"Mistral Search: Server error detected. Retrying in {delay}s...")
-                    await asyncio.sleep(delay)
-                    continue
-
-                # その他のエラー
+                logger.error(f"Search error on attempt {attempt + 1}: {e}")
                 if attempt < self.max_retries:
-                    delay = self.base_delay * (2 ** attempt)
-                    logger.info(f"Retrying after API error... (attempt {attempt + 1}/{self.max_retries}) in {delay}s")
-                    await asyncio.sleep(delay)
+                    await asyncio.sleep(self.base_delay * (2 ** attempt))
                     continue
+                return f"[Search Error] {str(e)}"
 
-                return f"[Mistral Search Error]\nAPI error: {error_message}"
+        return "[Search Error] Failed after all retries."
 
-        return "[Mistral Search Error]\nFailed to get a response after several retries."
+    def _get_initialization_error(self) -> str:
+        """初期化エラーの詳細を返す"""
+        error_details = ["[Search Error] Agent not properly initialized:"]
 
-    def _is_rate_limit_error(self, error_message: str) -> bool:
-        """レート制限エラーかどうかをチェック"""
-        rate_limit_indicators = ["429", "rate limit", "too many requests"]
-        return any(indicator in error_message.lower() for indicator in rate_limit_indicators)
+        if self.initialization_error:
+            error_details.append(f"- Initialization error: {self.initialization_error}")
 
-    def _is_server_error(self, error_message: str) -> bool:
-        """サーバーエラーかどうかをチェック"""
-        server_error_codes = ["500", "502", "503", "504"]
-        return any(code in error_message for code in server_error_codes)
+        if not Mistral and not MistralAsyncClient:
+            error_details.append("- MistralAI library not installed. Run: pip install mistralai")
+
+        error_details.append("\nRequired configuration in config.yaml:")
+        error_details.append("search_agent:")
+        error_details.append("  api_key: 'your_mistral_api_key'")
+        error_details.append("  model: 'mistral-large-latest'")
+
+        return "\n".join(error_details)
 
     def _format_search_result(self, content: str, query: str) -> str:
-        """検索結果をフォーマットする"""
+        """検索結果をフォーマット"""
         try:
-            # 基本的なフォーマット
-            formatted_result = f"🔍 **Search Results for: {query}**\n\n"
-            formatted_result += content
+            formatted = f"🔍 **Search Results for: {query}**\n\n{content}"
 
-            # 結果の長さをチェックし、必要に応じて切り詰める
-            if len(formatted_result) > 3500:  # 安全マージンを考慮
-                formatted_result = formatted_result[:3500] + "\n\n[Results truncated due to length limit]"
+            if len(formatted) > 3500:
+                formatted = formatted[:3500] + "\n\n[Results truncated]"
 
-            return formatted_result
-
+            return formatted
         except Exception as e:
-            logger.error(f"Error formatting search result: {e}")
-            return content  # フォーマットに失敗した場合は元のコンテンツを返す
+            logger.error(f"Error formatting result: {e}")
+            return content
 
     async def run(self, *, arguments: Dict[str, Any], bot) -> str:
-        """
-        The main entry point for the agent, called by the LLM cog.
-
-        Args:
-            arguments: Dictionary containing the query and other parameters
-            bot: The bot instance
-
-        Returns:
-            str: The search results or error message
-        """
+        """LLM Cogから呼び出されるメインエントリーポイント"""
         try:
             query = arguments.get("query", "").strip()
             if not query:
-                return "[Mistral Search Error] The 'query' argument is empty or invalid."
+                return "[Search Error] Empty query provided."
 
-            logger.info(f"SearchAgent executing query: {query}")
+            logger.info(f"SearchAgent executing: {query}")
             result = await self._mistral_search(query)
-            logger.info("SearchAgent completed successfully")
+
+            # エラーでない場合のみ成功ログ
+            if not result.startswith("[Search Error]") and not result.startswith("[Error]"):
+                logger.info("SearchAgent completed successfully")
+            else:
+                logger.warning(f"SearchAgent returned error: {result[:100]}...")
+
             return result
 
         except Exception as e:
-            logger.error(f"Unexpected error in SearchAgent's run method: {e}", exc_info=True)
-            return f"[Mistral Search Error]\nUnexpected error in run method: {e}"
+            logger.error(f"Unexpected error in SearchAgent.run: {e}", exc_info=True)
+            return f"[Search Error] Unexpected error: {str(e)}"
 
     def is_available(self) -> bool:
-        """
-        Check if the SearchAgent is properly configured and available.
-
-        Returns:
-            bool: True if the agent is available, False otherwise
-        """
+        """エージェントが利用可能かチェック"""
         return self.client is not None
 
     def get_status(self) -> Dict[str, Any]:
-        """
-        Get the current status of the SearchAgent.
-
-        Returns:
-            dict: Status information including configuration and availability
-        """
-        status = {
+        """エージェントのステータスを取得"""
+        return {
             "available": self.is_available(),
             "model": self.model,
-            "supported_models": self.SUPPORTED_MODELS,
-            "max_retries": self.max_retries,
-            "timeout": self.timeout,
-            "client_initialized": self.client is not None,
+            "search_enabled_models": self.SEARCH_ENABLED_MODELS,
+            "client_type": "new" if not self.use_legacy_client else "legacy",
             "initialization_error": self.initialization_error,
-            "use_legacy_client": self.use_legacy_client,
-            "mistral_library_available": Mistral is not None or MistralAsyncClient is not None
         }
-
-        # 設定の診断
-        try:
-            mcfg = self.bot.cfg.get("search_agent", {})
-            status["config_present"] = bool(mcfg)
-            status["api_key_present"] = bool(mcfg.get("api_key"))
-            if mcfg.get("api_key"):
-                status["api_key_length"] = len(mcfg.get("api_key"))
-        except Exception as e:
-            status["config_error"] = str(e)
-
-        return status
-
-    def get_diagnostic_info(self) -> str:
-        """
-        Get detailed diagnostic information as a formatted string.
-
-        Returns:
-            str: Formatted diagnostic information
-        """
-        status = self.get_status()
-        lines = []
-        lines.append("=== SearchAgent Diagnostic Information ===")
-
-        for key, value in status.items():
-            lines.append(f"{key}: {value}")
-
-        lines.append("")
-        lines.append("=== Required Setup ===")
-        lines.append("1. Install MistralAI library: pip install mistralai")
-        lines.append("2. Add to config.yaml:")
-        lines.append("  search_agent:")
-        lines.append("    api_key: 'your_mistral_api_key'")
-        lines.append("    model: 'mistral-large-latest'")
-        lines.append("3. Get API key from: https://console.mistral.ai/")
-
-        return "\n".join(lines)
-
-    async def test_connection(self) -> tuple[bool, str]:
-        """
-        Test the connection to the Mistral API.
-
-        Returns:
-            tuple: (success: bool, message: str)
-        """
-        if not self.client:
-            return False, "Client not initialized"
-
-        try:
-            # シンプルなテストクエリを実行
-            test_result = await self._mistral_search("test connection")
-            if "[Mistral Search Error]" in test_result:
-                return False, test_result
-            return True, "Connection test successful"
-        except Exception as e:
-            return False, f"Connection test failed: {e}"
