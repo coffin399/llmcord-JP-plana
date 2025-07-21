@@ -11,6 +11,7 @@ import base64
 import re
 import aiohttp
 from typing import List, Dict, Any, Tuple, Optional
+from collections import deque
 
 # Attempt to import the SearchAgent plugin
 try:
@@ -43,7 +44,11 @@ class LLMCog(commands.Cog, name="LLM"):
             raise commands.ExtensionFailed(self.qualified_name, "The 'llm' section in config is missing or invalid.")
         self.http_session = aiohttp.ClientSession()
         self.bot.cfg = self.llm_config
-        self.chat_histories: Dict[int, List[Dict[str, Any]]] = {}
+        # リプライチェーンベースの会話履歴
+        # キー: 会話の起点となるメッセージID、値: その会話チェーンの履歴
+        self.conversation_threads: Dict[int, List[Dict[str, Any]]] = {}
+        # メッセージIDから会話スレッドIDへのマッピング
+        self.message_to_thread: Dict[int, int] = {}
         self.main_llm_client = self._initialize_llm_client(self.llm_config.get('model'))
         if not self.main_llm_client:
             logger.error("Failed to initialize main LLM client. Core functionality is disabled.")
@@ -93,6 +98,106 @@ class LLMCog(commands.Cog, name="LLM"):
         if 'search' in active_tools and self.search_agent and hasattr(self.search_agent, 'tool_spec'):
             definitions.append(self.search_agent.tool_spec)
         return definitions or None
+
+    async def _get_conversation_thread_id(self, message: discord.Message) -> int:
+        """
+        メッセージの会話スレッドIDを取得または作成する。
+        リプライチェーンを辿って最初のメッセージを見つけ、それをスレッドIDとして使用。
+        """
+        # すでにマッピングがある場合はそれを返す
+        if message.id in self.message_to_thread:
+            return self.message_to_thread[message.id]
+
+        # リプライチェーンを辿る
+        current_msg = message
+        visited_ids = set()
+
+        while current_msg.reference and current_msg.reference.message_id:
+            # 循環参照を防ぐ
+            if current_msg.id in visited_ids:
+                break
+            visited_ids.add(current_msg.id)
+
+            # リプライ先のメッセージを取得
+            try:
+                parent_msg = current_msg.reference.resolved
+                if not parent_msg:
+                    # キャッシュにない場合はフェッチを試みる
+                    parent_msg = await message.channel.fetch_message(current_msg.reference.message_id)
+
+                # 親メッセージがBotのものでない場合は、そこで止める
+                if parent_msg.author != self.bot.user:
+                    break
+
+                current_msg = parent_msg
+            except (discord.NotFound, discord.HTTPException):
+                # メッセージが削除されているか取得できない場合
+                break
+
+        # 最も古いメッセージのIDをスレッドIDとする
+        thread_id = current_msg.id
+
+        # このメッセージをスレッドにマッピング
+        self.message_to_thread[message.id] = thread_id
+
+        return thread_id
+
+    async def _collect_conversation_history(self, message: discord.Message) -> List[Dict[str, Any]]:
+        """
+        リプライチェーンから会話履歴を収集する。
+        """
+        history = []
+        current_msg = message
+        visited_ids = set()
+
+        # リプライチェーンを辿って履歴を収集
+        while current_msg.reference and current_msg.reference.message_id:
+            if current_msg.reference.message_id in visited_ids:
+                break
+            visited_ids.add(current_msg.reference.message_id)
+
+            try:
+                parent_msg = current_msg.reference.resolved
+                if not parent_msg:
+                    parent_msg = await message.channel.fetch_message(current_msg.reference.message_id)
+
+                # ユーザーのメッセージの場合
+                if parent_msg.author != self.bot.user:
+                    # 画像とテキストを処理
+                    image_contents, text_content = await self._prepare_multimodal_content(parent_msg)
+                    text_content = text_content.replace(f'<@!{self.bot.user.id}>', '').replace(f'<@{self.bot.user.id}>',
+                                                                                               '').strip()
+
+                    if text_content or image_contents:
+                        user_content_parts = [{"type": "text", "text": text_content}] if text_content else []
+                        user_content_parts.extend(image_contents)
+                        history.append({"role": "user", "content": user_content_parts})
+
+                # Botのメッセージの場合
+                else:
+                    # スレッドIDを取得
+                    thread_id = await self._get_conversation_thread_id(parent_msg)
+                    if thread_id in self.conversation_threads:
+                        # そのスレッドの履歴から該当するアシスタントメッセージを探す
+                        for msg in self.conversation_threads[thread_id]:
+                            if msg.get("role") == "assistant" and msg.get("message_id") == parent_msg.id:
+                                history.append({"role": "assistant", "content": msg["content"]})
+                                break
+
+                current_msg = parent_msg
+
+            except (discord.NotFound, discord.HTTPException):
+                break
+
+        # 履歴を時系列順（古い順）に並べ替える
+        history.reverse()
+
+        # 最大履歴数で制限
+        max_history_entries = self.llm_config.get('max_messages', 10) * 2
+        if len(history) > max_history_entries:
+            history = history[-max_history_entries:]
+
+        return history
 
     async def _process_image_url(self, url: str) -> Optional[Dict[str, Any]]:
         try:
@@ -171,7 +276,7 @@ class LLMCog(commands.Cog, name="LLM"):
         # ロール制限のチェック
         if (allowed_roles := self.config.get('allowed_role_ids', [])) and isinstance(message.author,
                                                                                      discord.Member) and not any(
-                role.id in allowed_roles for role in message.author.roles):
+            role.id in allowed_roles for role in message.author.roles):
             return
 
         if not self.main_llm_client:
@@ -206,15 +311,18 @@ class LLMCog(commands.Cog, name="LLM"):
             f"Received LLM request | {log_context} | image_count={len(image_contents)} | text='{log_text_summary}...' | is_reply={is_reply_to_bot}"
         )
 
-        history_key = message.channel.id
-        self.chat_histories.setdefault(history_key, [])
+        # スレッドIDを取得
+        thread_id = await self._get_conversation_thread_id(message)
+
+        # システムプロンプトを準備
         system_prompt = self.llm_config.get('system_prompt', "You are a helpful assistant.")
         messages_for_api: List[Dict[str, Any]] = [{"role": "system", "content": system_prompt}]
-        max_history_entries = self.llm_config.get('max_messages', 10) * 2
-        channel_history = self.chat_histories[history_key]
-        if len(channel_history) > max_history_entries:
-            channel_history = channel_history[-max_history_entries:]
-        messages_for_api.extend(channel_history)
+
+        # リプライチェーンから履歴を収集
+        conversation_history = await self._collect_conversation_history(message)
+        messages_for_api.extend(conversation_history)
+
+        # 現在のメッセージを追加
         user_content_parts = [{"type": "text", "text": text_content}] if text_content else []
         user_content_parts.extend(image_contents)
         user_message_for_api = {"role": "user", "content": user_content_parts}
@@ -227,11 +335,30 @@ class LLMCog(commands.Cog, name="LLM"):
                 log_response_summary = llm_response.replace('\n', ' ')[:150]
                 logger.info(f"Sending LLM response | {log_context} | response='{log_response_summary}...'"
                             )
-                self.chat_histories[history_key].append(user_message_for_api)
-                self.chat_histories[history_key].append({"role": "assistant", "content": llm_response})
-                if len(self.chat_histories[history_key]) > max_history_entries:
-                    self.chat_histories[history_key] = self.chat_histories[history_key][-max_history_entries:]
-                await self._send_reply_chunks(message, llm_response)
+
+                # 会話スレッドに履歴を保存
+                if thread_id not in self.conversation_threads:
+                    self.conversation_threads[thread_id] = []
+
+                # ユーザーメッセージとアシスタントの応答を保存
+                self.conversation_threads[thread_id].append(user_message_for_api)
+
+                # アシスタントの応答を送信
+                sent_message = await self._send_reply_chunks(message, llm_response)
+
+                # アシスタントの応答をメッセージIDと共に保存
+                if sent_message:
+                    assistant_message = {
+                        "role": "assistant",
+                        "content": llm_response,
+                        "message_id": sent_message.id
+                    }
+                    self.conversation_threads[thread_id].append(assistant_message)
+                    self.message_to_thread[sent_message.id] = thread_id
+
+                # 古い会話スレッドをクリーンアップ（メモリ管理）
+                self._cleanup_old_threads()
+
             else:
                 logger.warning(f"Received empty response from LLM | {log_context}")
                 await message.reply(self.llm_config.get('error_msg', {}).get('general_error',
@@ -240,6 +367,17 @@ class LLMCog(commands.Cog, name="LLM"):
         except Exception as e:
             logger.error(f"Error during LLM interaction: {e}", exc_info=True)
             await message.reply(self._handle_llm_exception(e), silent=True)
+
+    def _cleanup_old_threads(self):
+        """古い会話スレッドを削除してメモリを節約"""
+        max_threads = 100  # 最大100スレッドまで保持
+        if len(self.conversation_threads) > max_threads:
+            # 最も古いスレッドから削除
+            threads_to_remove = list(self.conversation_threads.keys())[:len(self.conversation_threads) - max_threads]
+            for thread_id in threads_to_remove:
+                del self.conversation_threads[thread_id]
+                # 関連するマッピングも削除
+                self.message_to_thread = {k: v for k, v in self.message_to_thread.items() if v != thread_id}
 
     async def _get_llm_response(self, messages: List[Dict[str, Any]], log_context: str) -> str:
         current_messages = messages.copy()
@@ -359,18 +497,21 @@ class LLMCog(commands.Cog, name="LLM"):
             logger.error(f"An unexpected error occurred during LLM interaction: {e}", exc_info=True)
             return self.llm_config.get('error_msg', {}).get('general_error', "An unexpected error occurred.")
 
-    async def _send_reply_chunks(self, message: discord.Message, text_content: str):
+    async def _send_reply_chunks(self, message: discord.Message, text_content: str) -> Optional[discord.Message]:
+        """メッセージを分割して送信し、最初のメッセージを返す"""
         if not text_content:
-            return
+            return None
         chunks = self._split_message(text_content, DISCORD_MESSAGE_MAX_LENGTH)
         first_chunk = chunks.pop(0) if chunks else ""
+        first_message = None
         try:
-            await message.reply(first_chunk, silent=True)
+            first_message = await message.reply(first_chunk, silent=True)
         except discord.HTTPException as e:
             logger.warning(f"Failed to reply, falling back to sending message. Error: {e}")
-            await message.channel.send(first_chunk, silent=True)
+            first_message = await message.channel.send(first_chunk, silent=True)
         for chunk in chunks:
             await message.channel.send(chunk, silent=True)
+        return first_message
 
     def _split_message(self, text_content: str, max_length: int) -> List[str]:
         if not text_content:
@@ -549,13 +690,40 @@ class LLMCog(commands.Cog, name="LLM"):
         embed.set_footer(text="These guidelines are subject to change without notice.")
         await interaction.followup.send(embed=embed, ephemeral=False)
 
-    @app_commands.command(name="clear_history", description="現在のチャンネルの会話履歴をクリアします。")
+    @app_commands.command(name="clear_history", description="現在の会話スレッドの履歴をクリアします。")
     async def clear_history_slash(self, interaction: discord.Interaction):
-        """Clear the conversation history for the current channel."""
-        history_key = interaction.channel_id
-        if history_key in self.chat_histories:
-            del self.chat_histories[history_key]
-            await interaction.response.send_message("✅ このチャンネルの会話履歴をクリアしました。", ephemeral=True)
+        """Clear the conversation history for the current thread."""
+        # 実行者のメッセージIDからスレッドIDを探す（最近のメッセージから）
+        cleared_count = 0
+
+        # すべてのスレッドをチェック
+        threads_to_clear = []
+        for thread_id, messages in self.conversation_threads.items():
+            # このチャンネルのメッセージが含まれているか確認
+            for msg in messages:
+                if isinstance(msg.get("content"), list):
+                    # ユーザーメッセージの場合、チャンネルIDは直接取得できないので、スキップ
+                    continue
+                elif msg.get("message_id"):
+                    # アシスタントメッセージの場合、そのメッセージがこのチャンネルのものか確認
+                    try:
+                        # メッセージIDからチャンネルを推測することはできないので、
+                        # 現在のチャンネルに関連するすべてのスレッドをクリア
+                        threads_to_clear.append(thread_id)
+                        break
+                    except:
+                        pass
+
+        # 見つかったスレッドをクリア
+        for thread_id in threads_to_clear:
+            del self.conversation_threads[thread_id]
+            # 関連するマッピングも削除
+            self.message_to_thread = {k: v for k, v in self.message_to_thread.items() if v != thread_id}
+            cleared_count += 1
+
+        if cleared_count > 0:
+            await interaction.response.send_message(f"✅ {cleared_count}個の会話スレッドの履歴をクリアしました。",
+                                                    ephemeral=True)
         else:
             await interaction.response.send_message("ℹ️ このチャンネルには会話履歴がありません。", ephemeral=True)
 
