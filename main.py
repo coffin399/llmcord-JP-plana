@@ -282,7 +282,7 @@ if __name__ == "__main__":
     intents = discord.Intents.default()
 
     # サーバーに関する基本的なイベントを取得するために必要
-    intents.guilds = False
+    intents.guilds = True
 
     # ボイスチャット機能用のインテントを有効に保ちます
     intents.voice_states = True

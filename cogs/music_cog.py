@@ -434,6 +434,7 @@ class MusicCog(commands.Cog, name="音楽"):
                 {"name": "leave", "args": "", "desc_ja": "VCから切断", "desc_en": "Leave voice channel"},
             ]
         }
+
         cog_command_names = {cmd.name for cmd in self.__cog_app_commands__}
         for category, commands_in_category in command_info.items():
             field_value = ""
