@@ -6,7 +6,7 @@
   プラナちゃんとおしゃべりしよう！
 </i></h3>
 
-![](https://cdn.discordapp.com/attachments/1231490510955483167/1378688090734071848/image.png?ex=683d82d7&is=683c3157&hm=b01ce381f990f092482c205271012c3919bd835971336868fed8733d5a8ee26f&)
+![](https://i.imgur.com/Q3VuxzG.png)
 
 
 Plana-Cord-JP (通称: PLANA) は、[llmcord](https://github.com/jakobdylanc/llmcord) を基盤として開発された多機能Discordボットです。大規模言語モデル (LLM) との対話、音楽再生、画像認識、便利なサーバーユーティリティ機能などを提供します。リモートホスト型やローカルホスト型など、ほぼすべてのLLMに対応しています。
