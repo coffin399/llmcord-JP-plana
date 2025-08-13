@@ -49,8 +49,7 @@ class SearchAgent:
 
     # Mistral AIの検索対応モデル
     SEARCH_ENABLED_MODELS = [
-        "mistral-large-latest",
-        "mistral-large-2411"
+        "mistral-medium-latest"
     ]
 
     def __init__(self, bot) -> None:
