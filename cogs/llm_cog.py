@@ -32,7 +32,7 @@ DISCORD_MESSAGE_MAX_LENGTH = 1990
 
 
 class LLMCog(commands.Cog, name="LLM"):
-    """A cog for interacting with Large Language Models without requiring MESSAGE_CONTENT privileged intent."""
+    """A cog for interacting with Large Language Models, with tool support."""
 
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -44,23 +44,17 @@ class LLMCog(commands.Cog, name="LLM"):
             raise commands.ExtensionFailed(self.qualified_name, "The 'llm' section in config is missing or invalid.")
         self.http_session = aiohttp.ClientSession()
         self.bot.cfg = self.llm_config
-        self.thread_conversations: Dict[int, List[Dict[str, Any]]] = {}
-        self.active_threads: set[int] = set()
+        # リプライチェーンベースの会話履歴
+        # キー: 会話の起点となるメッセージID、値: その会話チェーンの履歴
+        self.conversation_threads: Dict[int, List[Dict[str, Any]]] = {}
+        # メッセージIDから会話スレッドIDへのマッピング
         self.message_to_thread: Dict[int, int] = {}
-        self.thread_close_tasks: Dict[int, asyncio.Task] = {}
-        self.closing_keywords = ['ありがとう', 'ありがとうございます', 'ありがとうございました',
-                                 '終了', '終わり', 'おわり', 'さようなら', 'さよなら', 'バイバイ',
-                                 'thank you', 'thanks', 'bye', 'goodbye', 'end', 'close']
-        self.auto_close_delay = self.llm_config.get('auto_close_delay', 60)
         self.main_llm_client = self._initialize_llm_client(self.llm_config.get('model'))
         if not self.main_llm_client:
             logger.error("Failed to initialize main LLM client. Core functionality is disabled.")
         self.search_agent = self._initialize_search_agent()
 
     async def cog_unload(self):
-        for task in self.thread_close_tasks.values():
-            if not task.done():
-                task.cancel()
         await self.http_session.close()
         logger.info("LLMCog's aiohttp session has been closed.")
 
@@ -105,14 +99,100 @@ class LLMCog(commands.Cog, name="LLM"):
             definitions.append(self.search_agent.tool_spec)
         return definitions or None
 
-    async def _collect_thread_history(self, thread: discord.Thread) -> List[Dict[str, Any]]:
-        if thread.id not in self.thread_conversations:
-            return []
+    async def _get_conversation_thread_id(self, message: discord.Message) -> int:
+        """
+        メッセージの会話スレッドIDを取得または作成する。
+        リプライチェーンを辿って最初のメッセージを見つけ、それをスレッドIDとして使用。
+        """
+        # すでにマッピングがある場合はそれを返す
+        if message.id in self.message_to_thread:
+            return self.message_to_thread[message.id]
 
+        # リプライチェーンを辿る
+        current_msg = message
+        visited_ids = set()
+
+        while current_msg.reference and current_msg.reference.message_id:
+            # 循環参照を防ぐ
+            if current_msg.id in visited_ids:
+                break
+            visited_ids.add(current_msg.id)
+
+            # リプライ先のメッセージを取得
+            try:
+                parent_msg = current_msg.reference.resolved
+                if not parent_msg:
+                    # キャッシュにない場合はフェッチを試みる
+                    parent_msg = await message.channel.fetch_message(current_msg.reference.message_id)
+
+                # 親メッセージがBotのものでない場合は、そこで止める
+                if parent_msg.author != self.bot.user:
+                    break
+
+                current_msg = parent_msg
+            except (discord.NotFound, discord.HTTPException):
+                # メッセージが削除されているか取得できない場合
+                break
+
+        # 最も古いメッセージのIDをスレッドIDとする
+        thread_id = current_msg.id
+
+        # このメッセージをスレッドにマッピング
+        self.message_to_thread[message.id] = thread_id
+
+        return thread_id
+
+    async def _collect_conversation_history(self, message: discord.Message) -> List[Dict[str, Any]]:
+        """
+        リプライチェーンから会話履歴を収集する。
+        """
         history = []
-        for msg in self.thread_conversations[thread.id]:
-            history.append(msg)
+        current_msg = message
+        visited_ids = set()
 
+        # リプライチェーンを辿って履歴を収集
+        while current_msg.reference and current_msg.reference.message_id:
+            if current_msg.reference.message_id in visited_ids:
+                break
+            visited_ids.add(current_msg.reference.message_id)
+
+            try:
+                parent_msg = current_msg.reference.resolved
+                if not parent_msg:
+                    parent_msg = await message.channel.fetch_message(current_msg.reference.message_id)
+
+                # ユーザーのメッセージの場合
+                if parent_msg.author != self.bot.user:
+                    # 画像とテキストを処理
+                    image_contents, text_content = await self._prepare_multimodal_content(parent_msg)
+                    text_content = text_content.replace(f'<@!{self.bot.user.id}>', '').replace(f'<@{self.bot.user.id}>',
+                                                                                               '').strip()
+
+                    if text_content or image_contents:
+                        user_content_parts = [{"type": "text", "text": text_content}] if text_content else []
+                        user_content_parts.extend(image_contents)
+                        history.append({"role": "user", "content": user_content_parts})
+
+                # Botのメッセージの場合
+                else:
+                    # スレッドIDを取得
+                    thread_id = await self._get_conversation_thread_id(parent_msg)
+                    if thread_id in self.conversation_threads:
+                        # そのスレッドの履歴から該当するアシスタントメッセージを探す
+                        for msg in self.conversation_threads[thread_id]:
+                            if msg.get("role") == "assistant" and msg.get("message_id") == parent_msg.id:
+                                history.append({"role": "assistant", "content": msg["content"]})
+                                break
+
+                current_msg = parent_msg
+
+            except (discord.NotFound, discord.HTTPException):
+                break
+
+        # 履歴を時系列順（古い順）に並べ替える
+        history.reverse()
+
+        # 最大履歴数で制限
         max_history_entries = self.llm_config.get('max_messages', 10) * 2
         if len(history) > max_history_entries:
             history = history[-max_history_entries:]
@@ -139,25 +219,25 @@ class LLMCog(commands.Cog, name="LLM"):
 
     async def _prepare_multimodal_content(self, message: discord.Message) -> Tuple[List[Dict[str, Any]], str]:
         image_inputs, processed_urls = [], set()
+        messages_to_scan = [message]
+        if message.reference and isinstance(message.reference.resolved, discord.Message):
+            messages_to_scan.append(message.reference.resolved)
         source_urls = []
-
-        found_urls = IMAGE_URL_PATTERN.findall(message.content)
-        for url in found_urls:
-            if url not in processed_urls:
-                source_urls.append(url)
-                processed_urls.add(url)
-
-        for attachment in message.attachments:
-            if attachment.content_type and attachment.content_type.startswith(
-                    'image/') and attachment.url not in processed_urls:
-                source_urls.append(attachment.url)
-                processed_urls.add(attachment.url)
-
+        for msg in messages_to_scan:
+            found_urls = IMAGE_URL_PATTERN.findall(msg.content)
+            for url in found_urls:
+                if url not in processed_urls:
+                    source_urls.append(url)
+                    processed_urls.add(url)
+            for attachment in msg.attachments:
+                if attachment.content_type and attachment.content_type.startswith(
+                        'image/') and attachment.url not in processed_urls:
+                    source_urls.append(attachment.url)
+                    processed_urls.add(attachment.url)
         max_images = self.llm_config.get('max_images', 1)
         for url in source_urls[:max_images]:
             if image_data := await self._process_image_url(url):
                 image_inputs.append(image_data)
-
         if len(source_urls) > max_images:
             logger.info(f"Reached max image limit ({max_images}). Ignoring {len(source_urls) - max_images} images.")
             try:
@@ -167,81 +247,36 @@ class LLMCog(commands.Cog, name="LLM"):
                                            silent=True)
             except discord.HTTPException:
                 pass
-
-        clean_text = IMAGE_URL_PATTERN.sub('', message.content)
-        clean_text = clean_text.replace(f'<@!{self.bot.user.id}>', '').replace(f'<@{self.bot.user.id}>', '').strip()
-
+        clean_text = IMAGE_URL_PATTERN.sub('', message.content).strip()
         return image_inputs, clean_text
-
-    async def _schedule_thread_close(self, thread: discord.Thread, delay: int = None):
-        if thread.id in self.thread_close_tasks:
-            existing_task = self.thread_close_tasks[thread.id]
-            if not existing_task.done():
-                existing_task.cancel()
-
-        delay = delay or self.auto_close_delay
-        task = asyncio.create_task(self._auto_close_thread(thread, delay))
-        self.thread_close_tasks[thread.id] = task
-
-    async def _auto_close_thread(self, thread: discord.Thread, delay: int):
-        try:
-            await asyncio.sleep(delay)
-
-            if thread.id not in self.active_threads:
-                return
-
-            try:
-                await thread.send("⏰ このスレッドは非アクティブのため、まもなくクローズされます。")
-                await asyncio.sleep(10)
-            except discord.HTTPException:
-                pass
-
-            try:
-                await thread.edit(archived=True, reason="Auto-closed due to inactivity")
-                logger.info(f"Thread '{thread.name}' (ID: {thread.id}) auto-closed after {delay} seconds of inactivity")
-            except discord.HTTPException as e:
-                logger.error(f"Failed to archive thread {thread.id}: {e}")
-
-            self._cleanup_thread(thread.id)
-
-        except asyncio.CancelledError:
-            pass
-        except Exception as e:
-            logger.error(f"Error in auto-close thread task: {e}")
-
-    def _cleanup_thread(self, thread_id: int):
-        self.active_threads.discard(thread_id)
-        if thread_id in self.thread_conversations:
-            del self.thread_conversations[thread_id]
-        if thread_id in self.thread_close_tasks:
-            del self.thread_close_tasks[thread_id]
-        self.message_to_thread = {k: v for k, v in self.message_to_thread.items() if v != thread_id}
-
-    def _check_closing_keywords(self, text: str) -> bool:
-        text_lower = text.lower()
-        return any(keyword in text_lower for keyword in self.closing_keywords)
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
+        # Botのメッセージは無視
         if message.author.bot:
             return
 
-        if not (self.bot.user.mentioned_in(message) and not message.mention_everyone):
+        # メンションされているか、またはBotのメッセージへの返信かをチェック
+        is_mentioned = self.bot.user.mentioned_in(message) and not message.mention_everyone
+        is_reply_to_bot = (
+                message.reference and
+                isinstance(message.reference.resolved, discord.Message) and
+                message.reference.resolved.author == self.bot.user
+        )
+
+        # どちらでもない場合は無視
+        if not (is_mentioned or is_reply_to_bot):
             return
 
-        if isinstance(message.channel, discord.Thread):
-            if message.channel.id in self.active_threads:
-                await self._handle_thread_message(message)
-            else:
-                await self._handle_thread_message(message, new_conversation=True)
+        # チャンネル制限のチェック
+        if (
+        allowed_channels := self.config.get('allowed_channel_ids', [])) and message.channel.id not in allowed_channels:
             return
 
-        if (allowed_channels := self.config.get('allowed_channel_ids', [])) and message.channel.id not in allowed_channels:
-            return
-
+        # ロール制限のチェック
         if (allowed_roles := self.config.get('allowed_role_ids', [])) and isinstance(message.author,
                                                                                      discord.Member) and not any(
-                role.id in allowed_roles for role in message.author.roles):
+            role.id in allowed_roles for role in message.author.roles):
             return
 
         if not self.main_llm_client:
@@ -249,139 +284,100 @@ class LLMCog(commands.Cog, name="LLM"):
                                 silent=True)
             return
 
-        await self._create_thread_and_respond(message)
-
-    async def _create_thread_and_respond(self, message: discord.Message):
         image_contents, text_content = await self._prepare_multimodal_content(message)
+        text_content = text_content.replace(f'<@!{self.bot.user.id}>', '').replace(f'<@{self.bot.user.id}>', '').strip()
 
+        # リプライのみの場合でもテキストが空の場合は、エラーメッセージを返す
         if not text_content and not image_contents:
-            await message.reply(
-                self.llm_config.get('error_msg', {}).get('empty_mention_reply', "Yes? How can I help you?"),
-                silent=True)
-            return
-
-        try:
-            thread_name = text_content[:30] + "..." if len(
-                text_content) > 30 else text_content if text_content else "AI Chat"
-            thread_name = thread_name.replace('\n', ' ').strip() or "AI Chat"
-
-            thread = await message.create_thread(
-                name=thread_name,
-                auto_archive_duration=60
-            )
-
-            self.active_threads.add(thread.id)
-            self.message_to_thread[message.id] = thread.id
-            self.thread_conversations[thread.id] = []
-            logger.info(f"Created thread '{thread_name}' (ID: {thread.id}) for user {message.author.name}")
-
-            user_content_parts = [{"type": "text", "text": text_content}] if text_content else []
-            user_content_parts.extend(image_contents)
-            user_message = {"role": "user", "content": user_content_parts}
-            self.thread_conversations[thread.id].append(user_message)
-
-            if self._check_closing_keywords(text_content):
-                await self._schedule_thread_close(thread, delay=30)
+            # リプライのみの場合は別のメッセージを返す
+            if is_reply_to_bot and not is_mentioned:
+                await message.reply(
+                    self.llm_config.get('error_msg', {}).get('empty_reply', "何かお話しください。"),
+                    silent=True)
             else:
-                await self._schedule_thread_close(thread)
-
-            await self._generate_response_in_thread(thread, message.author)
-
-        except discord.HTTPException as e:
-            logger.error(f"Failed to create thread: {e}")
-            await message.reply(
-                self.llm_config.get('error_msg', {}).get('general_error', "Failed to create conversation thread."),
-                silent=True)
-
-    async def _handle_thread_message(self, message: discord.Message, new_conversation: bool = False):
-        thread = message.channel
-
-        if new_conversation:
-            self.active_threads.add(thread.id)
-            self.thread_conversations[thread.id] = []
-
-        image_contents, text_content = await self._prepare_multimodal_content(message)
-
-        if not text_content and not image_contents:
-            await message.reply("何かメッセージを入力してください。", silent=True)
+                await message.reply(
+                    self.llm_config.get('error_msg', {}).get('empty_mention_reply', "Yes? How can I help you?"),
+                    silent=True)
             return
 
-        user_content_parts = [{"type": "text", "text": text_content}] if text_content else []
-        user_content_parts.extend(image_contents)
-        user_message = {"role": "user", "content": user_content_parts}
+        guild_log = f"guild='{message.guild.name}({message.guild.id})'" if message.guild else "guild='DM'"
+        channel_log = f"channel='{message.channel.name}({message.channel.id})'" if hasattr(message.channel,
+                                                                                           'name') and message.channel.name else f"channel(id)={message.channel.id}"
+        author_log = f"author='{message.author.name}({message.author.id})'"
+        log_context = f"{guild_log}, {channel_log}, {author_log}"
 
-        if thread.id not in self.thread_conversations:
-            self.thread_conversations[thread.id] = []
+        log_text_summary = text_content.replace('\n', ' ')[:150]
+        logger.info(
+            f"Received LLM request | {log_context} | image_count={len(image_contents)} | text='{log_text_summary}...' | is_reply={is_reply_to_bot}"
+        )
 
-        self.thread_conversations[thread.id].append(user_message)
+        # スレッドIDを取得
+        thread_id = await self._get_conversation_thread_id(message)
 
-        if self._check_closing_keywords(text_content):
-            await self._schedule_thread_close(thread, delay=30)
-        else:
-            await self._schedule_thread_close(thread)
-
-        await self._generate_response_in_thread(thread, message.author)
-
-    async def _generate_response_in_thread(self, thread: discord.Thread, author: discord.User):
-        guild_log = f"guild='{thread.guild.name}({thread.guild.id})'" if thread.guild else "guild='DM'"
-        thread_log = f"thread='{thread.name}({thread.id})'"
-        author_log = f"author='{author.name}({author.id})'"
-        log_context = f"{guild_log}, {thread_log}, {author_log}"
-
+        # システムプロンプトを準備
         system_prompt = self.llm_config.get('system_prompt', "You are a helpful assistant.")
         messages_for_api: List[Dict[str, Any]] = [{"role": "system", "content": system_prompt}]
 
-        conversation_history = await self._collect_thread_history(thread)
+        # リプライチェーンから履歴を収集
+        conversation_history = await self._collect_conversation_history(message)
+        messages_for_api.extend(conversation_history)
 
-        allowed_keys = {'role', 'content', 'name', 'tool_calls', 'tool_call_id'}
-        cleaned_history = [
-            {key: value for key, value in msg.items() if key in allowed_keys}
-            for msg in conversation_history
-        ]
-        messages_for_api.extend(cleaned_history)
+        # 現在のメッセージを追加
+        user_content_parts = [{"type": "text", "text": text_content}] if text_content else []
+        user_content_parts.extend(image_contents)
+        user_message_for_api = {"role": "user", "content": user_content_parts}
+        messages_for_api.append(user_message_for_api)
 
         try:
-            async with thread.typing():
+            async with message.channel.typing():
                 llm_response = await self._get_llm_response(messages_for_api, log_context)
-
             if llm_response:
                 log_response_summary = llm_response.replace('\n', ' ')[:150]
-                logger.info(f"Sending LLM response in thread | {log_context} | response='{log_response_summary}...'")
+                logger.info(f"Sending LLM response | {log_context} | response='{log_response_summary}...'"
+                            )
 
-                sent_message = await self._send_thread_chunks(thread, llm_response)
+                # 会話スレッドに履歴を保存
+                if thread_id not in self.conversation_threads:
+                    self.conversation_threads[thread_id] = []
 
+                # ユーザーメッセージとアシスタントの応答を保存
+                self.conversation_threads[thread_id].append(user_message_for_api)
+
+                # アシスタントの応答を送信
+                sent_message = await self._send_reply_chunks(message, llm_response)
+
+                # アシスタントの応答をメッセージIDと共に保存
                 if sent_message:
                     assistant_message = {
                         "role": "assistant",
                         "content": llm_response,
                         "message_id": sent_message.id
                     }
-                    self.thread_conversations[thread.id].append(assistant_message)
+                    self.conversation_threads[thread_id].append(assistant_message)
+                    self.message_to_thread[sent_message.id] = thread_id
 
-                if "さようなら" in llm_response or "goodbye" in llm_response.lower() or "会話を終了" in llm_response:
-                    await self._schedule_thread_close(thread, delay=30)
-                else:
-                    await self._schedule_thread_close(thread)
-
+                # 古い会話スレッドをクリーンアップ（メモリ管理）
                 self._cleanup_old_threads()
 
             else:
                 logger.warning(f"Received empty response from LLM | {log_context}")
-                await thread.send(
-                    self.llm_config.get('error_msg', {}).get('general_error',
-                                                             "Received an empty response from the AI."),
-                    silent=True)
-
+                await message.reply(self.llm_config.get('error_msg', {}).get('general_error',
+                                                                             "Received an empty response from the AI."),
+                                    silent=True)
         except Exception as e:
-            logger.error(f"Error during LLM interaction in thread: {e}", exc_info=True)
-            await thread.send(self._handle_llm_exception(e), silent=True)
+            logger.error(f"Error during LLM interaction: {e}", exc_info=True)
+            await message.reply(self._handle_llm_exception(e), silent=True)
 
     def _cleanup_old_threads(self):
-        max_threads = 100
-        if len(self.thread_conversations) > max_threads:
-            threads_to_remove = list(self.thread_conversations.keys())[:len(self.thread_conversations) - max_threads]
+        """古い会話スレッドを削除してメモリを節約"""
+        max_threads = 100  # 最大100スレッドまで保持
+        if len(self.conversation_threads) > max_threads:
+            # 最も古いスレッドから削除
+            threads_to_remove = list(self.conversation_threads.keys())[:len(self.conversation_threads) - max_threads]
             for thread_id in threads_to_remove:
-                self._cleanup_thread(thread_id)
+                del self.conversation_threads[thread_id]
+                # 関連するマッピングも削除
+                self.message_to_thread = {k: v for k, v in self.message_to_thread.items() if v != thread_id}
 
     async def _get_llm_response(self, messages: List[Dict[str, Any]], log_context: str) -> str:
         current_messages = messages.copy()
@@ -405,27 +401,34 @@ class LLMCog(commands.Cog, name="LLM"):
                 response = await self.main_llm_client.chat.completions.create(**api_kwargs)
                 response_message = response.choices[0].message
 
+                # Add assistant message to conversation
                 current_messages.append(response_message.model_dump(exclude_none=True))
 
+                # If there are tool calls, process them
                 if response_message.tool_calls:
                     logger.info(
                         f"Processing {len(response_message.tool_calls)} tool call(s) in iteration {iteration + 1}")
 
+                    # Process all tool calls and add their results to the conversation
                     await self._process_tool_calls(response_message.tool_calls, current_messages, log_context)
 
+                    # Continue the loop to get LLM's response based on tool results
                     continue
                 else:
+                    # No tool calls, return the final response
                     return response_message.content or ""
 
             except Exception as e:
                 logger.error(f"Error during LLM API call in iteration {iteration + 1}: {e}", exc_info=True)
                 raise
 
+        # If we've reached max iterations, return a timeout message
         logger.warning(f"Tool processing exceeded max iterations ({max_iterations})")
         return self.llm_config.get('error_msg', {}).get('tool_loop_timeout', "Tool processing exceeded max iterations.")
 
     async def _process_tool_calls(self, tool_calls: List[Any], messages: List[Dict[str, Any]],
                                   log_context: str) -> None:
+        """Process tool calls and add their results to the message history."""
         for tool_call in tool_calls:
             function_name = tool_call.function.name
 
@@ -435,8 +438,10 @@ class LLMCog(commands.Cog, name="LLM"):
                     query_text = function_args.get('query', 'N/A')
                     logger.info(f"Executing SearchAgent | {log_context} | query='{query_text}'")
 
+                    # Execute the search agent and get results
                     search_results = await self.search_agent.run(arguments=function_args, bot=self.bot)
 
+                    # Add tool response to conversation
                     tool_response = {
                         "tool_call_id": tool_call.id,
                         "role": "tool",
@@ -492,16 +497,20 @@ class LLMCog(commands.Cog, name="LLM"):
             logger.error(f"An unexpected error occurred during LLM interaction: {e}", exc_info=True)
             return self.llm_config.get('error_msg', {}).get('general_error', "An unexpected error occurred.")
 
-    async def _send_thread_chunks(self, thread: discord.Thread, text_content: str) -> Optional[discord.Message]:
+    async def _send_reply_chunks(self, message: discord.Message, text_content: str) -> Optional[discord.Message]:
+        """メッセージを分割して送信し、最初のメッセージを返す"""
         if not text_content:
             return None
         chunks = self._split_message(text_content, DISCORD_MESSAGE_MAX_LENGTH)
+        first_chunk = chunks.pop(0) if chunks else ""
         first_message = None
-        for i, chunk in enumerate(chunks):
-            if i == 0:
-                first_message = await thread.send(chunk, silent=True)
-            else:
-                await thread.send(chunk, silent=True)
+        try:
+            first_message = await message.reply(first_chunk, silent=True)
+        except discord.HTTPException as e:
+            logger.warning(f"Failed to reply, falling back to sending message. Error: {e}")
+            first_message = await message.channel.send(first_chunk, silent=True)
+        for chunk in chunks:
+            await message.channel.send(chunk, silent=True)
         return first_message
 
     def _split_message(self, text_content: str, max_length: int) -> List[str]:
@@ -534,13 +543,10 @@ class LLMCog(commands.Cog, name="LLM"):
 
         embed.add_field(
             name="基本的な使い方",
-            value=f"• **Botにメンション (`@{bot_name}`) して話しかけると、自動的にスレッドが作成されAIが応答します。**\n"
-                  f"• **作成されたスレッド内でも、Botにメンションすることで会話を続けられます。**\n"
+            value=f"• Botにメンション (`@{bot_name}`) して話しかけると、AIが応答します。\n"
+                  f"• **Botのメッセージに返信することでも会話を続けられます（メンション不要）。**\n"
                   f"• メッセージと一緒に画像を添付、または画像URLを貼り付けると、AIが画像の内容も理解しようとします。\n"
-                  f"• **スレッドは{self.auto_close_delay // 60}分間操作がないと自動的にクローズされます。**\n"
-                  f"• 「ありがとう」などの終了キーワードを含むメッセージ後は30秒でクローズされます。\n"
-                  f"• `/close_thread`コマンドで手動でスレッドをクローズできます。\n"
-                  f"• **注意: メンションなしのメッセージはBotには読めません。**",
+                  f"• 他の人のメッセージに返信する形でメンションすると、引用元の画像も認識します。",
             inline=False
         )
 
@@ -555,6 +561,7 @@ class LLMCog(commands.Cog, name="LLM"):
             inline=False
         )
 
+        # --- AI利用ガイドライン ---
         embed.add_field(
             name="--- 📜 AI利用ガイドライン ---",
             value="AI機能を安全にご利用いただくため、以下の内容を必ずご確認ください。",
@@ -617,13 +624,10 @@ class LLMCog(commands.Cog, name="LLM"):
 
         embed.add_field(
             name="Basic Usage",
-            value=f"• **Mention the bot (`@{bot_name}`) to automatically create a thread and get a response from the AI.**\n"
-                  f"• **Within the created thread, mention the bot to continue the conversation.**\n"
+            value=f"• Mention the bot (`@{bot_name}`) to get a response from the AI.\n"
+                  f"• **You can also continue the conversation by replying to the bot's messages (no mention needed).**\n"
                   f"• Attach images or paste image URLs with your message, and the AI will try to understand them.\n"
-                  f"• **Threads will be automatically closed after {self.auto_close_delay // 60} minutes of inactivity.**\n"
-                  f"• Threads close 30 seconds after messages with closing keywords like 'thank you'.\n"
-                  f"• Use `/close_thread` command to manually close a thread.\n"
-                  f"• **Note: Messages without mentions cannot be read by the bot.**",
+                  f"• If you reply to another message while mentioning the bot, it will also see the images in the replied-to message.",
             inline=False
         )
 
@@ -637,6 +641,7 @@ class LLMCog(commands.Cog, name="LLM"):
         )
         embed.add_field(name="Current AI Settings", value=settings_value, inline=False)
 
+        # --- AI Usage Guidelines ---
         embed.add_field(
             name="--- 📜 AI Usage Guidelines ---",
             value="Please review the following to ensure safe use of the AI features.",
@@ -685,67 +690,42 @@ class LLMCog(commands.Cog, name="LLM"):
         embed.set_footer(text="These guidelines are subject to change without notice.")
         await interaction.followup.send(embed=embed, ephemeral=False)
 
-    @app_commands.command(name="clear_history", description="現在のスレッドの会話履歴をクリアします。")
+    @app_commands.command(name="clear_history", description="現在の会話スレッドの履歴をクリアします。")
     async def clear_history_slash(self, interaction: discord.Interaction):
-        if isinstance(interaction.channel, discord.Thread):
-            thread_id = interaction.channel.id
-            if thread_id in self.thread_conversations:
-                self._cleanup_thread(thread_id)
-                await interaction.response.send_message("✅ このスレッドの会話履歴をクリアしました。", ephemeral=True)
-            else:
-                await interaction.response.send_message("ℹ️ このスレッドには会話履歴がありません。", ephemeral=True)
+        """Clear the conversation history for the current thread."""
+        # 実行者のメッセージIDからスレッドIDを探す（最近のメッセージから）
+        cleared_count = 0
+
+        # すべてのスレッドをチェック
+        threads_to_clear = []
+        for thread_id, messages in self.conversation_threads.items():
+            # このチャンネルのメッセージが含まれているか確認
+            for msg in messages:
+                if isinstance(msg.get("content"), list):
+                    # ユーザーメッセージの場合、チャンネルIDは直接取得できないので、スキップ
+                    continue
+                elif msg.get("message_id"):
+                    # アシスタントメッセージの場合、そのメッセージがこのチャンネルのものか確認
+                    try:
+                        # メッセージIDからチャンネルを推測することはできないので、
+                        # 現在のチャンネルに関連するすべてのスレッドをクリア
+                        threads_to_clear.append(thread_id)
+                        break
+                    except:
+                        pass
+
+        # 見つかったスレッドをクリア
+        for thread_id in threads_to_clear:
+            del self.conversation_threads[thread_id]
+            # 関連するマッピングも削除
+            self.message_to_thread = {k: v for k, v in self.message_to_thread.items() if v != thread_id}
+            cleared_count += 1
+
+        if cleared_count > 0:
+            await interaction.response.send_message(f"✅ {cleared_count}個の会話スレッドの履歴をクリアしました。",
+                                                    ephemeral=True)
         else:
-            cleared_count = len(self.thread_conversations)
-
-            for task in self.thread_close_tasks.values():
-                if not task.done():
-                    task.cancel()
-
-            self.thread_conversations.clear()
-            self.active_threads.clear()
-            self.message_to_thread.clear()
-            self.thread_close_tasks.clear()
-
-            if cleared_count > 0:
-                await interaction.response.send_message(f"✅ {cleared_count}個のスレッドの会話履歴をクリアしました。",
-                                                        ephemeral=True)
-            else:
-                await interaction.response.send_message("ℹ️ 会話履歴がありません。", ephemeral=True)
-
-    @app_commands.command(name="close_thread", description="現在のAI会話スレッドをクローズします。")
-    async def close_thread_slash(self, interaction: discord.Interaction):
-        if not isinstance(interaction.channel, discord.Thread):
-            await interaction.response.send_message(
-                "このコマンドはAI会話スレッド内でのみ使用できます。",
-                ephemeral=True
-            )
-            return
-
-        thread = interaction.channel
-
-        if thread.id not in self.active_threads:
-            await interaction.response.send_message(
-                "このスレッドはAI会話スレッドではありません。",
-                ephemeral=True
-            )
-            return
-
-        try:
-            await interaction.response.send_message("👋 会話を終了します。このスレッドをクローズします。")
-
-            self._cleanup_thread(thread.id)
-
-            await asyncio.sleep(2)
-            await thread.edit(archived=True, reason="Manually closed by user")
-
-            logger.info(f"Thread '{thread.name}' (ID: {thread.id}) manually closed by {interaction.user.name}")
-
-        except discord.HTTPException as e:
-            logger.error(f"Failed to close thread {thread.id}: {e}")
-            await interaction.followup.send(
-                "スレッドのクローズに失敗しました。",
-                ephemeral=True
-            )
+            await interaction.response.send_message("ℹ️ このチャンネルには会話履歴がありません。", ephemeral=True)
 
 
 async def setup(bot: commands.Bot):
