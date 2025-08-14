@@ -15,7 +15,11 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
         # configから必要な値を取得
         self.arona_repository = self.bot.config.get("arona_repository_url", "")
         self.plana_repository = self.bot.config.get("plana_repository_url", "")
-        self.support_server_invite = self.bot.config.get("support_server_invite_url", "")
+
+        # サポート連絡先の設定
+        self.support_x_url = self.bot.config.get("support_x_url", "https://x.com/coffin299")
+        self.support_discord_id = self.bot.config.get("support_discord_id", "coffin299")
+
         self.bot_invite_url = self.bot.config.get("bot_invite_url")
 
         if not self.bot_invite_url:
@@ -258,19 +262,64 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
             logger.warning(f"/plana が実行されましたが、リポジトリURL未設定。 (User: {interaction.user.id})")
 
     @app_commands.command(name="support",
-                          description="サポートサーバーの招待コードを表示します / Shows the support server invite code")
-    async def support_server_slash(self, interaction: discord.Interaction) -> None:
-        if self.support_server_invite and self.support_server_invite != "https://discord.gg/HogeFugaPiyo":
-            message_ja = f"サポートサーバーへの招待リンクはこちらです！\n{self.support_server_invite}"
-            message_en = f"Here is the invitation link to our support server!\n{self.support_server_invite}"
-            await interaction.response.send_message(f"{message_ja}\n\n{message_en}", ephemeral=False)
-            logger.info(f"/support が実行されました。 (User: {interaction.user.id})")
-        else:
-            message_ja = "申し訳ありませんが、現在サポートサーバーの招待リンクが設定されていません。\n管理者にお問い合わせください。"
-            message_en = "Sorry, the invitation link for the support server is not currently set.\nPlease contact an administrator."
-            await interaction.response.send_message(f"{message_ja}\n\n{message_en}", ephemeral=False)
-            logger.warning(
-                f"/support が実行されましたが、招待リンク未設定またはプレースホルダ。 (User: {interaction.user.id})")
+                          description="開発者へのお問い合わせ方法を表示します / Shows how to contact the developer")
+    async def support_contact_slash(self, interaction: discord.Interaction) -> None:
+        """開発者への連絡方法を表示するコマンド"""
+
+        # Embedの作成
+        embed = discord.Embed(
+            title="💬 お問い合わせ / Contact Support",
+            description="Botに関するご質問・ご要望・不具合報告などは、以下の方法でお気軽にお問い合わせください。\n"
+                        "For questions, requests, or bug reports about the bot, please feel free to contact us using the methods below.",
+            color=discord.Color.blue()
+        )
+
+        # X (Twitter) での連絡
+        embed.add_field(
+            name="🐦 X (Twitter)",
+            value=f"DMまたはメンションでお問い合わせください。\n"
+                  f"Please contact via DM or mention.\n"
+                  f"[**@coffin299**]({self.support_x_url})",
+            inline=False
+        )
+
+        # Discord での連絡
+        embed.add_field(
+            name="💬 Discord",
+            value=f"DiscordのDMでお問い合わせください。\n"
+                  f"Please contact via Discord DM.\n"
+                  f"**ユーザー名 / Username:** `{self.support_discord_id}`",
+            inline=False
+        )
+
+        # 注意事項
+        embed.add_field(
+            name="📝 ご連絡時のお願い / When Contacting",
+            value="• Botを使用しているサーバー名をお知らせください。\n"
+                  "• 具体的な問題や要望をお書きください。\n"
+                  "• スクリーンショットがあれば添付してください。\n\n"
+                  "• Please mention the server name where you're using the bot.\n"
+                  "• Describe the specific issue or request.\n"
+                  "• Attach screenshots if available.",
+            inline=False
+        )
+
+        # フッター
+        embed.set_footer(text="お気軽にお問い合わせください！ / Feel free to contact us!")
+
+        # ボタンビューの作成
+        view = discord.ui.View()
+        view.add_item(
+            discord.ui.Button(
+                label="X (Twitter)で連絡 / Contact on X",
+                style=discord.ButtonStyle.link,
+                url=self.support_x_url,
+                emoji="🐦"
+            )
+        )
+
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=False)
+        logger.info(f"/support が実行されました。 (User: {interaction.user.id})")
 
     @app_commands.command(name="invite",
                           description="このBotをあなたのサーバーに招待します。/ Invites this bot to your server.")
@@ -439,6 +488,7 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
             f"`/avatar [ユーザー]` - アバター画像を表示",
             f"`/invite` - Botの招待リンクを表示",
             f"`/meow` - ランダムな猫の画像を表示",
+            f"`/support` - 開発者への連絡方法を表示"
         ]
         utility_cmds_en = [
             f"`/gacha` - Simulates student recruitment (gacha) like in Blue Archive.",
@@ -448,11 +498,9 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
             f"`/avatar [user]` - Display avatar",
             f"`/invite` - Display bot invite link",
             f"`/meow` - Displays a random cat picture",
+            f"`/support` - Shows how to contact the developer"
         ]
 
-        if self.support_server_invite and self.support_server_invite != "https://discord.gg/HogeFugaPiyo":
-            utility_cmds_ja.append(f"`/support` - サポートサーバー招待")
-            utility_cmds_en.append(f"`/support` - Support server invite")
         if self.plana_repository:
             utility_cmds_ja.append(f"`/plana` - Plana (Bot)リポジトリ")
             utility_cmds_en.append(f"`/plana` - Plana (Bot) repository")
