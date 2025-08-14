@@ -8,23 +8,11 @@ logger = logging.getLogger(__name__)
 
 try:
     from mistralai import Mistral
-    from mistralai.models import ChatCompletionRequest, UserMessage, SystemMessage
 
-    MistralAPIException = Exception
-    logger.info("Using new Mistral client library")
+    logger.info("Mistral client library loaded successfully")
 except ImportError:
-    try:
-        from mistralai.async_client import MistralAsyncClient
-        from mistralai.exceptions import MistralAPIException
-        from mistralai.models.chat_completion import ChatMessage
-
-        Mistral = None
-        logger.info("Using legacy MistralAsyncClient")
-    except ImportError:
-        logger.error("MistralAI library not found. Please install: pip install mistralai")
-        Mistral = None
-        MistralAsyncClient = None
-        MistralAPIException = Exception
+    logger.error("MistralAI library not found. Please install: pip install mistralai")
+    Mistral = None
 
 
 class SearchAgent:
@@ -47,9 +35,11 @@ class SearchAgent:
         },
     }
 
-    # Mistral AIの検索対応モデル
+    # Mistral AIの検索対応モデル（最新版）
     SEARCH_ENABLED_MODELS = [
-        "mistral-medium-latest"
+        "mistral-large-latest",
+        "mistral-medium-latest",
+        "pixtral-large-latest"
     ]
 
     def __init__(self, bot) -> None:
@@ -60,12 +50,12 @@ class SearchAgent:
         self.base_delay = 1.0
         self.timeout = 30.0
         self.initialization_error = None
-        self.use_legacy_client = False
 
         try:
             logger.info("Loading SearchAgent configuration...")
             mcfg = self.bot.cfg.get("search_agent", {})
 
+            # API keyの取得
             api_key = mcfg.get("api_key")
             if not api_key:
                 error_msg = "API key not found in configuration under 'search_agent.api_key'"
@@ -75,16 +65,16 @@ class SearchAgent:
 
             logger.info(f"API key found (starts with: {api_key[:8]}...)")
 
-            # クライアントの初期化
+            # Mistralクライアントの初期化
+            if not Mistral:
+                error_msg = "Mistral library not available. Please install: pip install mistralai"
+                logger.error(error_msg)
+                self.initialization_error = error_msg
+                return
+
             try:
-                if Mistral:
-                    self.client = Mistral(api_key=api_key)
-                    logger.info("New Mistral client initialized successfully.")
-                    self.use_legacy_client = False
-                else:
-                    self.client = MistralAsyncClient(api_key=api_key)
-                    logger.info("Legacy MistralAsyncClient initialized successfully.")
-                    self.use_legacy_client = True
+                self.client = Mistral(api_key=api_key)
+                logger.info("Mistral client initialized successfully.")
             except Exception as e:
                 logger.error(f"Failed to initialize Mistral client: {e}")
                 self.client = None
@@ -95,11 +85,11 @@ class SearchAgent:
             configured_model = mcfg.get("model", "mistral-large-latest")
             if configured_model in self.SEARCH_ENABLED_MODELS:
                 self.model = configured_model
-                logger.info(f"Using search-enabled model: {self.model}")
+                logger.info(f"Using model: {self.model}")
             else:
                 # 検索非対応モデルの場合、警告を出すが続行
                 logger.warning(
-                    f"Model '{configured_model}' may not support web search. Consider using: {', '.join(self.SEARCH_ENABLED_MODELS)}")
+                    f"Model '{configured_model}' may not be optimal. Consider using: {', '.join(self.SEARCH_ENABLED_MODELS)}")
                 self.model = configured_model
 
             # その他の設定
@@ -113,134 +103,145 @@ class SearchAgent:
             self.initialization_error = error_msg
             self.client = None
 
-    async def _mistral_search_new(self, query: str) -> str:
-        """新しいMistralクライアントを使用した検索（修正版）"""
+    async def _perform_web_search(self, query: str) -> str:
+        """Mistral AIを使用してWeb検索を実行（最新版）"""
         try:
-            # Mistral AIのFunction Callingを使用する正しい方法
-            tools = [{
-                "type": "function",
-                "function": {
-                    "name": "web_search",
-                    "description": "Search the web for information",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "query": {
-                                "type": "string",
-                                "description": "The search query"
-                            }
-                        },
-                        "required": ["query"]
+            # Web検索ツールの定義
+            tools = [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "web_search",
+                        "description": "Search the web for real-time information",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "query": {
+                                    "type": "string",
+                                    "description": "The search query"
+                                }
+                            },
+                            "required": ["query"]
+                        }
                     }
                 }
-            }]
-
-            # まず検索ツールを呼び出すようLLMに指示
-            messages = [
-                {"role": "user", "content": f"Please search for information about: {query}"}
             ]
 
-            # ツール呼び出しを要求
-            logger.debug(f"Requesting tool call for query: {query}")
+            # 初期メッセージ
+            messages = [
+                {
+                    "role": "system",
+                    "content": "You are a helpful assistant with web search capabilities. Use the web_search tool to find current information."
+                },
+                {
+                    "role": "user",
+                    "content": f"Search for and provide comprehensive information about: {query}"
+                }
+            ]
 
+            logger.debug(f"Requesting search for query: {query}")
+
+            # Mistral AIのChat Completionを呼び出し（ツール使用を有効化）
             response = await asyncio.wait_for(
                 self.client.chat.complete_async(
                     model=self.model,
                     messages=messages,
                     tools=tools,
-                    tool_choice="required",  # ツールの使用を強制
-                ),
-                timeout=self.timeout
-            )
-
-            if not response.choices or not response.choices[0].message.tool_calls:
-                # ツール呼び出しがない場合、通常のチャットとして処理
-                logger.warning("No tool calls in response, falling back to regular chat")
-                return await self._fallback_search(query)
-
-            # ツール呼び出しの結果を処理
-            tool_call = response.choices[0].message.tool_calls[0]
-
-            # ツールの実行結果を模擬（実際にはMistral側で処理される）
-            messages.append(response.choices[0].message.model_dump())
-            messages.append({
-                "role": "tool",
-                "content": f"Web search completed for: {query}",
-                "tool_call_id": tool_call.id
-            })
-
-            # 最終的な応答を取得
-            final_response = await asyncio.wait_for(
-                self.client.chat.complete_async(
-                    model=self.model,
-                    messages=messages,
-                    temperature=0.1,
+                    tool_choice="auto",  # 自動的にツールを選択
+                    temperature=0.3,
                     max_tokens=4000,
                 ),
                 timeout=self.timeout
             )
 
-            if final_response.choices and final_response.choices[0].message.content:
-                content = final_response.choices[0].message.content.strip()
-                logger.info(f"Search successful for query: {query}")
-                return self._format_search_result(content, query)
+            # レスポンスの処理
+            if response.choices and response.choices[0].message:
+                message = response.choices[0].message
 
-            return "[Search Error] No content in response"
+                # ツール呼び出しがある場合
+                if hasattr(message, 'tool_calls') and message.tool_calls:
+                    logger.info(f"Tool call detected for query: {query}")
 
+                    # メッセージ履歴に追加
+                    messages.append(message.model_dump())
+
+                    # ツール呼び出しの結果を模擬
+                    for tool_call in message.tool_calls:
+                        messages.append({
+                            "role": "tool",
+                            "content": f"Search results retrieved for: {json.loads(tool_call.function.arguments).get('query', query)}",
+                            "tool_call_id": tool_call.id
+                        })
+
+                    # 最終的な応答を取得
+                    final_response = await asyncio.wait_for(
+                        self.client.chat.complete_async(
+                            model=self.model,
+                            messages=messages,
+                            temperature=0.3,
+                            max_tokens=4000,
+                        ),
+                        timeout=self.timeout
+                    )
+
+                    if final_response.choices and final_response.choices[0].message.content:
+                        content = final_response.choices[0].message.content.strip()
+                        logger.info(f"Search successful for query: {query}")
+                        return self._format_search_result(content, query)
+
+                # 通常のレスポンス（ツール呼び出しなし）
+                elif message.content:
+                    content = message.content.strip()
+                    logger.info(f"Response received without tool call for query: {query}")
+                    return self._format_search_result(content, query)
+
+            return "[Search Error] No valid response received"
+
+        except asyncio.TimeoutError:
+            logger.error(f"Search timeout for query: {query}")
+            return f"[Search Error] Request timeout after {self.timeout}s"
         except Exception as e:
-            logger.error(f"Error in new Mistral search: {e}", exc_info=True)
-            # フォールバックを試みる
-            return await self._fallback_search(query)
+            logger.error(f"Error in web search: {e}", exc_info=True)
+            return f"[Search Error] {str(e)}"
 
     async def _fallback_search(self, query: str) -> str:
-        """検索機能が使えない場合のフォールバック"""
+        """検索機能が使えない場合のフォールバック（知識ベースを使用）"""
         try:
-            logger.info(f"Using fallback search for query: {query}")
+            logger.info(f"Using fallback (knowledge base) for query: {query}")
 
             messages = [
                 {
                     "role": "system",
-                    "content": "You are a knowledgeable assistant. Provide comprehensive and detailed information about the topic based on your training data. Be clear that this is not live web data."
+                    "content": "You are a knowledgeable assistant. Provide comprehensive and detailed information based on your training data. Be clear that this is from your knowledge base, not live web data."
                 },
                 {
                     "role": "user",
-                    "content": f"Provide detailed information about: {query}\n\nPlease be comprehensive and include relevant facts, recent developments (up to your knowledge cutoff), and important context."
+                    "content": f"Provide detailed information about: {query}\n\nInclude relevant facts, context, and important details from your knowledge base."
                 }
             ]
 
-            if self.use_legacy_client:
-                response = await self.client.chat(
+            response = await asyncio.wait_for(
+                self.client.chat.complete_async(
                     model=self.model,
                     messages=messages,
                     temperature=0.3,
-                    max_tokens=2000,
-                )
-            else:
-                response = await self.client.chat.complete_async(
-                    model=self.model,
-                    messages=messages,
-                    temperature=0.3,
-                    max_tokens=2000,
-                )
+                    max_tokens=3000,
+                ),
+                timeout=self.timeout
+            )
 
             if response.choices and response.choices[0].message.content:
                 content = response.choices[0].message.content.strip()
-                return f"**Note:** Using AI knowledge base (not live web search)\n\n{content}"
+                return f"📚 **Note:** Information from AI knowledge base (not live web search)\n\n{content}"
 
             return "[Error] Failed to generate response"
 
         except Exception as e:
             logger.error(f"Error in fallback search: {e}")
-            return f"[Error] Search failed: {str(e)}"
-
-    async def _mistral_search_legacy(self, query: str) -> str:
-        """古いMistralAsyncClientを使用（フォールバックを使用）"""
-        # 古いクライアントでは検索機能が制限されている可能性があるため
-        # フォールバックを使用
-        return await self._fallback_search(query)
+            return f"[Error] Fallback search failed: {str(e)}"
 
     async def _mistral_search(self, query: str) -> str:
-        """検索を実行するメインメソッド"""
+        """検索を実行するメインメソッド（リトライロジック付き）"""
         if not self.client:
             return self._get_initialization_error()
 
@@ -249,28 +250,40 @@ class SearchAgent:
 
         for attempt in range(self.max_retries + 1):
             try:
-                logger.debug(f"Search attempt {attempt + 1} for: {query}")
+                logger.debug(f"Search attempt {attempt + 1}/{self.max_retries + 1} for: {query}")
 
-                if self.use_legacy_client:
-                    result = await self._mistral_search_legacy(query)
-                else:
-                    result = await self._mistral_search_new(query)
+                # まずWeb検索を試みる
+                result = await self._perform_web_search(query)
+
+                # エラーの場合、フォールバックを試みる
+                if result.startswith("[Search Error]") and attempt == self.max_retries:
+                    logger.info("Web search failed, trying fallback...")
+                    result = await self._fallback_search(query)
+
+                if not result.startswith("[Search Error]") and not result.startswith("[Error]"):
+                    return result
+
+                # リトライが必要な場合
+                if attempt < self.max_retries:
+                    delay = self.base_delay * (2 ** attempt)
+                    logger.info(f"Retrying in {delay}s...")
+                    await asyncio.sleep(delay)
+                    continue
 
                 return result
 
-            except asyncio.TimeoutError:
-                logger.warning(f"Search timeout on attempt {attempt + 1}")
-                if attempt < self.max_retries:
-                    await asyncio.sleep(self.base_delay * (2 ** attempt))
-                    continue
-                return f"[Search Error] Request timeout after {self.timeout}s."
-
             except Exception as e:
-                logger.error(f"Search error on attempt {attempt + 1}: {e}")
+                logger.error(f"Unexpected error on attempt {attempt + 1}: {e}")
                 if attempt < self.max_retries:
-                    await asyncio.sleep(self.base_delay * (2 ** attempt))
+                    delay = self.base_delay * (2 ** attempt)
+                    await asyncio.sleep(delay)
                     continue
-                return f"[Search Error] {str(e)}"
+
+                # 最後の試行でもエラーの場合、フォールバックを試みる
+                try:
+                    return await self._fallback_search(query)
+                except:
+                    return f"[Search Error] All attempts failed: {str(e)}"
 
         return "[Search Error] Failed after all retries."
 
@@ -281,25 +294,39 @@ class SearchAgent:
         if self.initialization_error:
             error_details.append(f"- Initialization error: {self.initialization_error}")
 
-        if not Mistral and not MistralAsyncClient:
+        if not Mistral:
             error_details.append("- MistralAI library not installed. Run: pip install mistralai")
 
-        error_details.append("\nRequired configuration in config.yaml:")
+        error_details.append("\n**Required configuration in config.yaml:**")
+        error_details.append("```yaml")
         error_details.append("search_agent:")
         error_details.append("  api_key: 'your_mistral_api_key'")
-        error_details.append("  model: 'mistral-large-latest'")
+        error_details.append("  model: 'mistral-large-latest'  # または他の対応モデル")
+        error_details.append("  max_retries: 3  # オプション")
+        error_details.append("  timeout: 30.0  # オプション")
+        error_details.append("```")
 
         return "\n".join(error_details)
 
     def _format_search_result(self, content: str, query: str) -> str:
         """検索結果をフォーマット"""
         try:
-            formatted = f"🔍 **Search Results for: {query}**\n\n{content}"
+            # 結果のタイプを判定
+            if "web_search" in content.lower() or "search results" in content.lower():
+                icon = "🔍"
+                title = "Web Search Results"
+            else:
+                icon = "📝"
+                title = "Information"
 
-            if len(formatted) > 3500:
-                formatted = formatted[:3500] + "\n\n[Results truncated]"
+            formatted = f"{icon} **{title} for: {query}**\n\n{content}"
+
+            # 長すぎる場合はトランケート
+            if len(formatted) > 4000:
+                formatted = formatted[:3900] + "\n\n... [Results truncated for brevity]"
 
             return formatted
+
         except Exception as e:
             logger.error(f"Error formatting result: {e}")
             return content
@@ -311,14 +338,14 @@ class SearchAgent:
             if not query:
                 return "[Search Error] Empty query provided."
 
-            logger.info(f"SearchAgent executing: {query}")
+            logger.info(f"SearchAgent executing query: {query}")
             result = await self._mistral_search(query)
 
-            # エラーでない場合のみ成功ログ
+            # 成功/失敗のログ
             if not result.startswith("[Search Error]") and not result.startswith("[Error]"):
-                logger.info("SearchAgent completed successfully")
+                logger.info(f"SearchAgent completed successfully for: {query}")
             else:
-                logger.warning(f"SearchAgent returned error: {result[:100]}...")
+                logger.warning(f"SearchAgent returned error for '{query}': {result[:100]}...")
 
             return result
 
@@ -335,7 +362,30 @@ class SearchAgent:
         return {
             "available": self.is_available(),
             "model": self.model,
-            "search_enabled_models": self.SEARCH_ENABLED_MODELS,
-            "client_type": "new" if not self.use_legacy_client else "legacy",
+            "supported_models": self.SEARCH_ENABLED_MODELS,
             "initialization_error": self.initialization_error,
+            "max_retries": self.max_retries,
+            "timeout": self.timeout,
         }
+
+    async def test_connection(self) -> bool:
+        """接続テスト"""
+        try:
+            if not self.client:
+                return False
+
+            # 簡単なテストクエリを実行
+            test_response = await asyncio.wait_for(
+                self.client.chat.complete_async(
+                    model=self.model,
+                    messages=[{"role": "user", "content": "Hello"}],
+                    max_tokens=10,
+                ),
+                timeout=5.0
+            )
+
+            return test_response.choices is not None
+
+        except Exception as e:
+            logger.error(f"Connection test failed: {e}")
+            return False
