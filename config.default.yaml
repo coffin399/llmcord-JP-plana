@@ -190,3 +190,4 @@ music:
 
     search_no_results: ":mag: No results found for \"{query}\"."
     max_queue_size_reached: ":no_entry_sign: Max queue size ({max_size} songs) reached. Cannot add more."
+    max_guilds: 1000000
