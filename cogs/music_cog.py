@@ -102,7 +102,7 @@ class GuildState:
 
 
 # --- MusicCog本体 ---
-class MusicCog(commands.Cog, name="音楽"):
+class MusicCog(commands.Cog, name="music_cog"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         if not all((Track, extract_audio_data, ensure_stream)):
@@ -121,14 +121,21 @@ class MusicCog(commands.Cog, name="音楽"):
         self.max_queue_size = self.music_config.get('max_queue_size', 9000)
 
         # マルチサーバー対応の設定
-        self.max_guilds = self.music_config.get('max_guilds', 100)  # 最大同時接続ギルド数
+        self.max_guilds = self.music_config.get('max_guilds', 100000000)  # 最大同時接続ギルド数
         self.inactive_timeout_minutes = self.music_config.get('inactive_timeout_minutes', 30)  # 非アクティブタイムアウト
 
         # グローバル接続管理用ロック
         self.global_connection_lock = asyncio.Lock()
 
-        # 定期クリーンアップタスク
-        self.cleanup_task.start()
+        # クリーンアップタスクは初期化のみ（start()は別途呼ぶ）
+        self.cleanup_task = None
+
+    async def cog_load(self):
+        """Cogがロードされた時に呼ばれる"""
+        # 定期クリーンアップタスクを開始
+        if not self.cleanup_task or self.cleanup_task.done():
+            self.cleanup_task = self.cleanup_task_loop.start()
+        logger.info("MusicCog loaded and cleanup task started")
 
     def _load_bot_config(self) -> dict:
         if hasattr(self.bot, 'config') and self.bot.config:
@@ -143,13 +150,35 @@ class MusicCog(commands.Cog, name="音楽"):
 
     def cog_unload(self):
         """Cogアンロード時のクリーンアップ"""
-        self.cleanup_task.cancel()
-        # 全ギルドの接続をクリーンアップ
+        logger.info("MusicCogをアンロードしています...")
+
+        # クリーンアップタスクをキャンセル
+        if hasattr(self, 'cleanup_task') and self.cleanup_task:
+            self.cleanup_task.cancel()
+
+        # cleanup_task_loopもキャンセル
+        if hasattr(self, 'cleanup_task_loop') and self.cleanup_task_loop.is_running():
+            self.cleanup_task_loop.cancel()
+
+        # 全ギルドの接続を非同期でクリーンアップ
         for guild_id in list(self.guild_states.keys()):
-            asyncio.create_task(self._cleanup_guild_state(guild_id))
+            try:
+                state = self.guild_states[guild_id]
+                # Voice Clientの強制切断
+                if state.voice_client and state.voice_client.is_connected():
+                    asyncio.create_task(state.voice_client.disconnect(force=True))
+                # Auto-leaveタスクのキャンセル
+                if state.auto_leave_task and not state.auto_leave_task.done():
+                    state.auto_leave_task.cancel()
+            except Exception as e:
+                logger.warning(f"Guild {guild_id} unload cleanup error: {e}")
+
+        # ステートをクリア
+        self.guild_states.clear()
+        logger.info("MusicCogのアンロードが完了しました。")
 
     @tasks.loop(minutes=5)
-    async def cleanup_task(self):
+    async def cleanup_task_loop(self):
         """定期的に非アクティブなギルドステートをクリーンアップ"""
         try:
             current_time = datetime.now()
@@ -175,7 +204,7 @@ class MusicCog(commands.Cog, name="音楽"):
         except Exception as e:
             logger.error(f"Cleanup task error: {e}", exc_info=True)
 
-    @cleanup_task.before_loop
+    @cleanup_task_loop.before_loop
     async def before_cleanup_task(self):
         await self.bot.wait_until_ready()
 
@@ -1003,16 +1032,72 @@ class MusicCog(commands.Cog, name="音楽"):
 
 
 async def setup(bot: commands.Bot):
+    """Cogのセットアップ（既存Cogの適切な処理を含む）"""
     if not hasattr(bot, 'config'):
         logger.warning("MusicCog: Botインスタンスに 'config' 属性がありません。")
+
     if not all((Track, extract_audio_data, ensure_stream)):
         raise commands.ExtensionFailed("MusicCog", "ytdlp_wrapper のコンポーネントが見つかりません。")
+
     try:
+        # 既存のMusicCogがあれば削除
+        existing_cog = bot.get_cog("music_cog")
+        if existing_cog:
+            logger.info("既存のMusicCogを削除しています...")
+
+            # 既存Cogのクリーンアップタスクをキャンセル
+            if hasattr(existing_cog, 'cleanup_task') and existing_cog.cleanup_task:
+                existing_cog.cleanup_task.cancel()
+
+            if hasattr(existing_cog, 'cleanup_task_loop') and existing_cog.cleanup_task_loop.is_running():
+                existing_cog.cleanup_task_loop.cancel()
+
+            # 全ギルドの接続をクリーンアップ
+            if hasattr(existing_cog, 'guild_states'):
+                for guild_id in list(existing_cog.guild_states.keys()):
+                    try:
+                        state = existing_cog.guild_states[guild_id]
+                        if state.voice_client and state.voice_client.is_connected():
+                            await state.voice_client.disconnect(force=True)
+                    except Exception as e:
+                        logger.warning(f"Guild {guild_id} cleanup error: {e}")
+
+            # Cogを削除
+            await bot.remove_cog("音楽")
+            logger.info("既存のMusicCogを削除しました。")
+
+        # 新しいCogを追加
         await bot.add_cog(MusicCog(bot))
         logger.info("MusicCog successfully loaded")
+
     except Exception as e:
         logger.error(f"MusicCogのセットアップ中にエラー: {e}", exc_info=True)
         raise
+
+
+async def teardown(bot: commands.Bot):
+    """Cogのアンロード時のクリーンアップ"""
+    cog = bot.get_cog("音楽")
+    if cog:
+        logger.info("MusicCogをクリーンアップしています...")
+
+        # クリーンアップタスクをキャンセル
+        if hasattr(cog, 'cleanup_task') and cog.cleanup_task:
+            cog.cleanup_task.cancel()
+
+        # cleanup_task_loopもキャンセル
+        if hasattr(cog, 'cleanup_task_loop') and cog.cleanup_task_loop.is_running():
+            cog.cleanup_task_loop.cancel()
+
+        # 全ギルドの接続をクリーンアップ
+        if hasattr(cog, 'guild_states'):
+            for guild_id in list(cog.guild_states.keys()):
+                try:
+                    await cog._cleanup_guild_state(guild_id)
+                except Exception as e:
+                    logger.warning(f"Guild {guild_id} teardown error: {e}")
+
+        logger.info("MusicCogのクリーンアップが完了しました。")
     if not hasattr(bot, 'config'):
         logger.warning("MusicCog: Botインスタンスに 'config' 属性がありません。")
     if not all((Track, extract_audio_data, ensure_stream)):
