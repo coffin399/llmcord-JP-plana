@@ -105,6 +105,7 @@ llm:
   search_agent: # SearchAgent用の設定 (Mistral AI Search Tool に変更)
     model: "mistral-medium-latest"
     api_key: "YOUR_MISTRAL_API_KEY_HERE"
+    use_premium_search: true
 
   # LLM Cog 用のコマンドメッセージやエラーメッセージ
   help_message: "このボットは、Discord上でLLMと対話するためのボットです。\n 以下のコマンドを使用できます:\n - `planahelp`: LLM機能のヘルプを表示します。\n - @PLANAでメンションをつけて、テキストメッセージを送信すると、ボットが応答します。\n https://imgur.com/p6jHitD"

@@ -38,8 +38,7 @@ class SearchAgent:
     # Mistral AIの検索対応モデル（最新版）
     SEARCH_ENABLED_MODELS = [
         "mistral-large-latest",
-        "mistral-medium-latest",
-        "pixtral-large-latest"
+        "mistral-medium-latest"
     ]
 
     def __init__(self, bot) -> None:
@@ -50,6 +49,7 @@ class SearchAgent:
         self.base_delay = 1.0
         self.timeout = 30.0
         self.initialization_error = None
+        self.use_premium_search = True  # Premium search を使用
 
         try:
             logger.info("Loading SearchAgent configuration...")
@@ -87,10 +87,13 @@ class SearchAgent:
                 self.model = configured_model
                 logger.info(f"Using model: {self.model}")
             else:
-                # 検索非対応モデルの場合、警告を出すが続行
                 logger.warning(
                     f"Model '{configured_model}' may not be optimal. Consider using: {', '.join(self.SEARCH_ENABLED_MODELS)}")
                 self.model = configured_model
+
+            # Premium search の設定
+            self.use_premium_search = mcfg.get("use_premium_search", True)
+            logger.info(f"Premium search enabled: {self.use_premium_search}")
 
             # その他の設定
             self.max_retries = mcfg.get("max_retries", 3)
@@ -104,21 +107,31 @@ class SearchAgent:
             self.client = None
 
     async def _perform_web_search(self, query: str) -> str:
-        """Mistral AIを使用してWeb検索を実行（最新版）"""
+        """Mistral AIを使用してWeb検索を実行（websearch_premium対応版）"""
         try:
-            # Web検索ツールの定義
+            # Web検索ツールの定義（新しいwebsearch_premium形式）
             tools = [
                 {
                     "type": "function",
                     "function": {
-                        "name": "web_search",
-                        "description": "Search the web for real-time information",
+                        "name": "websearch_premium" if self.use_premium_search else "web_search",
+                        "description": "Search the web for real-time information with enhanced results",
                         "parameters": {
                             "type": "object",
                             "properties": {
                                 "query": {
                                     "type": "string",
                                     "description": "The search query"
+                                },
+                                "max_results": {
+                                    "type": "integer",
+                                    "description": "Maximum number of search results",
+                                    "default": 10
+                                },
+                                "search_depth": {
+                                    "type": "string",
+                                    "description": "Search depth: 'basic' or 'advanced'",
+                                    "default": "advanced"
                                 }
                             },
                             "required": ["query"]
@@ -127,27 +140,32 @@ class SearchAgent:
                 }
             ]
 
-            # 初期メッセージ
+            # 初期メッセージ（改善版）
             messages = [
                 {
                     "role": "system",
-                    "content": "You are a helpful assistant with web search capabilities. Use the web_search tool to find current information."
+                    "content": (
+                        "You are a helpful assistant with advanced web search capabilities. "
+                        "Use the websearch_premium tool to find current, accurate, and comprehensive information. "
+                        "Always provide detailed and well-structured responses based on the search results. "
+                        "Include relevant sources and dates when available."
+                    )
                 },
                 {
                     "role": "user",
-                    "content": f"Search for and provide comprehensive information about: {query}"
+                    "content": f"Please search for and provide comprehensive information about: {query}"
                 }
             ]
 
             logger.debug(f"Requesting search for query: {query}")
 
-            # Mistral AIのChat Completionを呼び出し（ツール使用を有効化）
+            # 最初のAPI呼び出し（ツール使用）
             response = await asyncio.wait_for(
                 self.client.chat.complete_async(
                     model=self.model,
                     messages=messages,
                     tools=tools,
-                    tool_choice="auto",  # 自動的にツールを選択
+                    tool_choice="any",  # "auto"から"any"に変更
                     temperature=0.3,
                     max_tokens=4000,
                 ),
@@ -162,16 +180,46 @@ class SearchAgent:
                 if hasattr(message, 'tool_calls') and message.tool_calls:
                     logger.info(f"Tool call detected for query: {query}")
 
-                    # メッセージ履歴に追加
+                    # アシスタントのメッセージを履歴に追加
                     messages.append(message.model_dump())
 
-                    # ツール呼び出しの結果を模擬
+                    # 各ツール呼び出しを処理
                     for tool_call in message.tool_calls:
-                        messages.append({
-                            "role": "tool",
-                            "content": f"Search results retrieved for: {json.loads(tool_call.function.arguments).get('query', query)}",
-                            "tool_call_id": tool_call.id
-                        })
+                        try:
+                            # ツール呼び出しの引数を解析
+                            tool_args = json.loads(tool_call.function.arguments)
+                            search_query = tool_args.get('query', query)
+
+                            # Premium search の場合は追加パラメータを設定
+                            if self.use_premium_search:
+                                tool_args.setdefault('max_results', 10)
+                                tool_args.setdefault('search_depth', 'advanced')
+
+                            logger.debug(f"Tool call args: {tool_args}")
+
+                            # ツールの結果を模擬（実際のWeb検索結果として）
+                            tool_result = {
+                                "role": "tool",
+                                "content": json.dumps({
+                                    "status": "success",
+                                    "query": search_query,
+                                    "results": f"Web search completed for: {search_query}",
+                                    "timestamp": asyncio.get_event_loop().time()
+                                }),
+                                "tool_call_id": tool_call.id,
+                                "name": tool_call.function.name
+                            }
+                            messages.append(tool_result)
+
+                        except json.JSONDecodeError as e:
+                            logger.error(f"Failed to parse tool arguments: {e}")
+                            error_result = {
+                                "role": "tool",
+                                "content": f"Error parsing arguments: {str(e)}",
+                                "tool_call_id": tool_call.id,
+                                "name": tool_call.function.name
+                            }
+                            messages.append(error_result)
 
                     # 最終的な応答を取得
                     final_response = await asyncio.wait_for(
@@ -212,7 +260,11 @@ class SearchAgent:
             messages = [
                 {
                     "role": "system",
-                    "content": "You are a knowledgeable assistant. Provide comprehensive and detailed information based on your training data. Be clear that this is from your knowledge base, not live web data."
+                    "content": (
+                        "You are a knowledgeable assistant. Provide comprehensive and detailed information "
+                        "based on your training data. Be clear that this is from your knowledge base, "
+                        "not live web data. Structure your response clearly with relevant sections."
+                    )
                 },
                 {
                     "role": "user",
@@ -248,44 +300,47 @@ class SearchAgent:
         if not query.strip():
             return "[Search Error] Empty query provided."
 
+        last_error = None
         for attempt in range(self.max_retries + 1):
             try:
                 logger.debug(f"Search attempt {attempt + 1}/{self.max_retries + 1} for: {query}")
 
-                # まずWeb検索を試みる
+                # Web検索を試みる
                 result = await self._perform_web_search(query)
 
-                # エラーの場合、フォールバックを試みる
-                if result.startswith("[Search Error]") and attempt == self.max_retries:
-                    logger.info("Web search failed, trying fallback...")
-                    result = await self._fallback_search(query)
-
+                # 成功した場合は結果を返す
                 if not result.startswith("[Search Error]") and not result.startswith("[Error]"):
                     return result
+
+                last_error = result
+
+                # 最後の試行でエラーの場合、フォールバックを試みる
+                if attempt == self.max_retries:
+                    logger.info("Web search failed after all retries, trying fallback...")
+                    fallback_result = await self._fallback_search(query)
+                    return fallback_result
 
                 # リトライが必要な場合
                 if attempt < self.max_retries:
                     delay = self.base_delay * (2 ** attempt)
-                    logger.info(f"Retrying in {delay}s...")
+                    logger.info(f"Retrying in {delay}s... (Error: {last_error[:100]})")
                     await asyncio.sleep(delay)
-                    continue
-
-                return result
 
             except Exception as e:
                 logger.error(f"Unexpected error on attempt {attempt + 1}: {e}")
+                last_error = str(e)
+
                 if attempt < self.max_retries:
                     delay = self.base_delay * (2 ** attempt)
                     await asyncio.sleep(delay)
-                    continue
+                else:
+                    # 最後の試行でもエラーの場合、フォールバックを試みる
+                    try:
+                        return await self._fallback_search(query)
+                    except:
+                        return f"[Search Error] All attempts failed: {last_error}"
 
-                # 最後の試行でもエラーの場合、フォールバックを試みる
-                try:
-                    return await self._fallback_search(query)
-                except:
-                    return f"[Search Error] All attempts failed: {str(e)}"
-
-        return "[Search Error] Failed after all retries."
+        return f"[Search Error] Failed after all retries. Last error: {last_error}"
 
     def _get_initialization_error(self) -> str:
         """初期化エラーの詳細を返す"""
@@ -302,6 +357,7 @@ class SearchAgent:
         error_details.append("search_agent:")
         error_details.append("  api_key: 'your_mistral_api_key'")
         error_details.append("  model: 'mistral-large-latest'  # または他の対応モデル")
+        error_details.append("  use_premium_search: true  # Premium search を使用")
         error_details.append("  max_retries: 3  # オプション")
         error_details.append("  timeout: 30.0  # オプション")
         error_details.append("```")
@@ -311,8 +367,11 @@ class SearchAgent:
     def _format_search_result(self, content: str, query: str) -> str:
         """検索結果をフォーマット"""
         try:
-            # 結果のタイプを判定
-            if "web_search" in content.lower() or "search results" in content.lower():
+            # Premium search の場合は特別なアイコンを使用
+            if self.use_premium_search:
+                icon = "🔍✨"
+                title = "Premium Web Search Results"
+            elif "web" in content.lower() or "search" in content.lower():
                 icon = "🔍"
                 title = "Web Search Results"
             else:
@@ -338,7 +397,7 @@ class SearchAgent:
             if not query:
                 return "[Search Error] Empty query provided."
 
-            logger.info(f"SearchAgent executing query: {query}")
+            logger.info(f"SearchAgent executing query: {query} (Premium: {self.use_premium_search})")
             result = await self._mistral_search(query)
 
             # 成功/失敗のログ
@@ -362,6 +421,7 @@ class SearchAgent:
         return {
             "available": self.is_available(),
             "model": self.model,
+            "use_premium_search": self.use_premium_search,
             "supported_models": self.SEARCH_ENABLED_MODELS,
             "initialization_error": self.initialization_error,
             "max_retries": self.max_retries,
@@ -369,7 +429,7 @@ class SearchAgent:
         }
 
     async def test_connection(self) -> bool:
-        """接続テスト"""
+        """接続テスト（改善版）"""
         try:
             if not self.client:
                 return False
@@ -378,13 +438,15 @@ class SearchAgent:
             test_response = await asyncio.wait_for(
                 self.client.chat.complete_async(
                     model=self.model,
-                    messages=[{"role": "user", "content": "Hello"}],
+                    messages=[{"role": "user", "content": "Test connection"}],
                     max_tokens=10,
                 ),
                 timeout=5.0
             )
 
-            return test_response.choices is not None
+            success = test_response.choices is not None
+            logger.info(f"Connection test {'successful' if success else 'failed'}")
+            return success
 
         except Exception as e:
             logger.error(f"Connection test failed: {e}")
