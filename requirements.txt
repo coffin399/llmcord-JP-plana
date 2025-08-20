@@ -13,3 +13,4 @@ pycryptodomex
 ffmpeg
 mistralai
 mistralai[async]
+akinator
