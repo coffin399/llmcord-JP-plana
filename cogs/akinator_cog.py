@@ -306,6 +306,8 @@ class AkinatorCog(commands.Cog):
             should_guess = False
             current_step = game.aki.step
             progression = game.aki.progression
+            # ★修正: progressionの代わりにconfidenceを取得 (0.00-1.00)
+            confidence = game.aki.confidence if hasattr(game.aki, 'confidence') else 0.0
 
             # winプロパティがTrueかどうかチェック
             if hasattr(game.aki, 'win') and game.aki.win:
@@ -316,31 +318,31 @@ class AkinatorCog(commands.Cog):
                 else:
                     print(f"Win is True but too early (step {current_step}), continuing questions")
 
-            # progressionベースの判定（winがFalseの場合）
+            # ★修正: progressionベースからconfidenceベースの判定に変更
             if not should_guess:
-                # 段階的な閾値
+                # 段階的な閾値 (confidenceは0.0-1.0の値)
                 if current_step <= 20:
                     # 序盤（20問目まで）: 99%以上で推測
-                    threshold = 99
+                    threshold = 0.99
                 elif current_step <= 40:
                     # 中盤（21-40問目）: 97%以上で推測
-                    threshold = 97
+                    threshold = 0.97
                 elif current_step <= 60:
                     # 後半（41-60問目）: 95%以上で推測
-                    threshold = 95
+                    threshold = 0.95
                 else:
                     # 終盤（61問目以降）: 90%以上で推測
-                    threshold = 90
+                    threshold = 0.90
 
                 # name_propositionが設定されているかもチェック
-                if progression >= threshold and hasattr(game.aki, 'name_proposition') and game.aki.name_proposition:
+                if confidence >= threshold and hasattr(game.aki, 'name_proposition') and game.aki.name_proposition:
                     print(
-                        f"Progression {progression}% >= threshold {threshold}% at step {current_step}, trying to guess")
+                        f"Confidence {confidence:.2f} >= threshold {threshold:.2f} at step {current_step}, trying to guess")
                     should_guess = True
 
-            # 質問の上限が近い場合は強制的に推測
-            if current_step >= 75 and progression >= 85:
-                print(f"Near question limit (step {current_step}), forcing guess")
+            # ★修正: 質問の上限が近い場合もconfidenceベースで判定
+            if not should_guess and current_step >= 75 and confidence >= 0.85:
+                print(f"Near question limit (step {current_step}) and high confidence ({confidence:.2f}), forcing guess")
                 should_guess = True
 
             # 推測するかどうかの判定
@@ -392,7 +394,6 @@ class AkinatorCog(commands.Cog):
             # その他の全てのエラー
             print(f"Error handling answer: {traceback.format_exc()}")
             await self._handle_connection_error(game)
-
     async def _try_guess(self, game: AkinatorGame):
         """キャラクターの推測を試みる"""
         # 既に推測中または非アクティブな場合は何もしない
