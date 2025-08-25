@@ -492,8 +492,40 @@ class LLMCog(commands.Cog, name="LLM"):
             return self.llm_config.get('error_msg', {}).get('general_error', "Failed to connect to the AI service.")
         elif isinstance(e, openai.APIStatusError):
             logger.error(f"LLM API status error: {e.status_code} - {e.response.text if e.response else 'N/A'}")
-            return self.llm_config.get('error_msg', {}).get('general_error',
-                                                            f"An API error occurred (Code: {e.status_code}).")
+
+            error_detail = ""
+            if e.response:
+                try:
+                    # Try to parse the JSON response body
+                    error_data = e.response.json()
+                    title = error_data.get('title')
+                    detail = error_data.get('detail')
+
+                    # Construct a detailed message if title or detail are present
+                    if title and detail:
+                        error_detail = f"\n> **{title}**: {detail}"
+                    elif title:
+                        error_detail = f"\n> **Error**: {title}"
+                    elif detail:
+                        error_detail = f"\n> **Details**: {detail}"
+                    else:
+                        # Fallback if the JSON has no expected keys
+                        error_detail = f"\n> **Response**: `{str(error_data)[:500]}`"
+
+                except json.JSONDecodeError:
+                    # Fallback if the response body is not valid JSON
+                    error_detail = f"\n> **Raw Response**: `{e.response.text[:500]}`"
+
+            # Get the base message from config, or use a default.
+            base_message_template = self.llm_config.get('error_msg', {}).get('api_status_error',
+                                                                          "AIとの通信でエラーが発生しました。(Code: {status_code})")
+
+            # Format the message with the status code.
+            formatted_message = base_message_template.format(status_code=e.status_code)
+
+            # Combine the base message and the detailed error info.
+            final_message = f"{formatted_message}{error_detail}"
+            return final_message[:DISCORD_MESSAGE_MAX_LENGTH]
         else:
             logger.error(f"An unexpected error occurred during LLM interaction: {e}", exc_info=True)
             return self.llm_config.get('error_msg', {}).get('general_error', "An unexpected error occurred.")
