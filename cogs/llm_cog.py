@@ -365,7 +365,7 @@ class LLMCog(commands.Cog, name="LLM"):
                                                                              "Received an empty response from the AI."),
                                     silent=True)
         except Exception as e:
-            logger.error(f"Error during LLM interaction: {e}", exc_info=True)
+            # エラーロギングは _handle_llm_exception 内で行い、トレースバックの出力を制御
             await message.reply(self._handle_llm_exception(e), silent=True)
 
     def _cleanup_old_threads(self):
@@ -419,7 +419,8 @@ class LLMCog(commands.Cog, name="LLM"):
                     return response_message.content or ""
 
             except Exception as e:
-                logger.error(f"Error during LLM API call in iteration {iteration + 1}: {e}", exc_info=True)
+                # 呼び出し元で処理されるため、ここではトレースバックなしでエラーをログに記録し、例外を再送出
+                logger.error(f"Error during LLM API call in iteration {iteration + 1}: {e}")
                 raise
 
         # If we've reached max iterations, return a timeout message
