@@ -484,24 +484,42 @@ class LLMCog(commands.Cog, name="LLM"):
 
     def _handle_llm_exception(self, e: Exception) -> str:
         if isinstance(e, openai.RateLimitError):
-            logger.warning(f"LLM API rate limit exceeded: {e}")
-            return self.llm_config.get('error_msg', {}).get('ratelimit_error',
-                                                            "The AI is busy. Please try again later.")
+            logger.warning(f"LLM API rate limit exceeded: {e.status_code} - {e.response.text if e.response else 'N/A'}")
+
+            error_detail = ""
+            if e.response:
+                try:
+                    error_data = e.response.json()
+                    detail = error_data.get('detail') or error_data.get('message')  # Check for both keys
+                    if detail:
+                        error_detail = f"\n> **Details**: {detail}"
+                    else:
+                        error_detail = f"\n> **Response**: `{str(error_data)[:500]}`"
+                except json.JSONDecodeError:
+                    error_detail = f"\n> **Raw Response**: `{e.response.text[:500]}`"
+
+            base_message_template = self.llm_config.get('error_msg', {}).get(
+                'ratelimit_error',
+                "⚠️ 生成AIが現在非常に混雑しています。(Code: {status_code})"
+            )
+            formatted_message = base_message_template.format(status_code=e.status_code)
+            final_message = f"{formatted_message}{error_detail}"
+            return final_message[:DISCORD_MESSAGE_MAX_LENGTH]
+
         elif isinstance(e, (openai.APIConnectionError, openai.APITimeoutError)):
             logger.error(f"LLM API connection error: {e}")
             return self.llm_config.get('error_msg', {}).get('general_error', "Failed to connect to the AI service.")
+
         elif isinstance(e, openai.APIStatusError):
             logger.error(f"LLM API status error: {e.status_code} - {e.response.text if e.response else 'N/A'}")
 
             error_detail = ""
             if e.response:
                 try:
-                    # Try to parse the JSON response body
                     error_data = e.response.json()
                     title = error_data.get('title')
                     detail = error_data.get('detail')
 
-                    # Construct a detailed message if title or detail are present
                     if title and detail:
                         error_detail = f"\n> **{title}**: {detail}"
                     elif title:
@@ -509,23 +527,18 @@ class LLMCog(commands.Cog, name="LLM"):
                     elif detail:
                         error_detail = f"\n> **Details**: {detail}"
                     else:
-                        # Fallback if the JSON has no expected keys
                         error_detail = f"\n> **Response**: `{str(error_data)[:500]}`"
-
                 except json.JSONDecodeError:
-                    # Fallback if the response body is not valid JSON
                     error_detail = f"\n> **Raw Response**: `{e.response.text[:500]}`"
 
-            # Get the base message from config, or use a default.
-            base_message_template = self.llm_config.get('error_msg', {}).get('api_status_error',
-                                                                          "AIとの通信でエラーが発生しました。(Code: {status_code})")
-
-            # Format the message with the status code.
+            base_message_template = self.llm_config.get('error_msg', {}).get(
+                'api_status_error',
+                "AIとの通信でエラーが発生しました。(Code: {status_code})"
+            )
             formatted_message = base_message_template.format(status_code=e.status_code)
-
-            # Combine the base message and the detailed error info.
             final_message = f"{formatted_message}{error_detail}"
             return final_message[:DISCORD_MESSAGE_MAX_LENGTH]
+
         else:
             logger.error(f"An unexpected error occurred during LLM interaction: {e}", exc_info=True)
             return self.llm_config.get('error_msg', {}).get('general_error', "An unexpected error occurred.")
