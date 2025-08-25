@@ -13,7 +13,7 @@ class LanguageSelectView(discord.ui.View):
     def __init__(self, cog, interaction):
         super().__init__(timeout=60)
         self.cog = cog
-        self.interaction = interaction
+        self.interaction = interaction  # コマンド実行者のInteraction
 
     @discord.ui.select(
         placeholder="言語を選択してください / Choose your language",
@@ -31,9 +31,14 @@ class LanguageSelectView(discord.ui.View):
         ]
     )
     async def language_select(self, interaction: discord.Interaction, select: discord.ui.Select):
+        # ボタンを押したユーザーがコマンド実行者本人か確認
+        if interaction.user.id != self.interaction.user.id:
+            await interaction.response.send_message("コマンドを実行した本人しか操作できません。", ephemeral=True)
+            return
+
         language = select.values[0]
-        await interaction.response.defer()
-        await self.cog.start_game_with_language(self.interaction, language)
+        # interaction (component interaction) を渡して、メッセージを編集させる
+        await self.cog.start_game_with_language(interaction, language)
 
 
 class GameButtonView(discord.ui.View):
@@ -101,6 +106,7 @@ class GuessButtonView(discord.ui.View):
     @discord.ui.button(label="はい、正解です！ / Yes, Correct!", style=discord.ButtonStyle.green, emoji="✅")
     async def correct_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         # ユーザーチェック
+        # ★修正: self.game.user.id -> self.game.user_id
         if interaction.user.id != self.game.user_id:
             await interaction.response.send_message("このゲームはあなたのものではありません！", ephemeral=True)
             return
@@ -127,6 +133,7 @@ class GuessButtonView(discord.ui.View):
     @discord.ui.button(label="いいえ、違います / No, Wrong", style=discord.ButtonStyle.red, emoji="❌")
     async def wrong_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         # ユーザーチェック
+        # ★修正: self.game.user.id -> self.game.user_id
         if interaction.user.id != self.game.user_id:
             await interaction.response.send_message("このゲームはあなたのものではありません！", ephemeral=True)
             return
@@ -220,43 +227,52 @@ class AkinatorCog(commands.Cog):
             return
 
         embed = discord.Embed(
-            title="🔮 アキネーター / Akinator",
-            description="まず言語を選択してください。\nPlease select your language first.",
+            title="🔮 アキネーター / Akinator (BETA)",
+            description=f"{interaction.user.mention} さんがゲームを開始します。\n言語を選択してください。",
             color=discord.Color.blue()
         )
         view = LanguageSelectView(self, interaction)
-        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+        await interaction.response.send_message(embed=embed, view=view)
 
-    async def start_game_with_language(self, original_interaction: discord.Interaction, language: str):
+    async def start_game_with_language(self, interaction: discord.Interaction, language: str):
         try:
             aki = akinator.AsyncAkinator()
-            game = AkinatorGame(aki, original_interaction.channel_id, original_interaction.user.id, language)
-            self.games[original_interaction.channel_id] = game
+            # ゲームユーザーは言語選択ボタンを押したユーザー (本人確認済み)
+            game = AkinatorGame(aki, interaction.channel_id, interaction.user.id, language)
+            self.games[interaction.channel_id] = game
 
             await aki.start_game(language=language, child_mode=False)
 
             embed = self._create_question_embed(aki.question, aki.progression, aki.step)
             view = GameButtonView(self, game)
-            message = await original_interaction.followup.send(embed=embed, view=view, wait=True)
+
+            # 言語選択メッセージを編集して最初の質問を表示
+            await interaction.response.edit_message(embed=embed, view=view)
+            message = await interaction.original_response()
             game.message = message
 
         except Exception as e:
             error_msg = f"ゲームの開始中にエラーが発生しました。\n`{type(e).__name__}: {e}`"
             print(f"Akinator start error: {traceback.format_exc()}")
-            await original_interaction.followup.send(error_msg, ephemeral=True)
-            if original_interaction.channel_id in self.games:
-                del self.games[original_interaction.channel_id]
+            try:
+                # エラーメッセージで編集を試みる
+                await interaction.response.edit_message(content=error_msg, embed=None, view=None)
+            except discord.HTTPException:
+                # 編集に失敗した場合はfollowupで送信
+                await interaction.followup.send(error_msg, ephemeral=True)
+
+            if interaction.channel_id in self.games:
+                del self.games[interaction.channel_id]
 
     def _create_question_embed(self, question: str, progression: float, step: int) -> discord.Embed:
         embed = discord.Embed(
-            title="🔮 アキネーター",
+            title="🔮 アキネーター (BETA)",
             description=f"**質問 {step + 1}:**\n\n## {question}",
             color=discord.Color.blue()
         )
         progress_bar = self._create_progress_bar(progression)
         embed.add_field(name="進行状況", value=progress_bar, inline=False)
 
-        # デバッグ情報を追加（開発時のみ表示）
         debug_info = f"Step: {step} | Progression: {progression:.2f}%"
         embed.set_footer(text=f"下のボタンで回答してください！ ({debug_info})")
         return embed
@@ -289,7 +305,6 @@ class AkinatorCog(commands.Cog):
 
     async def _handle_answer(self, game: AkinatorGame, answer: str):
         """質問への回答を処理"""
-        # ゲームが既に終了している場合は何もしない
         if not game or not game.is_active:
             return
 
@@ -302,57 +317,43 @@ class AkinatorCog(commands.Cog):
             else:
                 await game.aki.answer(answer)
 
-            # 段階的な推測条件
             should_guess = False
             current_step = game.aki.step
             progression = game.aki.progression
-            # ★修正: progressionの代わりにconfidenceを取得 (0.00-1.00)
             confidence = game.aki.confidence if hasattr(game.aki, 'confidence') else 0.0
 
-            # winプロパティがTrueかどうかチェック
             if hasattr(game.aki, 'win') and game.aki.win:
-                # winがTrueでも、早すぎる段階では推測しない
-                if current_step >= 10:  # 最低10問は質問する
+                if current_step >= 10:
                     print(f"Win property is True at step {current_step}, trying to guess")
                     should_guess = True
                 else:
                     print(f"Win is True but too early (step {current_step}), continuing questions")
 
-            # ★修正: progressionベースからconfidenceベースの判定に変更
             if not should_guess:
-                # 段階的な閾値 (confidenceは0.0-1.0の値)
                 if current_step <= 20:
-                    # 序盤（20問目まで）: 99%以上で推測
                     threshold = 0.99
                 elif current_step <= 40:
-                    # 中盤（21-40問目）: 97%以上で推測
                     threshold = 0.97
                 elif current_step <= 60:
-                    # 後半（41-60問目）: 95%以上で推測
                     threshold = 0.95
                 else:
-                    # 終盤（61問目以降）: 90%以上で推測
                     threshold = 0.90
 
-                # name_propositionが設定されているかもチェック
                 if confidence >= threshold and hasattr(game.aki, 'name_proposition') and game.aki.name_proposition:
                     print(
                         f"Confidence {confidence:.2f} >= threshold {threshold:.2f} at step {current_step}, trying to guess")
                     should_guess = True
 
-            # ★修正: 質問の上限が近い場合もconfidenceベースで判定
             if not should_guess and current_step >= 75 and confidence >= 0.85:
-                print(f"Near question limit (step {current_step}) and high confidence ({confidence:.2f}), forcing guess")
+                print(
+                    f"Near question limit (step {current_step}) and high confidence ({confidence:.2f}), forcing guess")
                 should_guess = True
 
-            # 推測するかどうかの判定
             if should_guess and not game.is_guessing:
                 await self._try_guess(game)
             elif current_step >= 79:
-                # 最大質問数に達した
                 await self._end_game(game, "質問の上限に達しました。私の負けです！")
             else:
-                # 次の質問を更新
                 embed = self._create_question_embed(
                     game.aki.question,
                     game.aki.progression,
@@ -362,17 +363,11 @@ class AkinatorCog(commands.Cog):
                 await game.message.edit(embed=embed, view=view)
 
         except RuntimeError as e:
-            # サーバーエラーの処理
             error_msg = str(e)
             print(f"[RuntimeError] at step {game.aki.step}: {error_msg}")
-
-            # "Failed to exclude the proposition" エラーは25問目前後で発生することがある
-            # これは必ずしも推測のタイミングではない
             if "Failed to exclude the proposition" in error_msg:
-                # エラーが発生したが、まだ早い段階の場合は質問を続ける
                 if game.aki.step < 20:
                     print("[RuntimeError] Early stage error, continuing with questions")
-                    # 質問を続ける（エラーを無視）
                     embed = self._create_question_embed(
                         game.aki.question,
                         game.aki.progression,
@@ -380,42 +375,35 @@ class AkinatorCog(commands.Cog):
                     )
                     view = GameButtonView(self, game)
                     await game.message.edit(embed=embed, view=view)
-                # 十分な質問数がある場合のみ推測を試みる
                 elif game.aki.step >= 20 and hasattr(game.aki, 'name_proposition') and game.aki.name_proposition:
                     print("[RuntimeError] Attempting guess after server error")
                     await self._try_guess(game)
                 else:
-                    # 推測データがない場合は負けを認める
                     await self._end_game(game, "サーバーとの通信に問題が発生しました。私の負けです！")
             else:
                 print(f"[RuntimeError] Unexpected error: {traceback.format_exc()}")
                 await self._handle_connection_error(game)
         except Exception as e:
-            # その他の全てのエラー
             print(f"Error handling answer: {traceback.format_exc()}")
             await self._handle_connection_error(game)
+
     async def _try_guess(self, game: AkinatorGame):
         """キャラクターの推測を試みる"""
-        # 既に推測中または非アクティブな場合は何もしない
         if game.is_guessing or not game.is_active:
             return
 
-        # 推測状態にする
         game.is_guessing = True
 
         try:
-            # 推測データを取得する前に、各属性の状態を確認
             print(f"[NEW_CODE Try Guess] Step: {game.aki.step}, Progression: {game.aki.progression}%")
             print(f"[NEW_CODE Try Guess] Win property: {getattr(game.aki, 'win', 'Not found')}")
 
-            # 推測データの取得を試みる
             name = getattr(game.aki, 'name_proposition', None)
             description = getattr(game.aki, 'description_proposition', None)
             photo = getattr(game.aki, 'photo', None)
 
             print(f"[NEW_CODE Try Guess] name: {name}, has_description: {bool(description)}, has_photo: {bool(photo)}")
 
-            # 推測データが存在する場合
             if name and name.strip():
                 guess_data = {
                     'name': name,
@@ -426,20 +414,16 @@ class AkinatorCog(commands.Cog):
                 game.current_guess = guess_data
                 print(f"[NEW_CODE Try Guess] Success! Guessing: {guess_data['name']}")
 
-                # ゲームがまだアクティブな場合のみ表示を更新
                 if game.is_active:
                     embed = self._create_guess_embed(guess_data)
                     view = GuessButtonView(self, game)
                     await game.message.edit(embed=embed, view=view)
                 return
 
-            # 推測データがない場合の処理
             print("[NEW_CODE Try Guess] No guess data available, continuing with questions")
-            game.is_guessing = False  # 推測状態を解除
+            game.is_guessing = False
 
-            # まだ質問を続けられる場合
             if game.aki.step < 75:
-                # 次の質問を表示
                 embed = self._create_question_embed(
                     game.aki.question,
                     game.aki.progression,
@@ -448,16 +432,14 @@ class AkinatorCog(commands.Cog):
                 view = GameButtonView(self, game)
                 await game.message.edit(embed=embed, view=view)
             else:
-                # 質問数が多すぎる場合は終了
                 await self._end_game(game, "申し訳ありません、キャラクターを特定できませんでした。私の負けです！")
 
         except Exception as e:
             print(f"[NEW_CODE Try Guess] Error: {traceback.format_exc()}")
             print(f"[NEW_CODE Try Guess] Error details: {str(e)}")
 
-            game.is_guessing = False  # 推測状態を解除
+            game.is_guessing = False
 
-            # エラーが発生しても質問を続けられる場合は続行
             if game.aki.step < 75:
                 embed = self._create_question_embed(
                     game.aki.question,
@@ -471,34 +453,29 @@ class AkinatorCog(commands.Cog):
 
     async def _handle_connection_error(self, game: AkinatorGame):
         """接続エラー時の処理"""
-        # ゲームが推測中の場合は何もしない（勝敗ボタンの処理を優先）
         if game.is_guessing:
             return
         await self._end_game(game, "Akinatorサーバーとの接続に問題が発生しました。")
 
     async def _end_game(self, game: AkinatorGame, message: str):
         """通常のゲーム終了処理"""
-        # 既に終了している場合は何もしない
         if not game or not game.is_active:
             return
 
-        # ゲームを非アクティブにする（重複実行を防ぐ）
         game.is_active = False
 
         embed = discord.Embed(
-            title="🔮 アキネーター - ゲーム終了",
+            title="🔮 アキネーター(BETA) - ゲーム終了",
             description=message,
             color=discord.Color.red()
         )
 
-        # メッセージの更新を試みる
         if game.message:
             try:
                 await game.message.edit(embed=embed, view=None)
             except (discord.NotFound, discord.Forbidden, discord.HTTPException) as e:
                 print(f"Failed to edit message in _end_game: {e}")
 
-        # ゲームをクリーンアップ
         try:
             if game.channel_id in self.games:
                 del self.games[game.channel_id]
