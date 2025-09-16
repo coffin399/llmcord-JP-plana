@@ -325,13 +325,24 @@ class SearchAgent:
 
     # --- Public Interface ---
 
-    async def run(self, *, arguments: Dict[str, Any], bot) -> str:
-        """LLM Cogから呼び出されるメインエントリーポイント"""
+    async def run(self, *, arguments: Dict[str, Any], bot, **kwargs) -> str:
+        """LLM Cogから呼び出されるメインエントリーポイント
+
+        Args:
+            arguments: 検索引数（queryを含む）
+            bot: ボットインスタンス
+            **kwargs: その他の引数（channel_id, user_id等）
+        """
         try:
             query = arguments.get("query", "").strip()
 
             if not query:
                 return "[Search Error] No query provided"
+
+            # 追加の引数をログに出力（デバッグ用）
+            extra_args = {k: v for k, v in kwargs.items() if k not in ['arguments', 'bot']}
+            if extra_args:
+                logger.debug(f"SearchAgent received additional args: {extra_args}")
 
             logger.info(f"SearchAgent processing query: '{query}'")
             result = await self._search_with_retries(query)
