@@ -1,5 +1,4 @@
 
----
 <h1 align="center">
   PLANA
 </h1>
@@ -14,16 +13,23 @@
 <p align="center">
   <img src="https://i.imgur.com/wjdPNFQ.png" alt="PLANA MODEL CHANGE">
 </p>
+
 **llmcord-JP-PLANA** (通称: **PLANA**) は、[llmcord](https://github.com/jakobdylanc/llmcord) を基盤として開発された多機能Discordボットです。大規模言語モデル (LLM) との対話、高機能な音楽再生、画像認識、Akinatorやガチャシミュレーターなどのエンターテイメント機能、そして便利なサーバーユーティリティを提供します。OpenAI互換APIに対応しており、リモートホスト型やローカルホスト型など、ほぼすべてのLLMと連携可能です。
 
 **llmcord-JP-PLANA** (commonly known as **PLANA**) is a multi-functional Discord bot developed based on [llmcord](https://github.com/jakobdylanc/llmcord). It offers conversations with Large Language Models (LLMs), high-fidelity music playback, image recognition, entertainment features like Akinator and a gacha simulator, and useful server utilities. It supports OpenAI-compatible APIs, allowing integration with almost all LLMs, including remotely hosted and locally hosted ones.
 
 ## 🚀 クイックスタート / Quick Start
 
-### 🤖 Botをあなたのサーバーに招待 / Invite Plana to Your Server:
+### 🤖 Botをあなたのサーバーに招待 / Invite Plana to Your Server
+
+<h3 align="center">
+  <a href="https://discord.com/oauth2/authorize?client_id=1031673203774464160&permissions=551906765824&scope=bot" title="Click to invite PLANA to your server!">
+    <strong>➡️ PLANAをあなたのサーバーに招待する ⬅️</strong>
+  </a>
+</h3>
+
 *   セルフホストを行う場合は、`config.yaml` にご自身のBotの招待URLを設定してください。
 *   If you are self-hosting, please set your bot's invitation URL in `config.yaml`.
-*   [**公式Botの招待リンクはこちら**](https://discord.com/oauth2/authorize?client_id=1031673203774464160&permissions=551906765824&scope=bot)
 
 ### 💬 サポート / Support:
 *   Botの操作に関する質問や不具合報告は、`/support` コマンドで表示される連絡先までお願いします。
@@ -37,6 +43,9 @@ Start a conversation with the AI by mentioning the bot (`@PLANA`) or replying to
 
 *   **継続的な会話 / Continuous Conversations:** 返信を続けることで文脈を維持した会話が可能です。
 *   **画像認識 / Image Recognition:** メッセージと一緒に画像を添付すると、AIが画像の内容も理解しようとします (ビジョンモデル対応の場合)。
+*   **チャンネル毎のモデル切り替え / Per-Channel Model Switching:** チャンネルごとに使用するAIモデルを柔軟に変更できます。会話の目的に合わせて、最適なモデル（例: 高性能モデル、高速応答モデルなど）を使い分けることが可能です。
+    *   `/switch-models [model]`: 利用可能なモデルリストから選択して切り替えます。
+    *   `/switch-models-default`: モデルをデフォルト設定に戻します。
 *   **ツール利用 (ウェブ検索) / Tool Use (Web Search):** AIが必要と判断した場合、インターネットで情報を検索して応答に利用します (Google AI Studio APIキーが必要です)。
 *   **会話履歴の管理 / Conversation History Management:** `/clear_history` コマンドで現在のチャンネルの会話履歴をリセットできます。
 *   **カスタマイズ可能なAIパーソナリティ / Customizable AI Personality:** `config.yaml` のシステムプロンプトを編集することで、AIの性格や応答スタイルを自由に変更できます。
@@ -60,7 +69,7 @@ Enjoy high-quality music in your voice channels.
 サーバー管理や情報確認に役立つ便利なスラッシュコマンドを提供します。
 Provides useful slash commands for server management and information retrieval.
 
-*   **/help:** Botの全機能のヘルプとAI利用ガイドラインをまとめた総合的なヘルプパネルを表示します。
+*   **/help, /llm_help:** Botの全機能のヘルプとAI利用ガイドラインをまとめた総合的なヘルプパネルを表示します。
 *   **/ping:** Botの現在の応答速度（レイテンシ）を表示します。
 *   **/serverinfo:** サーバーの作成日、メンバー数、チャンネル数などの詳細情報を表示します。
 *   **/userinfo [user]:** 指定したユーザー（または自分）のアカウント作成日やサーバー参加日、ロールなどの情報を表示します。
@@ -138,6 +147,7 @@ Please read the following guidelines carefully before using the AI features of t
     |---|---|
     | **`model`** | **必須。** 使用するメインLLMモデル。`<provider name>/<model name>` 形式。(例: `openai/gpt-4o`)<br>**Required.** Main LLM model to use. Format `<provider name>/<model name>`. (e.g., `openai/gpt-4o`) |
     | **`providers`** | **必須。** 各LLMプロバイダーの `base_url` と `api_key` を設定します。(OpenAI互換APIのみ)<br>**Required.** Configure each LLM provider with `base_url` and `api_key`. (OpenAI-compatible APIs only) |
+    | `available_models` | `/switch-models` コマンドでユーザーが選択できるモデルのリスト。<br>A list of models users can select with the `/switch-models` command.<br>(例/e.g., `["openai/gpt-4o", "mistral/mistral-large-latest"]`) |
     | `system_prompt` | AIの性格や役割を定義するシステムプロンプト。<br>System prompt to define the AI's personality and role. |
     | `max_messages` | 会話履歴として記憶する最大メッセージ数。(デフォルト: `10`)<br>Max messages to keep in a reply chain. (Default: `10`) |
     | `max_images` | 一度に認識できる最大画像数。(デフォルト: `1`)<br>Max image attachments per message. (Default: `1`) |
@@ -196,8 +206,6 @@ Please read the following guidelines carefully before using the AI features of t
     docker compose up --build -d
     ```
     (2回目以降は `--build` は不要です / `--build` is not needed after the first run)
-
----
 
 <p align="center">
 現在開発中です。仕様は変更される可能性があります。
