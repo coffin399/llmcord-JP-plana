@@ -92,9 +92,15 @@ class GuildState:
                             timeout=5.0
                         )
                 except asyncio.TimeoutError:
-                    logger.warning(f"Guild {self.guild_id}: Voice disconnect timeout")
+                    ### 変更点: ロギングにギルド名を追加 ###
+                    guild = self.bot.get_guild(self.guild_id)
+                    guild_name = f" ({guild.name})" if guild else ""
+                    logger.warning(f"Guild {self.guild_id}{guild_name}: Voice disconnect timeout")
                 except Exception as e:
-                    logger.warning(f"Guild {self.guild_id}: Voice cleanup error: {e}")
+                    ### 変更点: ロギングにギルド名を追加 ###
+                    guild = self.bot.get_guild(self.guild_id)
+                    guild_name = f" ({guild.name})" if guild else ""
+                    logger.warning(f"Guild {self.guild_id}{guild_name}: Voice cleanup error: {e}")
                 finally:
                     self.voice_client = None
         finally:
@@ -171,7 +177,10 @@ class MusicCog(commands.Cog, name="music_cog"):
                 if state.auto_leave_task and not state.auto_leave_task.done():
                     state.auto_leave_task.cancel()
             except Exception as e:
-                logger.warning(f"Guild {guild_id} unload cleanup error: {e}")
+                ### 変更点: ロギングにギルド名を追加 ###
+                guild = self.bot.get_guild(guild_id)
+                guild_name = f" ({guild.name})" if guild else ""
+                logger.warning(f"Guild {guild_id}{guild_name} unload cleanup error: {e}")
 
         # ステートをクリア
         self.guild_states.clear()
@@ -194,7 +203,10 @@ class MusicCog(commands.Cog, name="music_cog"):
 
             # クリーンアップ実行
             for guild_id in guilds_to_cleanup:
-                logger.info(f"Cleaning up inactive guild: {guild_id}")
+                ### 変更点: ロギングにギルド名を追加 ###
+                guild = self.bot.get_guild(guild_id)
+                guild_name = f" ({guild.name})" if guild else ""
+                logger.info(f"Cleaning up inactive guild: {guild_id}{guild_name}")
                 await self._cleanup_guild_state(guild_id)
 
             # メモリ最適化
@@ -224,7 +236,10 @@ class MusicCog(commands.Cog, name="music_cog"):
 
                 if oldest_guild:
                     asyncio.create_task(self._cleanup_guild_state(oldest_guild))
-                    logger.info(f"Removed oldest inactive guild {oldest_guild} to make room")
+                    ### 変更点: ロギングにギルド名を追加 ###
+                    guild = self.bot.get_guild(oldest_guild)
+                    guild_name = f" ({guild.name})" if guild else ""
+                    logger.info(f"Removed oldest inactive guild {oldest_guild}{guild_name} to make room")
 
             self.guild_states[guild_id] = GuildState(self.bot, guild_id, self.config)
 
@@ -252,9 +267,11 @@ class MusicCog(commands.Cog, name="music_cog"):
             try:
                 await interaction.followup.send(content, ephemeral=ephemeral)
             except Exception as e:
-                logger.error(f"Guild {interaction.guild_id}: Followup error: {e}")
+                ### 変更点: ロギングにギルド名を追加 ###
+                logger.error(f"Guild {interaction.guild.id} ({interaction.guild.name}): Followup error: {e}")
         except Exception as e:
-            logger.error(f"Guild {interaction.guild_id}: Response error: {e}")
+            ### 変更点: ロギングにギルド名を追加 ###
+            logger.error(f"Guild {interaction.guild.id} ({interaction.guild.name}): Response error: {e}")
 
     async def _send_background_message(self, channel_id: int, message_key: str, **kwargs):
         try:
@@ -339,8 +356,9 @@ class MusicCog(commands.Cog, name="music_cog"):
                         ),
                         timeout=35.0
                     )
-
-                    logger.info(f"Guild {interaction.guild.id}: Connected to {user_voice.channel.name}")
+                    ### 変更点: ロギングにギルド名を追加 ###
+                    logger.info(
+                        f"Guild {interaction.guild.id} ({interaction.guild.name}): Connected to {user_voice.channel.name}")
                     return state.voice_client
 
                 except asyncio.TimeoutError:
@@ -377,7 +395,9 @@ class MusicCog(commands.Cog, name="music_cog"):
                             )
                             return state.voice_client
                         except Exception as retry_error:
-                            logger.error(f"Guild {interaction.guild.id}: Retry failed: {retry_error}")
+                            ### 変更点: ロギングにギルド名を追加 ###
+                            logger.error(
+                                f"Guild {interaction.guild.id} ({interaction.guild.name}): Retry failed: {retry_error}")
                             await self._send_response(interaction, "error_playing", ephemeral=True,
                                                       error="VC接続に失敗しました。しばらく待ってから再度お試しください。")
                             return None
@@ -387,7 +407,9 @@ class MusicCog(commands.Cog, name="music_cog"):
                         return None
 
                 except Exception as e:
-                    logger.error(f"Guild {interaction.guild.id}: Connection error: {e}", exc_info=True)
+                    ### 変更点: ロギングにギルド名を追加 ###
+                    logger.error(f"Guild {interaction.guild.id} ({interaction.guild.name}): Connection error: {e}",
+                                 exc_info=True)
                     await self._send_response(interaction, "error_playing", ephemeral=True,
                                               error=f"VC接続失敗: {type(e).__name__}")
                     state.voice_client = None
@@ -420,13 +442,22 @@ class MusicCog(commands.Cog, name="music_cog"):
             except:
                 pass
 
+        ### 変更点: 再生終了時にVCから退出するロジック ###
         if not track_to_play:
             state.current_track = None
             state.is_playing = False
+
+            guild = self.bot.get_guild(guild_id)
+            guild_name = f" ({guild.name})" if guild else ""
+            logger.info(f"Guild {guild_id}{guild_name}: Queue has ended. Disconnecting.")
+
             if state.last_text_channel_id:
                 await self._send_background_message(state.last_text_channel_id, "queue_ended")
-            self._schedule_auto_leave(guild_id)
+
+            # _schedule_auto_leave の代わりに即時退出
+            await state.cleanup_voice_client()
             return
+        ### 変更ここまで ###
 
         state.current_track = track_to_play
         state.is_playing = True
@@ -457,7 +488,10 @@ class MusicCog(commands.Cog, name="music_cog"):
                 after=lambda e: self._song_finished_callback(e, guild_id)
             )
 
-            logger.info(f"Guild {guild_id}: Now playing - {track_to_play.title}")
+            ### 変更点: ロギングにギルド名を追加 ###
+            guild = self.bot.get_guild(guild_id)
+            guild_name = f" ({guild.name})" if guild else ""
+            logger.info(f"Guild {guild_id}{guild_name}: Now playing - {track_to_play.title}")
 
             # 再生開始通知
             if state.last_text_channel_id and track_to_play.requester_id:
@@ -474,7 +508,10 @@ class MusicCog(commands.Cog, name="music_cog"):
                     requester_display_name=requester.display_name if requester else "不明"
                 )
         except Exception as e:
-            logger.error(f"Guild {guild_id}: Playback error: {e}", exc_info=True)
+            ### 変更点: ロギングにギルド名を追加 ###
+            guild = self.bot.get_guild(guild_id)
+            guild_name = f" ({guild.name})" if guild else ""
+            logger.error(f"Guild {guild_id}{guild_name}: Playback error: {e}", exc_info=True)
             if state.last_text_channel_id:
                 await self._send_background_message(state.last_text_channel_id, "error_playing", error=str(e))
             if state.loop_mode == LoopMode.ALL and track_to_play:
@@ -492,7 +529,10 @@ class MusicCog(commands.Cog, name="music_cog"):
         state.current_track = None
 
         if error:
-            logger.error(f"Guild {guild_id}: Playback error (after): {error}")
+            ### 変更点: ロギングにギルド名を追加 ###
+            guild = self.bot.get_guild(guild_id)
+            guild_name = f" ({guild.name})" if guild else ""
+            logger.error(f"Guild {guild_id}{guild_name}: Playback error (after): {error}")
             if state.last_text_channel_id:
                 asyncio.run_coroutine_threadsafe(
                     self._send_background_message(state.last_text_channel_id, "error_playing", error=str(error)),
@@ -544,7 +584,10 @@ class MusicCog(commands.Cog, name="music_cog"):
 
             # ステートの削除
             del self.guild_states[guild_id]
-            logger.info(f"Guild {guild_id}: State cleaned up")
+            ### 変更点: ロギングにギルド名を追加 ###
+            guild = self.bot.get_guild(guild_id)
+            guild_name = f" ({guild.name})" if guild else ""
+            logger.info(f"Guild {guild_id}{guild_name}: State cleaned up")
 
     @commands.Cog.listener()
     async def on_ready(self):
@@ -1060,7 +1103,10 @@ async def setup(bot: commands.Bot):
                         if state.voice_client and state.voice_client.is_connected():
                             await state.voice_client.disconnect(force=True)
                     except Exception as e:
-                        logger.warning(f"Guild {guild_id} cleanup error: {e}")
+                        ### 変更点: ロギングにギルド名を追加 ###
+                        guild = bot.get_guild(guild_id)
+                        guild_name = f" ({guild.name})" if guild else ""
+                        logger.warning(f"Guild {guild_id}{guild_name} cleanup error: {e}")
 
             # Cogを削除
             await bot.remove_cog("音楽")
@@ -1095,7 +1141,10 @@ async def teardown(bot: commands.Bot):
                 try:
                     await cog._cleanup_guild_state(guild_id)
                 except Exception as e:
-                    logger.warning(f"Guild {guild_id} teardown error: {e}")
+                    ### 変更点: ロギングにギルド名を追加 ###
+                    guild = bot.get_guild(guild_id)
+                    guild_name = f" ({guild.name})" if guild else ""
+                    logger.warning(f"Guild {guild_id}{guild_name} teardown error: {e}")
 
         logger.info("MusicCogのクリーンアップが完了しました。")
     if not hasattr(bot, 'config'):
