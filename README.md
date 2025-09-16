@@ -83,6 +83,10 @@ Downloads video or audio from sites like YouTube and generates a temporary share
 *   **/ytdlp_video [query]:** 動画のURLまたは検索キーワードを指定して、フォーマットを選択しダウンロードします。高画質（1080p以上）のダウンロードにも対応しています。
 *   **/ytdlp_audio [query] [audio_format]:** 音声のみを抽出し、指定したフォーマット（MP3, M4Aなど）でダウンロードします。
 
+<p align="center">
+ <img src="https://i.imgur.com/EdkYshV.png" alt="video downloader">
+</p>
+
 ---
 
 ### ⚠️ AI利用ガイドラインと免責事項 / AI Usage Guidelines and Disclaimer
