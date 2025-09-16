@@ -463,8 +463,8 @@ class LLMCog(commands.Cog, name="LLM"):
                ][:25]
 
     @app_commands.command(
-        name="switch-model",
-        description="このチャンネルで使用するAIモデルを切り替えます。"
+        name="switch-models",
+        description="このチャンネルで使用するAIモデルを切り替えます。/Switches the AI model used for this channel."
     )
     @app_commands.describe(
         model="使用したいモデルを選択してください。"
@@ -490,10 +490,10 @@ class LLMCog(commands.Cog, name="LLM"):
             logger.error(f"Failed to save channel model settings: {e}", exc_info=True)
             await interaction.followup.send("❌ 設定の保存に失敗しました。")
 
-    # --- 新規追加: /switch-model-default コマンド ---
+    # --- 新規追加: /switch-models-default コマンド ---
     @app_commands.command(
-        name="switch-model-default",
-        description="このチャンネルのAIモデルを推奨モデル(mistral-medium-latest)に切り替えます。"
+        name="switch-models-default",
+        description="このチャンネルのAIモデルをデフォルトに切り替えます。Switch to default"
     )
     async def switch_model_default_slash(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=False)
@@ -528,7 +528,7 @@ class LLMCog(commands.Cog, name="LLM"):
     # --- 新規追加ここまで ---
 
     @app_commands.command(
-        name="reset-model",
+        name="switch-models-default-server",
         description="このチャンネルのAIモデルをサーバーのデフォルト設定に戻します。"
     )
     async def reset_model_slash(self, interaction: discord.Interaction):
