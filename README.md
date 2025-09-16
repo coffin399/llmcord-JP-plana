@@ -84,7 +84,7 @@ Downloads video or audio from sites like YouTube and generates a temporary share
 *   **/ytdlp_audio [query] [audio_format]:** 音声のみを抽出し、指定したフォーマット（MP3, M4Aなど）でダウンロードします。
 
 <p align="center">
- <img src="https://i.imgur.com/EdkYshV.png" alt="video downloader">
+ <img src="https://i.imgur.com/pigk6eH.png" alt="video downloader">
 </p>
 
 ---
