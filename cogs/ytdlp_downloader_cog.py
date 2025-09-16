@@ -6,166 +6,299 @@ import os
 import uuid
 import asyncio
 import time
-from functools import partial
+
+# Google Drive API関連のインポート
+from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import InstalledAppFlow
+from google.auth.transport.requests import Request
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaFileUpload
+from googleapiclient.errors import HttpError
 
 # --- 設定項目 ---
-# Discordのファイルアップロード上限 (デフォルトは8MB)
-MAX_FILE_SIZE_BYTES = 8 * 1024 * 1024
-DOWNLOAD_DIR = "temp_audio"
+CLIENT_SECRETS_FILE = 'client_secrets.json'
+TOKEN_FILE = 'token.json'
+GDRIVE_FOLDER_ID = '1g5KmfB7xVrL-Y59RTf6f2IDbbJsTSFZs'  # ← ここを必ず書き換えてください
+DELETE_DELAY_SECONDS = 600
+DOWNLOAD_DIR = "temp_media_gdrive"
 
 
 # --- 設定項目ここまで ---
 
-class YtdlpCog(commands.Cog):
-    def __init__(self, bot: commands.Bot):
-        self.bot = bot
-        self.progress_message = None
-        self.last_update_time = 0
-        os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+class GDriveUploader:
+    # (このクラスは変更ありません)
+    def __init__(self, client_secrets_file, token_file):
+        self.scopes = ['https://www.googleapis.com/auth/drive']
+        self.client_secrets_file = client_secrets_file
+        self.token_file = token_file
+        self.service = self._get_drive_service()
 
-    def progress_hook(self, d):
-        """yt-dlpの進捗フック（別スレッドから呼び出される）"""
-        if d['status'] == 'downloading':
-            # 更新頻度を制限（Discordのレートリミット対策）
-            current_time = time.time()
-            if current_time - self.last_update_time < 1.5:
-                return
+    def _get_drive_service(self):
+        creds = None
+        if os.path.exists(self.token_file):
+            creds = Credentials.from_authorized_user_file(self.token_file, self.scopes)
+        if not creds or not creds.valid:
+            if creds and creds.expired and creds.refresh_token:
+                try:
+                    creds.refresh(Request())
+                except Exception as e:
+                    print(f"トークンのリフレッシュに失敗しました: {e}")
+                    creds = None
+            if not creds:
+                print("-" * 60)
+                print("Google Driveの認証が必要です。")
+                print("コンソールに表示されるURLをブラウザで開き、アカウントを認証してください。")
+                print("-" * 60)
+                try:
+                    flow = InstalledAppFlow.from_client_secrets_file(self.client_secrets_file, self.scopes)
+                    creds = flow.run_local_server(port=0)
+                except FileNotFoundError:
+                    print(f"エラー: クライアントシークレットファイル '{self.client_secrets_file}' が見つかりません。")
+                    return None
+            with open(self.token_file, 'w') as token:
+                token.write(creds.to_json())
+        try:
+            return build('drive', 'v3', credentials=creds)
+        except Exception as e:
+            print(f"Google Driveサービスのビルド中にエラー: {e}")
+            return None
 
-            total_bytes = d.get('total_bytes') or d.get('total_bytes_estimate')
-            if total_bytes is None:
-                return
+    def upload_file(self, file_path, file_name, folder_id):
+        if not self.service: return None, None
+        file_metadata = {'name': file_name, 'parents': [folder_id]}
+        media = MediaFileUpload(file_path, resumable=True)
+        file = self.service.files().create(body=file_metadata, media_body=media, fields='id').execute()
+        file_id = file.get('id')
+        self.service.permissions().create(fileId=file_id, body={'type': 'anyone', 'role': 'reader'}).execute()
+        download_link = f"https://drive.google.com/uc?export=download&id={file_id}"
+        return file_id, download_link
 
-            downloaded_bytes = d.get('downloaded_bytes', 0)
-            percentage = downloaded_bytes / total_bytes * 100
+    def delete_file(self, file_id):
+        if not self.service: return
+        try:
+            self.service.files().delete(fileId=file_id).execute()
+            print(f"Google Drive上のファイルを削除しました: {file_id}")
+        except HttpError as e:
+            if e.resp.status == 404:
+                print(f"削除しようとしたファイルが見つかりませんでした: {file_id}")
+            else:
+                print(f"Google Drive上のファイル削除中にエラーが発生しました: {e}")
+        except Exception as e:
+            print(f"Google Drive上のファイル削除中に予期せぬエラーが発生しました: {e}")
 
-            # プログレスバーの文字列を生成
-            bar = '█' * int(percentage / 5) + '─' * (20 - int(percentage / 5))
-            progress_text = (
-                f"**ダウンロード中...**\n"
-                f"`[{bar}] {percentage:.2f}%`\n"
-                f"`{downloaded_bytes / (1024 * 1024):.2f}MB / {total_bytes / (1024 * 1024):.2f}MB`"
-            )
 
-            # メッセージ編集のコルーチンをスレッドセーフに呼び出す
-            coro = self.progress_message.edit(content=progress_text)
-            asyncio.run_coroutine_threadsafe(coro, self.bot.loop)
-            self.last_update_time = current_time
+class VideoFormatSelect(discord.ui.Select):
+    # (コンストラクタは変更ありません)
+    def __init__(self, cog_instance, info, url):
+        self.cog = cog_instance
+        self.info = info
+        self.url = url
+        options = []
+        sorted_formats = sorted(
+            [f for f in info.get('formats', []) if f.get('vcodec') != 'none'],
+            key=lambda f: (f.get('height', 0), f.get('tbr', 0)),
+            reverse=True
+        )
+        for f in sorted_formats[:25]:
+            filesize = f.get('filesize') or f.get('filesize_approx')
+            filesize_mb = f"{filesize / (1024 * 1024):.2f}MB" if filesize else "N/A"
+            audio_note = " (映像のみ)" if f.get('acodec') == 'none' else ""
+            label = f"{f.get('resolution', 'N/A')}{audio_note} ({f.get('ext')}) - {filesize_mb}"
+            description = f"Video: {f.get('vcodec', 'n/a')}, Audio: {f.get('acodec', 'n/a')}"
+            options.append(discord.SelectOption(label=label, value=f.get('format_id'), description=description[:100]))
+        super().__init__(placeholder="ダウンロードする動画フォーマットを選択してください...", min_values=1,
+                         max_values=1, options=options)
 
-    @app_commands.command(name="ytdlp", description="YouTubeから音声をダウンロードしてアップロードします。")
-    @app_commands.describe(
-        query="YouTubeのURLまたは検索キーワード",
-        audio_format="出力する音声フォーマット"
-    )
-    @app_commands.choices(audio_format=[
-        app_commands.Choice(name="MP3", value="mp3"),
-        app_commands.Choice(name="M4A", value="m4a"),
-        app_commands.Choice(name="Opus", value="opus"),
-        app_commands.Choice(name="FLAC", value="flac"),
-        app_commands.Choice(name="WAV", value="wav"),
-    ])
-    async def ytdlp(self, interaction: discord.Interaction, query: str, audio_format: str):
-        await interaction.response.defer(thinking=True)
+    async def callback(self, interaction: discord.Interaction):
+        await interaction.response.edit_message(
+            content=f"**{interaction.user.display_name}** がフォーマットを選択しました。\n📥 ダウンロードと結合を開始します...",
+            view=None, embed=None)
+        format_id = self.values[0]
+        video_title = self.info.get('title', 'video')
 
-        # 一意なファイル名を生成
-        unique_id = uuid.uuid4()
-        output_filename = f"{unique_id}.{audio_format}"
-        output_path = os.path.join(DOWNLOAD_DIR, output_filename)
-
-        # 変換前の一時ファイル名を保持するための変数を初期化
-        temp_file_ext = None
+        base_uuid = str(uuid.uuid4())
 
         ydl_opts = {
-            'format': 'bestaudio/best',
-            'outtmpl': os.path.join(DOWNLOAD_DIR, f"{unique_id}.%(ext)s"),  # 変換前の一時ファイル
-            'postprocessors': [{
-                'key': 'FFmpegExtractAudio',
-                'preferredcodec': audio_format,
-                'preferredquality': '192',  # mp3の場合の品質
-            }],
-            'noplaylist': True,  # プレイリストの場合は最初の1件のみ
-            'default_search': 'ytsearch',  # URLでない場合はYouTubeで検索
+            'format': f"{format_id}+bestaudio[acodec^=mp4a]/bestvideo+bestaudio",
+            'outtmpl': os.path.join(DOWNLOAD_DIR, f"{base_uuid}.%(ext)s"),
+            'merge_output_format': 'mp4',
             'quiet': True,
             'no_warnings': True,
         }
 
+        downloaded_file_path = None
         try:
-            # --- 1. 情報取得とファイルサイズチェック ---
+            def download_sync():
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(self.url, download=False)
+                    final_path = ydl.prepare_filename(info).rsplit('.', 1)[0] + '.mp4'
+                    ydl.download([self.url])
+                    if os.path.exists(final_path):
+                        return final_path
+                    else:
+                        return None
+
+            downloaded_file_path = await asyncio.to_thread(download_sync)
+
+            if not downloaded_file_path:
+                await interaction.edit_original_response(content="エラー: 動画と音声の結合に失敗しました。")
+                return
+
+            await interaction.edit_original_response(
+                content=f"🔼 **{video_title}** をGoogle Driveにアップロードしています...")
+            upload_filename = f"{video_title}.mp4"
+            file_id, download_link = await asyncio.to_thread(
+                self.cog.gdrive_uploader.upload_file, downloaded_file_path, upload_filename, GDRIVE_FOLDER_ID
+            )
+            if not download_link:
+                await interaction.edit_original_response(content="エラー: Google Driveへのアップロードに失敗しました。")
+                return
+
+            # ===== ★★★★★ ここが修正点 ★★★★★ =====
+            embed = discord.Embed(
+                title="ダウンロード準備完了",
+                description=f"**{video_title}**\n\n以下のリンクからダウンロードしてください。\n"
+                            f"このリンクは**約{int(DELETE_DELAY_SECONDS / 60)}分後**に無効になります。",
+                color=discord.Color.green()
+            )
+            # サムネイルURLを取得してEmbedに設定
+            thumbnail_url = self.info.get('thumbnail')
+            if thumbnail_url:
+                embed.set_thumbnail(url=thumbnail_url)
+
+            embed.add_field(name="ダウンロードリンク", value=f"[ここをクリック]({download_link})", inline=False)
+            # =======================================
+
+            await interaction.edit_original_response(content=None, embed=embed)
+            asyncio.create_task(self.cog.schedule_gdrive_deletion(file_id))
+        except Exception as e:
+            await interaction.edit_original_response(content=f"処理中にエラーが発生しました: {e}")
+        finally:
+            print("[DEBUG] Cleaning up temporary files...")
+            for item in os.listdir(DOWNLOAD_DIR):
+                if item.startswith(base_uuid):
+                    try:
+                        item_path = os.path.join(DOWNLOAD_DIR, item)
+                        os.remove(item_path)
+                    except OSError:
+                        pass
+
+
+class YtdlpGdriveCog(commands.Cog):
+    # (このクラスの他のメソッドは変更ありません)
+    def __init__(self, bot: commands.Bot):
+        self.bot = bot
+        self.gdrive_uploader = GDriveUploader(CLIENT_SECRETS_FILE, TOKEN_FILE)
+        os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+
+    async def schedule_gdrive_deletion(self, file_id: str):
+        await asyncio.sleep(DELETE_DELAY_SECONDS)
+        await asyncio.to_thread(self.gdrive_uploader.delete_file, file_id)
+
+    @app_commands.command(name="ytdlp_audio",
+                          description="音声を指定フォーマットでダウンロードし、Google Drive経由で共有します。")
+    @app_commands.describe(query="YouTubeのURLまたは検索キーワード", audio_format="出力する音声フォーマット")
+    @app_commands.choices(audio_format=[
+        app_commands.Choice(name="MP3", value="mp3"), app_commands.Choice(name="M4A", value="m4a"),
+        app_commands.Choice(name="Opus", value="opus"), app_commands.Choice(name="FLAC", value="flac"),
+        app_commands.Choice(name="WAV", value="wav"),
+    ])
+    async def ytdlp_audio(self, interaction: discord.Interaction, query: str, audio_format: str):
+        if not self.gdrive_uploader.service:
+            await interaction.response.send_message(
+                "エラー: Google Drive APIが初期化されていません。コンソールを確認してください。")
+            return
+        await interaction.response.defer(thinking=True)
+        unique_id = uuid.uuid4()
+        output_path = os.path.join(DOWNLOAD_DIR, f"{unique_id}.{audio_format}")
+        ydl_opts = {
+            'format': 'bestaudio/best',
+            'outtmpl': os.path.join(DOWNLOAD_DIR, f"{unique_id}.%(ext)s"),
+            'postprocessors': [
+                {'key': 'FFmpegExtractAudio', 'preferredcodec': audio_format, 'preferredquality': '192'}],
+            'noplaylist': True, 'default_search': 'ytsearch', 'quiet': True, 'no_warnings': True,
+        }
+        temp_original_file_path = None
+        try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = await asyncio.to_thread(ydl.extract_info, query, download=False)
-
-                if 'entries' in info:
-                    info = info['entries'][0]
-
-                best_audio_format = next((f for f in info['formats'] if f['format_id'] == info['format_id']), None)
-                filesize = best_audio_format.get('filesize') or best_audio_format.get('filesize_approx')
-                temp_file_ext = best_audio_format.get('ext')  # 変換前ファイルの拡張子を保存
-
-                if filesize and filesize > MAX_FILE_SIZE_BYTES:
-                    await interaction.followup.send(
-                        f"エラー: ファイルサイズがDiscordのアップロード上限を超えています。\n"
-                        f"推定サイズ: **{filesize / (1024 * 1024):.2f}MB** (上限: {MAX_FILE_SIZE_BYTES / (1024 * 1024):.0f}MB)",
-                        ephemeral=True
-                    )
-                    return
-
-                video_title = info.get('title', 'Unknown Title')
-                self.progress_message = await interaction.followup.send(
-                    f"**{video_title}** のダウンロード準備をしています...")
-
-            # --- 2. ダウンロード実行 ---
-            ydl_opts['progress_hooks'] = [self.progress_hook]
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                await asyncio.to_thread(ydl.download, [info['webpage_url']])
-
-            # --- 3. アップロードと後処理 ---
+                if 'entries' in info: info = info['entries'][0]
+                video_title = info.get('title', 'audio')
+                message = await interaction.followup.send(f"📥 **{video_title}** をダウンロード・変換しています...")
+                temp_original_file_path = ydl.prepare_filename(info)
+                await asyncio.to_thread(ydl.download, [query])
             if not os.path.exists(output_path):
-                await self.progress_message.edit(
-                    content="エラー: ファイルの変換に失敗しました。FFmpegがインストールされているか確認してください。")
+                await message.edit(content="エラー: ファイル変換に失敗しました。FFmpegがインストールされていますか？")
                 return
-
-            final_size = os.path.getsize(output_path)
-            if final_size > MAX_FILE_SIZE_BYTES:
-                await self.progress_message.edit(
-                    content=f"エラー: ダウンロード後のファイルサイズが上限を超えました。\n"
-                            f"ファイルサイズ: **{final_size / (1024 * 1024):.2f}MB**"
-                )
-                os.remove(output_path)
+            await message.edit(content=f"🔼 **{video_title}** をGoogle Driveにアップロードしています...")
+            upload_filename = f"{video_title}.{audio_format}"
+            file_id, download_link = await asyncio.to_thread(
+                self.gdrive_uploader.upload_file, output_path, upload_filename, GDRIVE_FOLDER_ID
+            )
+            if not download_link:
+                await message.edit(content="エラー: Google Driveへのアップロードに失敗しました。")
                 return
-
-            # ===== 変更点 =====
-            # メッセージを「アップロード中」に編集
-            await self.progress_message.edit(content="アップロード中...")
-
-            # ファイルを新しいメッセージとして送信
-            discord_file = discord.File(output_path, filename=f"{video_title}.{audio_format}")
-            await interaction.followup.send(file=discord_file)
-
-            # 元のプログレスメッセージを「完了」に編集
-            await self.progress_message.edit(content=f"✅ **{video_title}** のダウンロードとアップロードが完了しました。")
-            # ==================
-
-        except yt_dlp.utils.DownloadError as e:
-            error_message = f"エラー: ダウンロードに失敗しました。\n`{str(e)}`"
-            if self.progress_message:
-                await self.progress_message.edit(content=error_message)
-            else:
-                await interaction.followup.send(error_message, ephemeral=True)
+            embed = discord.Embed(
+                title="ダウンロード準備完了",
+                description=f"**{video_title}**\n\n以下のリンクからダウンロードしてください。\n"
+                            f"このリンクは**約{int(DELETE_DELAY_SECONDS / 60)}分後**に無効になります。",
+                color=discord.Color.green()
+            )
+            embed.add_field(name="ダウンロードリンク", value=f"[ここをクリック]({download_link})", inline=False)
+            await message.edit(content=None, embed=embed)
+            asyncio.create_task(self.schedule_gdrive_deletion(file_id))
         except Exception as e:
-            error_message = f"予期せぬエラーが発生しました。\n`{e}`"
-            if self.progress_message:
-                await self.progress_message.edit(content=error_message)
+            error_msg = f"処理中にエラーが発生しました: {e}"
+            if 'message' in locals() and message:
+                await message.edit(content=error_msg)
             else:
-                await interaction.followup.send(error_message, ephemeral=True)
+                await interaction.followup.send(error_msg)
         finally:
-            # 一時ファイルを確実に削除
-            if os.path.exists(output_path):
-                os.remove(output_path)
-            # yt-dlpが生成した変換前の一時ファイルも削除しておく
-            if temp_file_ext:
-                temp_file_path = os.path.join(DOWNLOAD_DIR, f"{unique_id}.{temp_file_ext}")
-                if os.path.exists(temp_file_path):
-                    os.remove(temp_file_path)
+            if os.path.exists(output_path): os.remove(output_path)
+            if temp_original_file_path and os.path.exists(temp_original_file_path): os.remove(temp_original_file_path)
+
+    @app_commands.command(name="ytdlp_video", description="動画を検索・ダウンロードし、Google Drive経由で共有します。")
+    @app_commands.describe(query="ダウンロードしたい動画のURLまたは検索キーワード")
+    async def ytdlp_video(self, interaction: discord.Interaction, query: str):
+        if not self.gdrive_uploader.service:
+            await interaction.response.send_message(
+                "エラー: Google Drive APIが初期化されていません。コンソールを確認してください。")
+            return
+        await interaction.response.defer(thinking=True)
+        try:
+            ydl_opts = {'quiet': True, 'default_search': 'ytsearch', 'noplaylist': True}
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = await asyncio.to_thread(ydl.extract_info, query, download=False)
+                if 'entries' in info and info['entries']:
+                    info = info['entries'][0]
+            video_title = info.get('title', '不明なタイトル')
+            video_url = info.get('webpage_url', query)
+            thumbnail_url = info.get('thumbnail')
+            uploader = info.get('uploader', 'N/A')
+            duration = info.get('duration', 0)
+            if duration:
+                minutes, seconds = divmod(duration, 60)
+                hours, minutes = divmod(minutes, 60)
+                duration_str = (f"{hours:02}:" if hours > 0 else "") + f"{minutes:02}:{seconds:02}"
+            else:
+                duration_str = "N/A"
+            embed = discord.Embed(
+                title=video_title,
+                url=video_url,
+                description="ダウンロードしたい動画のフォーマットを選択してください:",
+                color=discord.Color.red()
+            )
+            if thumbnail_url:
+                embed.set_image(url=thumbnail_url)
+            embed.set_footer(text=f"チャンネル: {uploader} | 再生時間: {duration_str}")
+            view = discord.ui.View(timeout=300)
+            view.add_item(VideoFormatSelect(self, info, video_url))
+            await interaction.followup.send(embed=embed, view=view)
+        except yt_dlp.utils.DownloadError as e:
+            await interaction.followup.send(f"動画が見つかりませんでした。検索クエリやURLを確認してください。\n`{e}`")
+        except Exception as e:
+            await interaction.followup.send(f"URL/クエリの処理中にエラーが発生しました: {e}")
 
 
 async def setup(bot: commands.Bot):
-    await bot.add_cog(YtdlpCog(bot))
+    await bot.add_cog(YtdlpGdriveCog(bot))
