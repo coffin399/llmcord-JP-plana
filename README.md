@@ -1,4 +1,3 @@
-
 <h1 align="center">
   PLANA
 </h1>
@@ -77,6 +76,13 @@ Provides useful slash commands for server management and information retrieval.
 *   **/invite:** Botをあなたのサーバーに招待するためのリンクを表示します。
 *   **/support:** 開発者への連絡方法を表示します。
 
+### 📥 メディアダウンロード / Media Downloader
+YouTubeなどのサイトから動画や音声をダウンロードし、一時的な共有リンクを生成します。
+Downloads video or audio from sites like YouTube and generates a temporary shareable link.
+
+*   **/ytdlp_video [query]:** 動画のURLまたは検索キーワードを指定して、フォーマットを選択しダウンロードします。高画質（1080p以上）のダウンロードにも対応しています。
+*   **/ytdlp_audio [query] [audio_format]:** 音声のみを抽出し、指定したフォーマット（MP3, M4Aなど）でダウンロードします。
+
 ---
 
 ### ⚠️ AI利用ガイドラインと免責事項 / AI Usage Guidelines and Disclaimer
@@ -109,7 +115,7 @@ Please read the following guidelines carefully before using the AI features of t
 ### 前提条件 / Prerequisites
 *   Python 3.8以上
 *   Git
-*   FFmpeg (音楽機能を有効にする場合)
+*   FFmpeg (音楽機能・メディアダウンロード機能を有効にする場合)
 *   Docker & Docker Compose (任意、推奨)
 
 ### 手順 / Instructions
@@ -178,7 +184,7 @@ Please read the following guidelines carefully before using the AI features of t
     初回起動時に、必要なライブラリ (`requirements.txt` の内容) が自動的にインストールされます。
     
     Simply double-click the `start_plana.bat` file.
-    On the first run, it will automatically install the necessary libraries from `requirements.txt`.
+    On the first run, it will also automatically install the necessary libraries from `requirements.txt`.
 
     ---
     
