@@ -102,17 +102,20 @@ class VideoFormatSelect(discord.ui.Select):
         for f in sorted_formats[:25]:
             filesize = f.get('filesize') or f.get('filesize_approx')
             filesize_mb = f"{filesize / (1024 * 1024):.2f}MB" if filesize else "N/A"
-            audio_note = " (映像のみ)" if f.get('acodec') == 'none' else ""
+            audio_note = " (映像のみ / Video Only)" if f.get('acodec') == 'none' else ""
             label = f"{f.get('resolution', 'N/A')}{audio_note} ({f.get('ext')}) - {filesize_mb}"
             description = f"Video: {f.get('vcodec', 'n/a')}, Audio: {f.get('acodec', 'n/a')}"
             options.append(discord.SelectOption(label=label, value=f.get('format_id'), description=description[:100]))
-        super().__init__(placeholder="ダウンロードする動画フォーマットを選択してください...", min_values=1,
-                         max_values=1, options=options)
+        super().__init__(
+            placeholder="ダウンロードする動画フォーマットを選択してください / Select a video format to download...",
+            min_values=1, max_values=1, options=options)
 
     async def callback(self, interaction: discord.Interaction):
         await interaction.response.edit_message(
-            content=f"**{interaction.user.display_name}** がフォーマットを選択しました。\n📥 ダウンロードと結合を開始します...",
-            view=None, embed=None)
+            content=f"**{interaction.user.display_name}** がフォーマットを選択しました。\n**{interaction.user.display_name}** has selected a format.\n\n"
+                    f"📥 ダウンロードと結合を開始します...\nStarting download and merge...",
+            view=None, embed=None
+        )
         format_id = self.values[0]
         video_title = self.info.get('title', 'video')
 
@@ -141,38 +144,45 @@ class VideoFormatSelect(discord.ui.Select):
             downloaded_file_path = await asyncio.to_thread(download_sync)
 
             if not downloaded_file_path:
-                await interaction.edit_original_response(content="エラー: 動画と音声の結合に失敗しました。")
+                await interaction.edit_original_response(
+                    content="エラー: 動画と音声の結合に失敗しました。\nError: Failed to merge video and audio.")
                 return
 
             await interaction.edit_original_response(
-                content=f"🔼 **{video_title}** をGoogle Driveにアップロードしています...")
+                content=f"🔼 **{video_title}** をGoogle Driveにアップロードしています...\nUploading **{video_title}** to Google Drive...")
             upload_filename = f"{video_title}.mp4"
             file_id, download_link = await asyncio.to_thread(
                 self.cog.gdrive_uploader.upload_file, downloaded_file_path, upload_filename, GDRIVE_FOLDER_ID
             )
             if not download_link:
-                await interaction.edit_original_response(content="エラー: Google Driveへのアップロードに失敗しました。")
+                await interaction.edit_original_response(
+                    content="エラー: Google Driveへのアップロードに失敗しました。\nError: Failed to upload to Google Drive.")
                 return
 
-            # ===== ★★★★★ ここが修正点 ★★★★★ =====
+            minutes = int(DELETE_DELAY_SECONDS / 60)
             embed = discord.Embed(
-                title="ダウンロード準備完了",
-                description=f"**{video_title}**\n\n以下のリンクからダウンロードしてください。\n"
-                            f"このリンクは**約{int(DELETE_DELAY_SECONDS / 60)}分後**に無効になります。",
+                title="ダウンロード準備完了 / Download Ready",
+                description=f"**{video_title}**\n\n"
+                            f"以下のリンクからダウンロードしてください。\nPlease download from the link below.\n\n"
+                            f"このリンクは**約{minutes}分後**に無効になります。\nThis link will expire in **about {minutes} minutes**.",
                 color=discord.Color.green()
             )
-            # サムネイルURLを取得してEmbedに設定
+
+            # ===== ★★★★★ ここが修正点 ★★★★★ =====
             thumbnail_url = self.info.get('thumbnail')
             if thumbnail_url:
-                embed.set_thumbnail(url=thumbnail_url)
-
-            embed.add_field(name="ダウンロードリンク", value=f"[ここをクリック]({download_link})", inline=False)
+                # set_thumbnail から set_image に変更して画像を大きく表示
+                embed.set_image(url=thumbnail_url)
             # =======================================
+
+            embed.add_field(name="ダウンロードリンク / Download Link",
+                            value=f"[ここをクリック / Click Here]({download_link})", inline=False)
 
             await interaction.edit_original_response(content=None, embed=embed)
             asyncio.create_task(self.cog.schedule_gdrive_deletion(file_id))
         except Exception as e:
-            await interaction.edit_original_response(content=f"処理中にエラーが発生しました: {e}")
+            await interaction.edit_original_response(
+                content=f"処理中にエラーが発生しました / An error occurred during processing: {e}")
         finally:
             print("[DEBUG] Cleaning up temporary files...")
             for item in os.listdir(DOWNLOAD_DIR):
@@ -196,8 +206,11 @@ class YtdlpGdriveCog(commands.Cog):
         await asyncio.to_thread(self.gdrive_uploader.delete_file, file_id)
 
     @app_commands.command(name="ytdlp_audio",
-                          description="音声を指定フォーマットでダウンロードし、Google Drive経由で共有します。")
-    @app_commands.describe(query="YouTubeのURLまたは検索キーワード", audio_format="出力する音声フォーマット")
+                          description="音声をダウンロードし、Google Drive経由で共有します。/ Downloads audio and shares it via Google Drive.")
+    @app_commands.describe(
+        query="YouTubeのURLまたは検索キーワード / YouTube URL or search query",
+        audio_format="出力する音声フォーマット / Output audio format"
+    )
     @app_commands.choices(audio_format=[
         app_commands.Choice(name="MP3", value="mp3"), app_commands.Choice(name="M4A", value="m4a"),
         app_commands.Choice(name="Opus", value="opus"), app_commands.Choice(name="FLAC", value="flac"),
@@ -206,7 +219,7 @@ class YtdlpGdriveCog(commands.Cog):
     async def ytdlp_audio(self, interaction: discord.Interaction, query: str, audio_format: str):
         if not self.gdrive_uploader.service:
             await interaction.response.send_message(
-                "エラー: Google Drive APIが初期化されていません。コンソールを確認してください。")
+                "エラー: Google Drive APIが初期化されていません。コンソールを確認してください。\nError: Google Drive API is not initialized. Please check the console.")
             return
         await interaction.response.defer(thinking=True)
         unique_id = uuid.uuid4()
@@ -224,31 +237,39 @@ class YtdlpGdriveCog(commands.Cog):
                 info = await asyncio.to_thread(ydl.extract_info, query, download=False)
                 if 'entries' in info: info = info['entries'][0]
                 video_title = info.get('title', 'audio')
-                message = await interaction.followup.send(f"📥 **{video_title}** をダウンロード・変換しています...")
+                message = await interaction.followup.send(
+                    f"📥 **{video_title}** をダウンロード・変換しています...\nDownloading & converting **{video_title}**...")
                 temp_original_file_path = ydl.prepare_filename(info)
                 await asyncio.to_thread(ydl.download, [query])
             if not os.path.exists(output_path):
-                await message.edit(content="エラー: ファイル変換に失敗しました。FFmpegがインストールされていますか？")
+                await message.edit(
+                    content="エラー: ファイル変換に失敗しました。FFmpegがインストールされていますか？\nError: File conversion failed. Is FFmpeg installed?")
                 return
-            await message.edit(content=f"🔼 **{video_title}** をGoogle Driveにアップロードしています...")
+            await message.edit(
+                content=f"🔼 **{video_title}** をGoogle Driveにアップロードしています...\nUploading **{video_title}** to Google Drive...")
             upload_filename = f"{video_title}.{audio_format}"
             file_id, download_link = await asyncio.to_thread(
                 self.gdrive_uploader.upload_file, output_path, upload_filename, GDRIVE_FOLDER_ID
             )
             if not download_link:
-                await message.edit(content="エラー: Google Driveへのアップロードに失敗しました。")
+                await message.edit(
+                    content="エラー: Google Driveへのアップロードに失敗しました。\nError: Failed to upload to Google Drive.")
                 return
+
+            minutes = int(DELETE_DELAY_SECONDS / 60)
             embed = discord.Embed(
-                title="ダウンロード準備完了",
-                description=f"**{video_title}**\n\n以下のリンクからダウンロードしてください。\n"
-                            f"このリンクは**約{int(DELETE_DELAY_SECONDS / 60)}分後**に無効になります。",
+                title="ダウンロード準備完了 / Download Ready",
+                description=f"**{video_title}**\n\n"
+                            f"以下のリンクからダウンロードしてください。\nPlease download from the link below.\n\n"
+                            f"このリンクは**約{minutes}分後**に無効になります。\nThis link will expire in **about {minutes} minutes**.",
                 color=discord.Color.green()
             )
-            embed.add_field(name="ダウンロードリンク", value=f"[ここをクリック]({download_link})", inline=False)
+            embed.add_field(name="ダウンロードリンク / Download Link",
+                            value=f"[ここをクリック / Click Here]({download_link})", inline=False)
             await message.edit(content=None, embed=embed)
             asyncio.create_task(self.schedule_gdrive_deletion(file_id))
         except Exception as e:
-            error_msg = f"処理中にエラーが発生しました: {e}"
+            error_msg = f"処理中にエラーが発生しました / An error occurred during processing: {e}"
             if 'message' in locals() and message:
                 await message.edit(content=error_msg)
             else:
@@ -257,12 +278,13 @@ class YtdlpGdriveCog(commands.Cog):
             if os.path.exists(output_path): os.remove(output_path)
             if temp_original_file_path and os.path.exists(temp_original_file_path): os.remove(temp_original_file_path)
 
-    @app_commands.command(name="ytdlp_video", description="動画を検索・ダウンロードし、Google Drive経由で共有します。")
-    @app_commands.describe(query="ダウンロードしたい動画のURLまたは検索キーワード")
+    @app_commands.command(name="ytdlp_video",
+                          description="動画をダウンロードし、Google Drive経由で共有します。/ Downloads a video and shares it via Google Drive.")
+    @app_commands.describe(query="ダウンロードしたい動画のURLまたは検索キーワード / URL or search query of the video")
     async def ytdlp_video(self, interaction: discord.Interaction, query: str):
         if not self.gdrive_uploader.service:
             await interaction.response.send_message(
-                "エラー: Google Drive APIが初期化されていません。コンソールを確認してください。")
+                "エラー: Google Drive APIが初期化されていません。コンソールを確認してください。\nError: Google Drive API is not initialized. Please check the console.")
             return
         await interaction.response.defer(thinking=True)
         try:
@@ -285,19 +307,21 @@ class YtdlpGdriveCog(commands.Cog):
             embed = discord.Embed(
                 title=video_title,
                 url=video_url,
-                description="ダウンロードしたい動画のフォーマットを選択してください:",
+                description="ダウンロードしたい動画のフォーマットを選択してください:\nPlease select a video format to download:",
                 color=discord.Color.red()
             )
             if thumbnail_url:
                 embed.set_image(url=thumbnail_url)
-            embed.set_footer(text=f"チャンネル: {uploader} | 再生時間: {duration_str}")
+            embed.set_footer(text=f"チャンネル / Channel: {uploader} | 再生時間 / Duration: {duration_str}")
             view = discord.ui.View(timeout=300)
             view.add_item(VideoFormatSelect(self, info, video_url))
             await interaction.followup.send(embed=embed, view=view)
         except yt_dlp.utils.DownloadError as e:
-            await interaction.followup.send(f"動画が見つかりませんでした。検索クエリやURLを確認してください。\n`{e}`")
+            await interaction.followup.send(
+                f"動画が見つかりませんでした。検索クエリやURLを確認してください。\nVideo not found. Please check the query or URL.\n`{e}`")
         except Exception as e:
-            await interaction.followup.send(f"URL/クエリの処理中にエラーが発生しました: {e}")
+            await interaction.followup.send(
+                f"URL/クエリの処理中にエラーが発生しました / An error occurred while processing the URL/query: {e}")
 
 
 async def setup(bot: commands.Bot):
