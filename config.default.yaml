@@ -111,7 +111,7 @@ llm:
     # Google AI Studioなどで取得したGemini APIキー
     api_key: "YOUR_GOOGLE_GEMINI_API_KEY_HERE"
     # 検索に使用するGeminiモデル (Tool Use対応モデルを推奨)
-    model: "gemini-1.5-pro-latest"
+    model: "gemini-2.5-flash"
     timeout: 60.0 # 検索APIのタイムアウト秒数 (オプション)
 
   # --- エラーメッセージ設定 ---
