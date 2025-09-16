@@ -145,8 +145,10 @@ class Shittim(commands.Bot):
         self.status_templates = self.config.get('status_rotation', [
             "plz type /help",
             "operating on {guild_count} servers",
-            "評価テスト中...",
-            "In the testing phase..."
+            "operating on {guild_count} servers",
+            "Version20250916",
+            "SwitchModelsAvailable！",
+            "type /switch-model"
         ])
 
         # ステータスローテーションタスクを開始

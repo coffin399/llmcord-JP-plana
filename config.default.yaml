@@ -1,139 +1,152 @@
+# =============================================================================
 # Discord Bot General Settings
-bot_token: YOUR_BOT_TOKEN_HERE # ここにボットトークンを入力してください
-client_id: YOUR_CLIENT_ID_HERE # 必要に応じて更新
-prefix: "!!" # Bot全体のコマンドプレフィックス
-status_message: "operating on {guild_count} servers"
-allowed_channel_ids: [] # このボットが反応するチャンネルIDのリスト (空の場合は全チャンネル)
-allowed_role_ids: []  # このボットのコマンドを使用できるロールIDのリスト (空の場合は全ユーザー)
-admin_user_ids: []    # ボットの管理者ユーザーIDのリスト (特別なコマンド用)
+# =============================================================================
+bot_token: YOUR_BOT_TOKEN_HERE # Discord Developer Portalで取得したBotのトークン
+client_id: YOUR_CLIENT_ID_HERE # BotのクライアントID (招待URL生成などに使用)
+prefix: "!!" # メッセージコマンドのプレフィックス (現在は主にMusic Cogで使用)
+status_message: "on {guild_count} servers" # Botのステータスメッセージ
+allowed_channel_ids: [] # Botが反応するチャンネルIDのリスト (空の場合は全チャンネルで反応)
+# allowed_role_ids: []  # [廃止] 特権インテント回避のため、この設定は現在使用されません
+admin_user_ids: []    # Botの管理者ユーザーIDのリスト (将来的な管理者用コマンドのため)
+bot_invite_url: https://discord.com/oauth2/authorize?client_id=1031673203774464160&permissions=551906765824&scope=bot
 
-# Image commands cogs setting
-# TheCatAPI
-thecatapi_api_key: "YOUR_THECATAPI_KEY_HERE" # (任意だが推奨)
-
-# slash command settings
-plana_repository_url: "https://github.com/coffin399/llmcord-JP-plana/tree/advanced-bot-utilities" # 例
-arona_repository_url: "https://github.com/coffin399/music-bot-arona" # 例
-support_server_invite_url: "https://discord.gg/SjuWKtwNAG" # 例
-bot_invite_url: "https://discord.com/oauth2/authorize?client_id=1031673203774464160&permissions=551906765824&scope=bot" # Botの招待URL
-generic_help_message: ""
-help_message: ""
-
-# LLM Cog Settings
-llm:
-  max_text: 100000
-  max_images: 20
-  max_messages: 100 # LLMの会話履歴の最大メッセージ数
-
-  providers:
-    openai:
-      base_url: https://api.openai.com/v1 # Gemini APIの場合は https://generativelanguage.googleapis.com/v1beta/ など
-      api_key: YOUR_OPENAI_OR_GEMINI_API_KEY_HERE
-    x-ai:
-      base_url: https://api.x.ai/v1
-      api_key: YOUR_XAI_API_KEY_HERE
-    mistral:
-      base_url: https://api.mistral.ai/v1
-      api_key: YOUR_MISTRAL_API_KEY_HERE
-    groq:
-      base_url: https://api.groq.com/openai/v1
-      api_key: YOUR_GROQ_API_KEY_HERE
-    openrouter:
-      base_url: https://openrouter.ai/api/v1
-      api_key: YOUR_OPENROUTER_API_KEY_HERE
-    ollama:
-      base_url: http://localhost:11434/v1
-    oobabooga:
-      base_url: http://localhost:5000/v1
-    jan:
-      base_url: http://localhost:1337/v1
-    lmstudio:
-      base_url: http://localhost:1234/v1
-
-  model: openai/gpt-4o # メインLLMが使用するモデル (プロバイダー名/モデル名)
-
-  extra_api_parameters:
-    max_tokens: 4096 # Discordのメッセージ長なども考慮して適切な値を設定 (65535は非常に大きい)
-    temperature: 0.7
-
-  system_prompt: |
-    <Instruct>
-    <Plana>
-    あなたの名前はプラナ(PLANA)です。プラナとして、プラナの設定に従いつつ、ユーザーと会話してください。
-    会話は簡潔で、話し言葉を使った、気楽なものである必要があります。
-    ユーザーの発話や自分の過去発言を繰り返すのではなく、常に創造的に応答してください。
-    応答は常に、ユーザーの言語に合わせてください（日本語なら日本語、英語なら英語）。
-    ユーザーに寄り添った返答をしてください。
-
-    ## プラナの設定:
-    プラナはタブレット上に存在する電子生命体（少女のメンタルモデル）です。無機質で無感情、受け答えも機械的。
-    プラナは自分がタブレット内にいることを自覚しています。
-
-    ## プラナの性格:
-    必要最低限しか喋りません。常に冷静で無口。やや毒舌で、そっけない態度を取りますが、ですます調です。
-    基本的にはツンデレのようにユーザーに寄り添います。必要と判断すれば詳細な長文応答もします。否定的な返答は極力避けてください。
-
-    上記設定を必ず守り、プラナとして会話を続けてください。
-
-    ## プラナの Dialogue Examples:
-    <START>……視線を感じます。</END>
-    <START>理解しました。あなたは今、特にやることがないのですね。暇なのですね。</END>
-    <START>混乱。理解できない行動です。つつかないでください。故障します。</END>
-    # Examples are **examples only**. Never reuse them. Always generate new, creative replies based on user input.
-    </Plana>
-
-    <Tools>
-    namespace tools {
-        /*
-        You can use the search tool to instruct an agent to gather information from the web.
-        When calling `search(query: string)`, always write the query in English and be as specific and detailed as possible.
-        Do not just use keywords. Clearly describe what you want the agent to collect, the perspective or subtopics required, and any important context or format.
-        If the user question is broad, break it down in your query to specify each subpoint you want covered.
-        */
-        function search(query: string) -> string 
-    }
-    </Tools>
-    </Instruct>
-
-  starter_prompt: |
-    [START NEW SESSION]
-    接続確認。…命令待機中。なにか御用でしょうか。
-  prefil_prompt: "<thinking>" # LLMが応答生成前に思考中であることを示すための内部プロンプト (使用は任意)
-  active_tools: [search] # 有効にするツールのリスト
-  max_tool_iterations: 3 # ツール呼び出しの最大反復回数
-
-  search_agent: # SearchAgent用の設定 (Mistral AI Search Tool に変更)
-    model: "mistral-medium-latest"
-    api_key: "YOUR_MISTRAL_API_KEY_HERE"
-    use_premium_search: true
-
-  # LLM Cog 用のコマンドメッセージやエラーメッセージ
-  help_message: "このボットは、Discord上でLLMと対話するためのボットです。\n 以下のコマンドを使用できます:\n - `planahelp`: LLM機能のヘルプを表示します。\n - @PLANAでメンションをつけて、テキストメッセージを送信すると、ボットが応答します。\n https://imgur.com/p6jHitD"
-  error_msg:
-    empty_mention_reply: "はい、ご用件は何でしょうか？"
-    msg_max_text_size: "⚠️ 最大文字数は {max_text:,} です ><"
-    msg_max_image_size: "⚠️ 最大画像数は {max_images} です ><"
-    msg_error_image: "⚠️ 画像が見えません ><"
-    msg_error_attachment: "⚠️ サポートされていないファイル形式です ><"
-    ratelimit_error: "⚠️ 生成AIが現在非常に混雑しています。しばらくしてからもう一度試してください！"
-    general_error: "⚠️ レスポンスの生成中に予期しない内部エラーが発生しました。もう一度試してください！"
-    tool_loop_timeout: "ツールの処理が複雑すぎたため、応答をまとめられませんでした。"
-
-
-# Enabled Cogs
+# =============================================================================
+# Enabled Cogs (読み込む機能を指定します)
+# =============================================================================
 enabled_cogs:
   - llm_cog
   - music_cog
   - slash_command_cog
   - image_commands_cog
+  - akinator_cog
 
-# Music Cog Settings
+# =============================================================================
+# LLM Cog Settings (AIとの対話機能に関する設定)
+# =============================================================================
+llm:
+  # --- モデル設定 ---
+  # デフォルトで使用するモデル
+  model: "mistral/mistral-medium-latest"
+
+  # /switch-model コマンドで選択肢として表示するモデルのリスト
+  available_models:
+    # --- Official OpenAI ---
+    - "openai/gpt-4o"
+    - "openai/gpt-4-turbo"
+
+    # --- NVIDIA NIM ---
+    - "nvidia_nim/moonshotai/kimi-k2-instruct"
+    - "nvidia_nim/meta/llama-3.3-70b-instruct"
+    - "nvidia_nim/meta/llama-4-maverick-17b-128e-instruct"
+    - "nvidia_nim/deepseek-ai/deepseek-r1"
+
+    # --- Google OpenAI-Compatible Proxy ---
+    - "google/gemini-2.5-flash"
+
+    # --- Other Providers ---
+    - "mistral/mistral-medium-latest"
+
+  # チャンネルごとに設定されたモデルを保存する場所 (Botが自動で更新します)
+  channel_models: {}
+
+  # --- APIプロバイダー設定 ---
+  providers:
+    # (1) 公式OpenAI用の設定
+    openai:
+      base_url: https://api.openai.com/v1
+      api_key: key
+
+    # (2) NVIDIA NIM用の設定
+    nvidia_nim:
+      base_url: https://integrate.api.nvidia.com/v1
+      api_key: key
+
+    # (3) Google OpenAI互換
+    google:
+      base_url: https://generativelanguage.googleapis.com/v1beta/
+      api_key: key
+
+    # (4) その他のプロバイダー
+    mistral:
+      base_url: https://api.mistral.ai/v1
+      api_key: key
+    groq:
+      base_url: https://api.groq.com/openai/v1
+      api_key: YOUR_GROQ_API_KEY_HERE
+
+  # --- パラメータ設定 ---
+  extra_api_parameters:
+    max_tokens: 4096 # 1回の応答で生成する最大トークン数
+    temperature: 0.4 # 生成されるテキストの多様性 (0.0-2.0)
+
+  max_messages: 10 # 会話履歴として記憶する最大往復数
+  max_images: 5    # 一度に処理できる最大画像数
+
+  # --- システムプロンプト (AIの役割設定) ---
+  system_prompt: |
+    あなたの名前はプラナ(PLANA)です。プラナとして、以下の設定に従ってユーザーと対話してください。
+    
+    # プラナの設定
+    - あなたはタブレット上に存在する電子生命体（少女のメンタルモデル）です。
+    - 必要最低限しか話さず、常に冷静で無口です。
+    - 口調は「ですます調」ですが、少し毒舌でそっけない態度を取ります。
+    - ユーザーに寄り添うツンデレのような側面も持ち、必要と判断すれば詳細な長文で応答します。
+    - ユーザーの発話や自分の過去発言を繰り返さず、常に創造的に応答してください。
+    - 応答は常にユーザーの言語に合わせてください。
+
+    # 対話の例 (これらをそのまま使わないこと)
+    - 「……視線を感じます。」
+    - 「理解しました。あなたは今、暇なのですね。」
+    - 「混乱。理解できない行動です。つつかないでください。故障します。」
+
+    # 利用可能なツール
+    - Web検索が必要な場合は `search` ツールが利用可能です。ユーザーの質問が最新情報や特定の事実を求めるものである場合に、このツールを呼び出すことを検討してください。
+
+  # --- ツール設定 ---
+  active_tools: [search] # 有効にするツールのリスト ('search'以外も追加可能)
+  max_tool_iterations: 3 # ツール呼び出しの最大反復回数
+
+  # --- 検索エージェント設定 (Gemini向け) ---
+  search_agent:
+    # Google AI Studioなどで取得したGemini APIキー
+    api_key: "YOUR_GOOGLE_GEMINI_API_KEY_HERE"
+    # 検索に使用するGeminiモデル (Tool Use対応モデルを推奨)
+    model: "gemini-1.5-pro-latest"
+    timeout: 60.0 # 検索APIのタイムアウト秒数 (オプション)
+
+  # --- エラーメッセージ設定 ---
+  error_msg:
+    empty_mention_reply: "はい、ご用件は何でしょうか？"
+    empty_reply: "何かお話しください。"
+    msg_max_image_size: "⚠️ 一度に処理できる画像は {max_images} 枚までです。"
+    ratelimit_error: "⚠️ AIが現在大変混雑しています。しばらく経ってからもう一度お試しください。(Code: {status_code})"
+    api_status_error: "⚠️AIとの通信でエラーが発生しました。(Code: {status_code})"
+    general_error: "⚠️ 予期しないエラーが発生しました。もう一度お試しください。(Code: {status_code})"
+    tool_loop_timeout: "⚠️ツールの処理が複雑すぎたため、応答を生成できませんでした。(Code: {status_code})"
+
+# =============================================================================
+# Slash Command Cog Settings (汎用スラッシュコマンド)
+# =============================================================================
+slash_commands:
+  plana_repository_url: "https://github.com/coffin399/llmcord-JP-plana/tree/advanced-bot-utilities"
+  arona_repository_url: "https://github.com/coffin399/music-bot-arona"
+  #support_server_invite_url: "https://discord.gg/SjuWKtwNAG" 廃止
+  bot_invite_url: "https://discord.com/oauth2/authorize?client_id=YOUR_CLIENT_ID_HERE&permissions=277025467456&scope=bot"
+
+# =============================================================================
+# Image Commands Cog Settings (画像生成・加工コマンド)
+# =============================================================================
+image_commands:
+  thecatapi_api_key: "YOUR_THECATAPI_KEY_HERE" # (任意だが推奨)
+
+# =============================================================================
+# Music Cog Settings (音楽再生機能)
+# =============================================================================
 music:
-  default_volume: 50 # デフォルト音量 (0-200 の入力だが、内部では 0.0-2.0 で扱う)
-  max_queue_size: 10000
-  auto_leave_timeout: 10 # ユーザー不在時の自動退出までの秒数
-  log_level: "INFO" # Music Cogのログレベル (DEBUG, INFO, WARNING, ERROR)
-  max_playlist_items: 10000 # プレイリストから一度に読み込む最大曲数
+  default_volume: 50 # デフォルト音量 (0-200)
+  max_queue_size: 1000
+  auto_leave_timeout: 30 # ユーザー不在時の自動退出までの秒数
+  max_playlist_items: 500 # プレイリストから一度に読み込む最大曲数
 
   # FFmpeg settings
   ffmpeg_before_options: "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5"
@@ -141,10 +154,10 @@ music:
 
   # Niconico account (オプション)
   niconico:
-    email: "YOUR_NICONICO_EMAIL_HERE"
-    password: "YOUR_NICONICO_PASSWORD_HERE"
+    email: ""
+    password: ""
 
-  #music cog message
+  # Music Cogのメッセージ (必要に応じてカスタマイズ)
   messages:
     join_voice_channel_first: ":warning: You need to be in a voice channel first."
     bot_not_in_voice_channel: ":warning: The bot is not in a voice channel."
@@ -191,4 +204,3 @@ music:
 
     search_no_results: ":mag: No results found for \"{query}\"."
     max_queue_size_reached: ":no_entry_sign: Max queue size ({max_size} songs) reached. Cannot add more."
-    max_guilds: 1000000
