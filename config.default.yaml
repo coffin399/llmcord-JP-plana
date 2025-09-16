@@ -19,6 +19,7 @@ enabled_cogs:
   - slash_command_cog
   - image_commands_cog
   - akinator_cog
+  - ytdlp_downloader_cog
 
 # =============================================================================
 # LLM Cog Settings (AIとの対話機能に関する設定)
