@@ -36,7 +36,10 @@ class SearchAgent:
 
     # Google Search対応モデル（Tool Use対応）
     SEARCH_ENABLED_MODELS = [
-        "gemini-2.5-flash"
+        "gemini-2.5-flash",
+        "gemini-2.0-flash-exp",
+        "gemini-1.5-pro-latest",
+        "gemini-1.5-flash-latest"
     ]
 
     def __init__(self, bot) -> None:
@@ -94,19 +97,27 @@ class SearchAgent:
 
             # 検索ツール付きモデルの初期化
             try:
-                # Google Search tool を有効化
-                search_tool = genai.Tool.from_google_search_retrieval()
+                # Google Search grounding を有効化（最新API対応）
                 self.model = genai.GenerativeModel(
                     model_name=self.model_name,
-                    tools=[search_tool],
-                    system_instruction="You are a helpful search assistant. When asked to search, use the Google Search tool to find current, accurate information and provide comprehensive, well-structured responses."
+                    tools=[{"google_search_retrieval": {}}],  # 正しいツール指定
+                    system_instruction="You are a helpful search assistant. When asked to search, use Google Search grounding to find current, accurate information and provide comprehensive, well-structured responses."
                 )
-                logger.info(f"SearchAgent model '{self.model_name}' initialized with Google Search tool")
+                logger.info(f"SearchAgent model '{self.model_name}' initialized with Google Search grounding")
             except Exception as e:
                 logger.error(f"Failed to initialize model with search tool: {e}")
-                self.initialization_error = str(e)
-                self.model = None
-                return
+                # フォールバック: ツールなしでモデルを初期化
+                try:
+                    self.model = genai.GenerativeModel(
+                        model_name=self.model_name,
+                        system_instruction="You are a helpful assistant. Provide comprehensive information based on your knowledge."
+                    )
+                    logger.warning(f"Initialized model without search tool as fallback")
+                except Exception as fallback_e:
+                    logger.error(f"Failed to initialize fallback model: {fallback_e}")
+                    self.initialization_error = str(e)
+                    self.model = None
+                    return
 
             # その他の設定
             self.timeout = search_config.get("timeout", 60.0)
@@ -121,20 +132,30 @@ class SearchAgent:
             self.initialization_error = error_msg
             self.model = None
 
+    def _has_search_capability(self) -> bool:
+        """モデルが検索機能を持っているかチェック"""
+        try:
+            if not self.model:
+                return False
+            # モデルのツール設定を確認
+            return hasattr(self.model, '_tools') and self.model._tools is not None
+        except:
+            return False
+
     async def _perform_search(self, query: str) -> str:
         """Google AIの検索機能を使用してWeb検索を実行"""
         try:
             logger.debug(f"Executing search for query: '{query}'")
 
-            # 検索プロンプトの構成
+            # 検索用のプロンプト（Groundingを意識したプロンプト）
             search_prompt = (
-                f"Please search for current information about: {query}\n\n"
-                "Provide a comprehensive report that includes:\n"
-                "- Key facts and recent developments\n"
-                "- Important context and background\n"
-                "- Relevant statistics or data if available\n"
-                "- Multiple perspectives when appropriate\n\n"
-                "Structure your response clearly with appropriate headings and organize the information logically."
+                f"Search for and provide current, accurate information about: {query}\n\n"
+                "Please provide a comprehensive report including:\n"
+                "- Recent developments and current status\n"
+                "- Key facts and important context\n"
+                "- Relevant data, statistics, or examples\n"
+                "- Multiple viewpoints when appropriate\n\n"
+                "Structure your response with clear sections and cite sources when possible."
             )
 
             # 検索実行（タイムアウト付き）
@@ -142,8 +163,8 @@ class SearchAgent:
                 self.model.generate_content_async(
                     search_prompt,
                     generation_config=genai.types.GenerationConfig(
-                        temperature=0.2,  # より事実的な回答のため低めに設定
-                        max_output_tokens=4000,
+                        temperature=0.1,  # より客観的な回答のため低く設定
+                        max_output_tokens=3000,
                     )
                 ),
                 timeout=self.timeout
@@ -154,12 +175,11 @@ class SearchAgent:
                 logger.info(f"Search completed successfully for: '{query}'")
                 return self._format_result(content, query)
             else:
-                # レスポンスが空の場合
-                logger.warning(f"Empty response received for query: '{query}'")
+                # レスポンスが空またはブロックされた場合
+                logger.warning(f"Empty or blocked response for query: '{query}'")
                 if hasattr(response, 'prompt_feedback') and response.prompt_feedback:
-                    feedback = response.prompt_feedback
-                    return f"[Search Error] Response blocked. Reason: {feedback.block_reason if hasattr(feedback, 'block_reason') else 'Unknown'}"
-                return "[Search Error] Empty response received from Google AI"
+                    return f"[Search Error] Response blocked or filtered. Please try rephrasing your query."
+                return "[Search Error] No response received from the model"
 
         except asyncio.TimeoutError:
             logger.error(f"Search timeout ({self.timeout}s) for query: '{query}'")
@@ -260,6 +280,8 @@ class SearchAgent:
         if not genai:
             error_lines.append("• Google AI library not installed")
             error_lines.append("  Install with: pip install google-generativeai")
+            error_lines.append("  Note: This library will be deprecated Aug 31, 2025")
+            error_lines.append("  Consider migrating to Google Gen AI SDK")
 
         error_lines.extend([
             "",
@@ -271,7 +293,9 @@ class SearchAgent:
             "  timeout: 60.0  # Optional",
             "```",
             "",
-            f"**Supported models:** {', '.join(self.SEARCH_ENABLED_MODELS)}"
+            f"**Supported models:** {', '.join(self.SEARCH_ENABLED_MODELS)}",
+            "",
+            "**Note:** Search grounding requires a paid API tier ($35/1000 queries)"
         ])
 
         return "\n".join(error_lines)
@@ -282,10 +306,16 @@ class SearchAgent:
             # ヘッダーを追加
             formatted = f"🔍 **Search Results: {query}**\n\n{content}"
 
-            # Discord文字制限対応（2000文字制限を考慮）
-            if len(formatted) > 1900:
-                truncated = formatted[:1800]
-                formatted = truncated + "\n\n... *[Results truncated due to length limits]*"
+            # Discord文字制限対応（2000文字制限）
+            if len(formatted) > 1950:
+                # 切り詰めて省略表示を追加
+                truncated = formatted[:1850]
+                # 文の途中で切れないように調整
+                last_period = truncated.rfind('.')
+                last_newline = truncated.rfind('\n')
+                cut_point = max(last_period, last_newline, 1800)
+
+                formatted = truncated[:cut_point] + "\n\n... *[Results truncated due to Discord length limits]*"
 
             return formatted
 
@@ -327,6 +357,7 @@ class SearchAgent:
         return {
             "available": self.is_available(),
             "model_name": self.model_name,
+            "has_search_capability": self._has_search_capability(),
             "supported_models": self.SEARCH_ENABLED_MODELS,
             "initialization_error": self.initialization_error,
             "timeout": self.timeout,
