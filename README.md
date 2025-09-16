@@ -1,7 +1,7 @@
 
 ---
 <h1 align="center">
-  Plana-Cord-JP
+  PLANA
 </h1>
 
 <h3 align="center"><i>
@@ -12,9 +12,9 @@
   <img src="https://i.imgur.com/Q3VuxzG.png" alt="Plana Banner">
 </p>
 
-**Plana-Cord-JP** (通称: **PLANA**) は、[llmcord](https://github.com/jakobdylanc/llmcord) を基盤として開発された多機能Discordボットです。大規模言語モデル (LLM) との対話、高機能な音楽再生、画像認識、Akinatorやガチャシミュレーターなどのエンターテイメント機能、そして便利なサーバーユーティリティを提供します。OpenAI互換APIに対応しており、リモートホスト型やローカルホスト型など、ほぼすべてのLLMと連携可能です。
+**llmcord-JP-PLANA** (通称: **PLANA**) は、[llmcord](https://github.com/jakobdylanc/llmcord) を基盤として開発された多機能Discordボットです。大規模言語モデル (LLM) との対話、高機能な音楽再生、画像認識、Akinatorやガチャシミュレーターなどのエンターテイメント機能、そして便利なサーバーユーティリティを提供します。OpenAI互換APIに対応しており、リモートホスト型やローカルホスト型など、ほぼすべてのLLMと連携可能です。
 
-**Plana-Cord-JP** (commonly known as **PLANA**) is a multi-functional Discord bot developed based on [llmcord](https://github.com/jakobdylanc/llmcord). It offers conversations with Large Language Models (LLMs), high-fidelity music playback, image recognition, entertainment features like Akinator and a gacha simulator, and useful server utilities. It supports OpenAI-compatible APIs, allowing integration with almost all LLMs, including remotely hosted and locally hosted ones.
+**llmcord-JP-PLANA** (commonly known as **PLANA**) is a multi-functional Discord bot developed based on [llmcord](https://github.com/jakobdylanc/llmcord). It offers conversations with Large Language Models (LLMs), high-fidelity music playback, image recognition, entertainment features like Akinator and a gacha simulator, and useful server utilities. It supports OpenAI-compatible APIs, allowing integration with almost all LLMs, including remotely hosted and locally hosted ones.
 
 ## 🚀 クイックスタート / Quick Start
 
