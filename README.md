@@ -6,11 +6,17 @@
   プラナちゃんとおしゃべりしよう！
 </i></h3>
 
+<h3 align="center">
+  <a href="https://discord.com/oauth2/authorize?client_id=1031673203774464160&permissions=551906765824&scope=bot" title="Click to invite PLANA to your server!">
+    <strong>➡️ PLANAをあなたのサーバーに招待する ⬅️</strong>
+  </a>
+</h3>
+
+*   セルフホストを行う場合は、`config.yaml` にご自身のBotの招待URLを設定してください。
+*   If you are self-hosting, please set your bot's invitation URL in `config.yaml`.
+
 <p align="center">
   <img src="https://i.imgur.com/Q3VuxzG.png" alt="Plana Banner">
-</p>
-<p align="center">
-  <img src="https://i.imgur.com/wjdPNFQ.png" alt="PLANA MODEL CHANGE">
 </p>
 
 **llmcord-JP-PLANA** (通称: **PLANA**) は、[llmcord](https://github.com/jakobdylanc/llmcord) を基盤として開発された多機能Discordボットです。大規模言語モデル (LLM) との対話、高機能な音楽再生、画像認識、Akinatorやガチャシミュレーターなどのエンターテイメント機能、そして便利なサーバーユーティリティを提供します。OpenAI互換APIに対応しており、リモートホスト型やローカルホスト型など、ほぼすべてのLLMと連携可能です。
@@ -21,14 +27,6 @@
 
 ### 🤖 Botをあなたのサーバーに招待 / Invite Plana to Your Server
 
-<h3 align="center">
-  <a href="https://discord.com/oauth2/authorize?client_id=1031673203774464160&permissions=551906765824&scope=bot" title="Click to invite PLANA to your server!">
-    <strong>➡️ PLANAをあなたのサーバーに招待する ⬅️</strong>
-  </a>
-</h3>
-
-*   セルフホストを行う場合は、`config.yaml` にご自身のBotの招待URLを設定してください。
-*   If you are self-hosting, please set your bot's invitation URL in `config.yaml`.
 
 ### 💬 サポート / Support:
 *   Botの操作に関する質問や不具合報告は、`/support` コマンドで表示される連絡先までお願いします。
@@ -48,6 +46,10 @@ Start a conversation with the AI by mentioning the bot (`@PLANA`) or replying to
 *   **ツール利用 (ウェブ検索) / Tool Use (Web Search):** AIが必要と判断した場合、インターネットで情報を検索して応答に利用します (Google AI Studio APIキーが必要です)。
 *   **会話履歴の管理 / Conversation History Management:** `/clear_history` コマンドで現在のチャンネルの会話履歴をリセットできます。
 *   **カスタマイズ可能なAIパーソナリティ / Customizable AI Personality:** `config.yaml` のシステムプロンプトを編集することで、AIの性格や応答スタイルを自由に変更できます。
+
+<p align="center">
+  <img src="https://i.imgur.com/wjdPNFQ.png" alt="PLANA MODEL CHANGE">
+</p>
 
 ### 🎶 高機能な音楽再生 / Advanced Music Playback
 ボイスチャンネルで高品質な音楽を楽しめます。
