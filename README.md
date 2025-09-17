@@ -6,6 +6,8 @@
   プラナちゃんとおしゃべりしよう！
 </i></h3>
 
+### 🤖 Botをあなたのサーバーに招待 / Invite Plana to Your Server
+
 <h3 align="center">
   <a href="https://discord.com/oauth2/authorize?client_id=1031673203774464160&permissions=551906765824&scope=bot" title="Click to invite PLANA to your server!">
     <strong>➡️ PLANAをあなたのサーバーに招待する ⬅️</strong>
@@ -25,7 +27,7 @@
 
 ## 🚀 クイックスタート / Quick Start
 
-### 🤖 Botをあなたのサーバーに招待 / Invite Plana to Your Server
+
 
 
 ### 💬 サポート / Support:
