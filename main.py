@@ -2,17 +2,19 @@ import discord
 from discord.ext import commands, tasks
 import yaml
 import logging
-import asyncio
 import os
 import shutil
 
-# --- ロギング設定 ---
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - [%(funcName)s] %(message)s')
+# --- ロギング設定の初期化（後でsetup_hookで上書きするため、ここでは最低限に） ---
+# discord.pyや他のライブラリのログレベル設定は残しておく
 logging.getLogger('discord').setLevel(logging.WARNING)
 logging.getLogger('openai').setLevel(logging.WARNING)
 logging.getLogger('google.generativeai').setLevel(logging.WARNING)
 logging.getLogger('google.ai').setLevel(logging.WARNING)
 logging.getLogger('httpx').setLevel(logging.WARNING)
+
+# --- カスタムDiscordロギングハンドラをインポート ---
+from services.discord_handler import DiscordLogHandler
 
 COGS_DIRECTORY_NAME = "cogs"
 CONFIG_FILE = 'config.yaml'
@@ -26,10 +28,11 @@ class Shittim(commands.Bot):
         # ステータスローテーション用の設定
         self.status_templates = []
         self.status_index = 0
-        # self.loop.set_debug(True)
+        # self.loop.set_debug(True) # デバッグが必要な場合にコメント解除
 
     async def setup_hook(self):
         """Botの初期セットアップ（ログイン後、接続準備完了前）"""
+        # --- config.yaml の存在確認とコピー ---
         if not os.path.exists(CONFIG_FILE):
             if os.path.exists(DEFAULT_CONFIG_FILE):
                 try:
@@ -38,27 +41,65 @@ class Shittim(commands.Bot):
                         f"{CONFIG_FILE} が見つからなかったため、{DEFAULT_CONFIG_FILE} をコピーして生成しました。")
                     logging.warning(f"生成された {CONFIG_FILE} を確認し、ボットトークンやAPIキーを設定してください。")
                 except Exception as e_copy:
-                    logging.critical(
-                        f"{DEFAULT_CONFIG_FILE} から {CONFIG_FILE} のコピー中にエラーが発生しました: {e_copy}",
-                        exc_info=True)
+                    # ここではまだDiscordロギングは設定されていないので、標準出力にエラーを出す
+                    print(
+                        f"CRITICAL: {DEFAULT_CONFIG_FILE} から {CONFIG_FILE} のコピー中にエラーが発生しました: {e_copy}")
                     raise RuntimeError(f"{CONFIG_FILE} の生成に失敗しました。")
             else:
-                logging.critical(f"{CONFIG_FILE} も {DEFAULT_CONFIG_FILE} も見つかりません。設定ファイルがありません。")
+                print(f"CRITICAL: {CONFIG_FILE} も {DEFAULT_CONFIG_FILE} も見つかりません。設定ファイルがありません。")
                 raise FileNotFoundError(f"{CONFIG_FILE} も {DEFAULT_CONFIG_FILE} も見つかりません。")
 
-        # config.yaml を読み込む
+        # --- config.yaml を読み込む ---
         try:
             with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
                 self.config = yaml.safe_load(f)
                 if not self.config:
-                    logging.critical(f"{CONFIG_FILE} が空または無効です。ボットを起動できません。")
+                    print(f"CRITICAL: {CONFIG_FILE} が空または無効です。ボットを起動できません。")
                     raise RuntimeError(f"{CONFIG_FILE} が空または無効です。")
             logging.info(f"{CONFIG_FILE} を正常に読み込みました。")
         except Exception as e:
-            logging.critical(f"{CONFIG_FILE} の読み込みまたは解析中にエラーが発生しました: {e}", exc_info=True)
+            print(f"CRITICAL: {CONFIG_FILE} の読み込みまたは解析中にエラーが発生しました: {e}")
             raise
 
-        # Cogのロード
+        # ================================================================
+        # ===== ここから新しいロギング設定を追加 =========================
+        # ================================================================
+        log_format = logging.Formatter(
+            '%(asctime)s - %(name)s - %(levelname)s - [%(funcName)s] %(message)s'
+        )
+
+        # ルートロガーを取得
+        root_logger = logging.getLogger()
+        root_logger.setLevel(logging.INFO)  # ボット全体のログレベルを設定
+
+        # 既存のハンドラをクリア（basicConfigで設定されたものなど）
+        # これにより、重複したハンドラ追加を防ぎ、完全に制御下に置く
+        root_logger.handlers = []
+
+        # 1. コンソールへのハンドラ
+        console_handler = logging.StreamHandler()
+        console_handler.setFormatter(log_format)
+        root_logger.addHandler(console_handler)
+
+        # 2. Discordへのカスタムハンドラ
+        log_channel_id = self.config.get('log_channel_id')
+        if log_channel_id:
+            try:
+                discord_handler = DiscordLogHandler(bot=self, channel_id=int(log_channel_id))
+                # DiscordにはINFO以上のログを送信する
+                discord_handler.setLevel(logging.INFO)
+                discord_handler.setFormatter(log_format)
+                root_logger.addHandler(discord_handler)
+                logging.info(f"DiscordへのロギングをチャンネルID {log_channel_id} で有効化しました。")
+            except (ValueError, TypeError) as e:
+                logging.error(f"config.yamlの log_channel_id が不正です: {e}")
+        else:
+            logging.warning("config.yamlに log_channel_id が設定されていないため、Discordへのロギングは無効です。")
+        # ================================================================
+        # ===== ロギング設定ここまで =====================================
+        # ================================================================
+
+        # --- Cogのロード ---
         if self.config.get('enabled_cogs') and isinstance(self.config['enabled_cogs'], list):
             for cog_name in self.config['enabled_cogs']:
                 cog_module_path = f"{COGS_DIRECTORY_NAME}.{str(cog_name).strip()}"
@@ -71,7 +112,7 @@ class Shittim(commands.Bot):
             logging.warning(
                 "config.yamlに 'enabled_cogs' が設定されていないか、リスト形式ではありません。Cogはロードされません。")
 
-        # スラッシュコマンドの同期
+        # --- スラッシュコマンドの同期 ---
         if self.config.get('sync_slash_commands', True):
             try:
                 test_guild_id = self.config.get('test_guild_id')
@@ -254,30 +295,32 @@ if __name__ == "__main__":
 ╚═╝     ╚══════╝╚═╝  ╚═╝╚═╝  ╚═══╝╚═╝  ╚═╝
     """
     print(plana_art)
+
+    # ここでのconfig読み込みは、ボットトークン取得のためのみ
     initial_config = {}
     try:
         if not os.path.exists(CONFIG_FILE) and os.path.exists(DEFAULT_CONFIG_FILE):
             try:
                 shutil.copyfile(DEFAULT_CONFIG_FILE, CONFIG_FILE)
-                logging.info(f"メイン実行: {CONFIG_FILE} が見つからず、{DEFAULT_CONFIG_FILE} からコピー生成しました。")
+                # ここではまだロガーが完全に設定されていないため、printを使用
+                print(f"INFO: メイン実行: {CONFIG_FILE} が見つからず、{DEFAULT_CONFIG_FILE} からコピー生成しました。")
             except Exception as e_copy_main:
-                logging.critical(
-                    f"メイン実行: {DEFAULT_CONFIG_FILE} から {CONFIG_FILE} のコピー中にエラー: {e_copy_main}",
-                    exc_info=True)
+                print(
+                    f"CRITICAL: メイン実行: {DEFAULT_CONFIG_FILE} から {CONFIG_FILE} のコピー中にエラー: {e_copy_main}")
                 exit(1)
 
         with open(CONFIG_FILE, 'r', encoding='utf-8') as f_main_init:
             initial_config = yaml.safe_load(f_main_init)
             if not initial_config or not isinstance(initial_config, dict):
-                logging.critical(f"メイン実行: {CONFIG_FILE} が空または無効な形式です。")
+                print(f"CRITICAL: メイン実行: {CONFIG_FILE} が空または無効な形式です。")
                 exit(1)
     except Exception as e_main:
-        logging.critical(f"メイン実行: {CONFIG_FILE} の読み込みまたは解析中にエラー: {e_main}。")
+        print(f"CRITICAL: メイン実行: {CONFIG_FILE} の読み込みまたは解析中にエラー: {e_main}。")
         exit(1)
 
     bot_token_val = initial_config.get('bot_token')
     if not bot_token_val or bot_token_val == "YOUR_BOT_TOKEN_HERE":
-        logging.critical(f"{CONFIG_FILE}にbot_tokenが未設定か無効、またはプレースホルダのままです。")
+        print(f"CRITICAL: {CONFIG_FILE}にbot_tokenが未設定か無効、またはプレースホルダのままです。")
         exit(1)
 
     # デフォルトのインテント設定から開始
@@ -306,4 +349,6 @@ if __name__ == "__main__":
     try:
         bot_instance.run(bot_token_val)
     except Exception as e:
+        # ここではロガーが完全に設定されているはずだが、念のためprintも残す
         logging.critical(f"ボットの実行中に致命的なエラーが発生しました: {e}", exc_info=True)
+        print(f"CRITICAL: ボットの実行中に致命的なエラーが発生しました: {e}")
