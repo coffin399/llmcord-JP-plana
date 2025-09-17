@@ -10,7 +10,7 @@
 
 <h3 align="center">
   <a href="https://discord.com/oauth2/authorize?client_id=1031673203774464160&permissions=551906765824&scope=bot" title="Click to invite PLANA to your server!">
-    <strong>➡️ PLANAをあなたのサーバーに招待する ⬅️</strong>
+    <strong>➡️ PLANAをあなたのサーバーに招待する/Click here to invite PLANA ⬅️</strong>
   </a>
 </h3>
 
