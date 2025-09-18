@@ -119,13 +119,13 @@ llm:
 
   # --- エラーメッセージ設定 ---
   error_msg:
-    empty_mention_reply: "はい、ご用件は何でしょうか？"
-    empty_reply: "何かお話しください。"
-    msg_max_image_size: "⚠️ 一度に処理できる画像は {max_images} 枚までです。"
-    ratelimit_error: "⚠️ AIが現在大変混雑しています。しばらく経ってからもう一度お試しください。(Code: {status_code})"
-    api_status_error: "⚠️AIとの通信でエラーが発生しました。(Code: {status_code})"
-    general_error: "⚠️ 予期しないエラーが発生しました。もう一度お試しください。(Code: {status_code})"
-    tool_loop_timeout: "⚠️ツールの処理が複雑すぎたため、応答を生成できませんでした。(Code: {status_code})"
+    empty_mention_reply: "はい、ご用件は何でしょうか？\nYes, how can I help you?"
+    empty_reply: "何かお話しください。\nPlease say something."
+    msg_max_image_size: "⚠️ 一度に処理できる画像は {max_images} 枚までです。\n⚠️ You can only process up to {max_images} images at a time."
+    ratelimit_error: "⚠️ AIが現在大変混雑しています。しばらく経ってからもう一度お試しください。または、他のモデルを試してください`/switch-models`\n⚠️ The AI is very busy right now. Please try again later, or try a different model: `/switch-models` (Code: {status_code})"
+    api_status_error: "⚠️AIとの通信でエラーが発生しました。\n⚠️ An error occurred while communicating with the AI. (Code: {status_code})"
+    general_error: "⚠️ 予期しないエラーが発生しました。もう一度お試しください。\n⚠️ An unexpected error occurred. Please try again. (Code: {status_code})"
+    tool_loop_timeout: "⚠️ツールの処理が複雑すぎたため、応答を生成できませんでした。\n⚠️ Failed to generate a response because the tool's operation was too complex. (Code: {status_code})"
 
 # =============================================================================
 # Slash Command Cog Settings (汎用スラッシュコマンド)
