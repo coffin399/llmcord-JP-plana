@@ -9,7 +9,9 @@ allowed_channel_ids: [] # Botが反応するチャンネルIDのリスト (空�
 # allowed_role_ids: []  # [廃止] 特権インテント回避のため、この設定は現在使用されません
 admin_user_ids: []    # Botの管理者ユーザーIDのリスト (将来的な管理者用コマンドのため)
 bot_invite_url: https://discord.com/oauth2/authorize?client_id=1031673203774464160&permissions=551906765824&scope=bot
-log_channel_id: 000000000000000 # ログを送信したいチャンネルのIDに置き換える
+log_channel_ids:
+ - 100000000000000000 # メインログチャンネル
+ - 200000000000000000 # サブ
 
 # =============================================================================
 # Enabled Cogs (読み込む機能を指定します)
