@@ -5,6 +5,7 @@ import logging
 import datetime
 from typing import Optional
 import random  # ガチャ機能のために追加
+import re  # nDnダイスロールのために追加
 
 logger = logging.getLogger(__name__)
 
@@ -40,22 +41,7 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
                 prefix = cfg_prefix
         return prefix
 
-    def _get_single_recruit(self, guaranteed_star2: bool = False) -> int:
-        """
-        1回分の募集処理を行い、レアリティを返す。
-        """
-        if guaranteed_star2:
-            rarity_roll = random.uniform(0, 21.5)
-            return 3 if rarity_roll < 3.0 else 2
-        else:
-            rarity_roll = random.uniform(0, 100)
-            if rarity_roll < 3.0:
-                return 3
-            elif rarity_roll < 21.5:
-                return 2
-            else:
-                return 1
-
+    # (gacha, diceroll, roll などのコマンドは変更なし)
     @app_commands.command(name="gacha",
                           description="ブルーアーカイブ風の生徒募集（ガチャ）を行います。/ Recruits students like in Blue Archive.")
     @app_commands.describe(rolls="募集回数を選択します。/ Select the number of recruitments.")
@@ -106,6 +92,261 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
 
         await interaction.followup.send(embed=embed)
         logger.info(f"/gacha ({num_rolls}回) が実行されました。 (User: {interaction.user.id})")
+
+    @app_commands.command(name="diceroll",
+                          description="指定された範囲でダイスを振ります。/ Rolls a dice within the specified range.")
+    @app_commands.describe(
+        min_value="ダイスの最小値 / The minimum value of the dice",
+        max_value="ダイスの最大値 / The maximum value of the dice"
+    )
+    async def diceroll(self, interaction: discord.Interaction, min_value: int, max_value: int):
+        """指定された範囲でダイスを振るコマンド"""
+        # 入力値のバリデーション
+        if min_value > max_value:
+            await interaction.response.send_message(
+                "エラー: 最小値は最大値より大きくできません。\nError: The minimum value cannot be greater than the maximum value.",
+                ephemeral=True
+            )
+            return
+
+        # ダイスロールの実行
+        result = random.randint(min_value, max_value)
+
+        # 結果をEmbedで表示
+        embed = discord.Embed(
+            title="🎲 ダイスロール結果 / Dice Roll Result",
+            description=f"{interaction.user.mention} がダイスを振りました！",
+            color=discord.Color.green()
+        )
+        embed.add_field(name="指定範囲 / Range", value=f"`{min_value}` ～ `{max_value}`", inline=False)
+        embed.add_field(name="出た目 / Result", value=f"**{result}**", inline=False)
+        embed.timestamp = datetime.datetime.now(datetime.timezone.utc)
+
+        await interaction.response.send_message(embed=embed)
+        logger.info(
+            f"/diceroll が実行されました。 (User: {interaction.user.id}, Range: {min_value}-{max_value}, Result: {result})")
+
+    @app_commands.command(name="roll",
+                          description="nDn形式でダイスを振ります (例: 2d6+3)。/ Rolls dice in nDn format (e.g., 2d6+3).")
+    @app_commands.describe(
+        expression="ダイスの表記 (例: 1d100, 2d6+5, 3d8-2) / Dice notation (e.g., 1d100, 2d6+5, 3d8-2)"
+    )
+    async def roll(self, interaction: discord.Interaction, expression: str):
+        """nDn形式でダイスを振るコマンド"""
+        match = re.match(r'(\d*)d(\d+)\s*([+-]\s*\d+)?', expression.lower().strip())
+
+        if not match:
+            await interaction.response.send_message(
+                "エラー: 不正なダイス表記です。`1d100`や`2d6+5`のような形式で入力してください。\n"
+                "Error: Invalid dice notation. Please use a format like `1d100` or `2d6+5`.",
+                ephemeral=True
+            )
+            return
+
+        dice_count_str, dice_sides_str, modifier_str = match.groups()
+        dice_count = int(dice_count_str) if dice_count_str else 1
+        dice_sides = int(dice_sides_str)
+        modifier = int(modifier_str.replace(" ", "")) if modifier_str else 0
+
+        MAX_DICE_COUNT = 100
+        MAX_DICE_SIDES = 10000
+        if not (1 <= dice_count <= MAX_DICE_COUNT):
+            await interaction.response.send_message(
+                f"エラー: ダイスの数は1から{MAX_DICE_COUNT}の間で指定してください。\n"
+                f"Error: The number of dice must be between 1 and {MAX_DICE_COUNT}.",
+                ephemeral=True
+            )
+            return
+        if not (1 <= dice_sides <= MAX_DICE_SIDES):
+            await interaction.response.send_message(
+                f"エラー: ダイスの面は1から{MAX_DICE_SIDES}の間で指定してください。\n"
+                f"Error: The number of sides must be between 1 and {MAX_DICE_SIDES}.",
+                ephemeral=True
+            )
+            return
+
+        rolls = [random.randint(1, dice_sides) for _ in range(dice_count)]
+        total = sum(rolls)
+        final_result = total + modifier
+
+        embed = discord.Embed(
+            title="🎲 ダイスロール結果 / Dice Roll Result",
+            description=f"{interaction.user.mention} がダイスを振りました！",
+            color=discord.Color.purple()
+        )
+
+        input_expression = f"{dice_count}d{dice_sides}"
+        if modifier > 0:
+            input_expression += f" + {modifier}"
+        elif modifier < 0:
+            input_expression += f" - {abs(modifier)}"
+        embed.add_field(name="入力 / Input", value=f"`{input_expression}`", inline=False)
+
+        rolls_str = ", ".join(map(str, rolls))
+        if len(rolls_str) > 1000:
+            rolls_str = rolls_str[:997] + "..."
+        embed.add_field(name="各ダイスの出目 / Individual Rolls", value=f"[{rolls_str}]", inline=False)
+
+        result_str = f"**{final_result}**"
+        if modifier != 0 or dice_count > 1:
+            details = f" (合計: {total}"
+            if modifier > 0:
+                details += f" + {modifier}"
+            elif modifier < 0:
+                details += f" - {abs(modifier)}"
+            details += ")"
+            result_str += details
+
+        embed.add_field(name="最終結果 / Final Result", value=result_str, inline=False)
+        embed.timestamp = datetime.datetime.now(datetime.timezone.utc)
+
+        await interaction.response.send_message(embed=embed)
+        logger.info(
+            f"/roll が実行されました。 (User: {interaction.user.id}, Expression: {expression}, Result: {final_result})")
+
+    ### ▼▼▼ 変更箇所 ▼▼▼ ###
+    @app_commands.command(name="check",
+                          description="ダイスロールと、任意で条件判定を行います。/ Rolls dice and optionally performs a check.")
+    @app_commands.describe(
+        expression="ダイスの表記 (例: 1d100, 2d6+5) / Dice notation (e.g., 1d100, 2d6+5)",
+        condition="[任意] 比較条件 / [Optional] Comparison condition",
+        target="[任意] 目標値 / [Optional] Target number"
+    )
+    @app_commands.choices(condition=[
+        app_commands.Choice(name="< (より小さい)", value="<"),
+        app_commands.Choice(name="<= (以下)", value="<="),
+        app_commands.Choice(name="> (より大きい)", value=">"),
+        app_commands.Choice(name=">= (以上)", value=">="),
+        app_commands.Choice(name="= (等しい)", value="=="),
+    ])
+    async def check(self,
+                    interaction: discord.Interaction,
+                    expression: str,
+                    condition: Optional[str] = None,
+                    target: Optional[int] = None):
+        """ダイスロールと、任意で条件判定を行うコマンド"""
+
+        # --- 引数のバリデーション ---
+        if (condition is None and target is not None) or (condition is not None and target is None):
+            await interaction.response.send_message(
+                "エラー: 判定を行うには、`条件`と`目標値`の両方を指定してください。\n"
+                "Error: To perform a check, you must specify both a `condition` and a `target` number.",
+                ephemeral=True
+            )
+            return
+
+        # --- ダイス表記のパースとロール ---
+        match = re.match(r'(\d*)d(\d+)\s*([+-]\s*\d+)?', expression.lower().strip())
+        if not match:
+            await interaction.response.send_message(
+                "エラー: 不正なダイス表記です。`1d100`や`2d6+5`のような形式で入力してください。\n"
+                "Error: Invalid dice notation. Please use a format like `1d100` or `2d6+5`.",
+                ephemeral=True
+            )
+            return
+
+        dice_count_str, dice_sides_str, modifier_str = match.groups()
+        dice_count = int(dice_count_str) if dice_count_str else 1
+        dice_sides = int(dice_sides_str)
+        modifier = int(modifier_str.replace(" ", "")) if modifier_str else 0
+
+        MAX_DICE_COUNT = 100
+        MAX_DICE_SIDES = 10000
+        if not (1 <= dice_count <= MAX_DICE_COUNT) or not (1 <= dice_sides <= MAX_DICE_SIDES):
+            await interaction.response.send_message(
+                f"エラー: ダイスの数(1〜{MAX_DICE_COUNT})または面(1〜{MAX_DICE_SIDES})が不正です。\n"
+                f"Error: Invalid number of dice (1-{MAX_DICE_COUNT}) or sides (1-{MAX_DICE_SIDES}).",
+                ephemeral=True
+            )
+            return
+
+        rolls = [random.randint(1, dice_sides) for _ in range(dice_count)]
+        total = sum(rolls)
+        final_result = total + modifier
+
+        # --- 結果の表示 (判定の有無で分岐) ---
+        is_check = condition is not None and target is not None
+
+        if is_check:
+            # 判定ありの場合
+            success = False
+            # targetがNoneでないことをis_checkで確認済みなので、型チェッカーを黙らせる
+            target_val = target or 0
+            if condition == "<":
+                success = final_result < target_val
+            elif condition == "<=":
+                success = final_result <= target_val
+            elif condition == ">":
+                success = final_result > target_val
+            elif condition == ">=":
+                success = final_result >= target_val
+            elif condition == "==":
+                success = final_result == target_val
+
+            status_text = "Success!" if success else "Failure!"
+            status_emoji = "✅" if success else "❌"
+            embed_color = discord.Color.green() if success else discord.Color.red()
+
+            embed = discord.Embed(
+                title=f"{status_emoji} 判定ロール結果 / Check Roll Result",
+                description=f"{interaction.user.mention} が判定を行いました！",
+                color=embed_color
+            )
+
+            dice_expression = f"{dice_count}d{dice_sides}"
+            if modifier > 0:
+                dice_expression += f"+{modifier}"
+            elif modifier < 0:
+                dice_expression += f"{modifier}"
+
+            rolls_str = ", ".join(map(str, rolls))
+            display_condition = condition.replace("==", "=")
+
+            result_details = (
+                f"**{status_text}** ⟵ `{final_result}` {display_condition} `{target}` "
+                f"⟵ `[{rolls_str}]` {dice_expression}"
+            )
+            embed.add_field(name="結果 / Result", value=result_details, inline=False)
+
+        else:
+            # 判定なしの場合 (/roll と同じ)
+            embed = discord.Embed(
+                title="🎲 ダイスロール結果 / Dice Roll Result",
+                description=f"{interaction.user.mention} がダイスを振りました！",
+                color=discord.Color.purple()
+            )
+
+            input_expression = f"{dice_count}d{dice_sides}"
+            if modifier > 0:
+                input_expression += f" + {modifier}"
+            elif modifier < 0:
+                input_expression += f" - {abs(modifier)}"
+            embed.add_field(name="入力 / Input", value=f"`{input_expression}`", inline=False)
+
+            rolls_str = ", ".join(map(str, rolls))
+            if len(rolls_str) > 1000: rolls_str = rolls_str[:997] + "..."
+            embed.add_field(name="各ダイスの出目 / Individual Rolls", value=f"[{rolls_str}]", inline=False)
+
+            result_str = f"**{final_result}**"
+            if modifier != 0 or dice_count > 1:
+                details = f" (合計: {total}"
+                if modifier > 0:
+                    details += f" + {modifier}"
+                elif modifier < 0:
+                    details += f" - {abs(modifier)}"
+                details += ")"
+                result_str += details
+            embed.add_field(name="最終結果 / Final Result", value=result_str, inline=False)
+
+        embed.timestamp = datetime.datetime.now(datetime.timezone.utc)
+        await interaction.response.send_message(embed=embed)
+
+        log_message = (f"/check が実行されました。 (User: {interaction.user.id}, Expression: {expression}"
+                       f"{f' {condition} {target}' if is_check else ''}, Result: {final_result}"
+                       f"{f', Success: {success}' if is_check else ''})")
+        logger.info(log_message)
+
+    ### ▲▲▲ 変更箇所 ▲▲▲ ###
 
     @app_commands.command(name="ping",
                           description="Botの現在のレイテンシを表示します。/ Shows the bot's current latency.")
@@ -183,21 +424,25 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
         embed.add_field(name="ユーザー名 / Username", value=username_display, inline=True)
         embed.add_field(name="ユーザーID / User ID", value=target_user.id, inline=True)
 
-        bot_status_ja = "はい" if target_user.bot else "いいえ"
-        bot_status_en = "Yes" if target_user.bot else "No"
-        embed.add_field(name="Botアカウントか / Bot Account?", value=f"{bot_status_ja} / {bot_status_en}", inline=True)
+        # Botかどうかの表示は、target_user.botで判定
+        is_bot = "はい" if target_user.bot else "いいえ"
+        is_bot_en = "Yes" if target_user.bot else "No"
+        embed.add_field(name="Botアカウントか / Bot Account?", value=f"{is_bot} / {is_bot_en}", inline=True)
 
         created_at_text = discord.utils.format_dt(target_user.created_at, style='F')
         embed.add_field(name="アカウント作成日時 / Account Created", value=created_at_text, inline=False)
 
+        # サーバー固有の情報を表示
         if interaction.guild and isinstance(target_user, discord.Member):
             member: discord.Member = target_user
 
+            # サーバー参加日時
             joined_at_text = "不明 / Unknown"
             if member.joined_at:
                 joined_at_text = discord.utils.format_dt(member.joined_at, style='F')
             embed.add_field(name="サーバー参加日時 / Joined Server", value=joined_at_text, inline=False)
 
+            # ロール一覧
             roles = [r.mention for r in reversed(member.roles) if r.name != "@everyone"]
             roles_count = len(roles)
             roles_display_value = "なし / None"
@@ -210,6 +455,53 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
             embed.add_field(name=f"ロール ({roles_count}) / Roles ({roles_count})", value=roles_display_value,
                             inline=False)
 
+            # --- 評価セクション (対象がBotか人間かで分岐) ---
+            if member.bot:
+                # Botの場合の評価
+                evaluation_lines = []
+                if member.public_flags.verified_bot:
+                    evaluation_lines.append("✅ **認証済みBot** / Verified Bot")
+                else:
+                    evaluation_lines.append("❌ **未認証Bot** / Unverified Bot")
+
+                if member.guild_permissions.administrator:
+                    evaluation_lines.append("👑 **管理者権限** / Administrator Privileges")
+                else:
+                    evaluation_lines.append("🔧 **標準権限** / Standard Privileges")
+
+                embed.add_field(name="Botの評価 / Bot Evaluation", value="\n".join(evaluation_lines), inline=False)
+
+            else:
+                # 人間の場合の評価
+                # 参加順位
+                if member.joined_at:
+                    sorted_members = sorted(interaction.guild.members,
+                                            key=lambda m: m.joined_at or datetime.datetime.max.replace(
+                                                tzinfo=datetime.timezone.utc))
+                    try:
+                        join_position = sorted_members.index(member) + 1
+                        embed.add_field(name="参加順位 / Join Rank", value=f"{join_position}番目 / th", inline=True)
+                    except ValueError:
+                        pass  # メンバーが見つからない場合は何もしない
+
+                # 重要な権限
+                perms = member.guild_permissions
+                notable_perms_ja = {
+                    "管理者": perms.administrator, "サーバー管理": perms.manage_guild,
+                    "ロール管理": perms.manage_roles, "追放": perms.kick_members, "BAN": perms.ban_members,
+                }
+                user_perms = [name for name, has_perm in notable_perms_ja.items() if has_perm]
+                perms_display = "なし / None"
+                if user_perms:
+                    perms_display = "✅ **管理者**" if "管理者" in user_perms else ", ".join(user_perms)
+                embed.add_field(name="重要な権限 / Key Permissions", value=perms_display, inline=False)
+
+                # タイムアウト情報
+                if member.timed_out_until:
+                    timeout_text = discord.utils.format_dt(member.timed_out_until, style='R')
+                    embed.add_field(name="⏳ タイムアウト中 / Timed Out", value=f"終了: {timeout_text}", inline=True)
+
+            # ニックネームとブースト情報 (共通)
             if member.nick:
                 embed.add_field(name="ニックネーム / Nickname", value=member.nick, inline=True)
             if member.premium_since:
@@ -219,6 +511,7 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
         await interaction.response.send_message(embed=embed, ephemeral=False)
         logger.info(f"/userinfo が実行されました。 (TargetUser: {target_user.id}, Requester: {interaction.user.id})")
 
+    # (avatar, arona, plana, support, invite などのコマンドは変更なし)
     @app_commands.command(name="avatar",
                           description="指定されたユーザーのアバター画像URLを表示します。/ Displays the avatar of the specified user.")
     @app_commands.describe(
@@ -363,7 +656,7 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
     @app_commands.command(name="help",
                           description="Botのヘルプ情報とAI利用ガイドラインを表示します。/ Displays help and AI usage guidelines.")
     async def help_slash_command(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=False)  # 誰でも見れるようにephemeralはFalse
+        await interaction.response.defer(ephemeral=False)
 
         bot_name_ja = self.bot.user.name if self.bot.user else "当Bot"
         bot_name_en = self.bot.user.name if self.bot.user else "This Bot"
@@ -406,6 +699,7 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
         main_features_en_val = (
             "- **AI Chat (LLM):** Mention the bot to talk with AI. It can also recognize images (if model supports).\n"
             "- **Music Playback:** Play music in voice channels, manage queues, and perform various operations.\n"
+
             "- **Image Search:** Display cat pictures.\n"
             "- **Information Display:** Show server info, user info, bot latency, etc."
         )
@@ -480,7 +774,11 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
 
         # --- 3. その他の便利なコマンド ---
         utility_title_ja = "便利なコマンド"
+        ### ▼▼▼ 変更箇所 ▼▼▼ ###
         utility_cmds_ja = [
+            f"`/check <表記> [条件] [目標値]` - ダイスロールと任意での条件判定を行います。",
+            f"`/roll <表記>` - nDn形式でダイスを振ります (例: 2d6+3)。",
+            f"`/diceroll <最小値> <最大値>` - 指定範囲でダイスを振ります。",
             f"`/gacha` - ブルーアーカイブ風の募集（ガチャ）をシミュレートします。",
             f"`/ping` - Botの応答速度を確認",
             f"`/serverinfo` - サーバー情報を表示",
@@ -491,6 +789,9 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
             f"`/support` - 開発者への連絡方法を表示"
         ]
         utility_cmds_en = [
+            f"`/check <notation> [cond] [target]` - Rolls dice and optionally performs a check.",
+            f"`/roll <notation>` - Rolls dice in nDn format (e.g., 2d6+3).",
+            f"`/diceroll <min_value> <max_value>` - Rolls a dice in a specified range.",
             f"`/gacha` - Simulates student recruitment (gacha) like in Blue Archive.",
             f"`/ping` - Check bot's latency",
             f"`/serverinfo` - Display server info",
@@ -500,6 +801,7 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
             f"`/meow` - Displays a random cat picture",
             f"`/support` - Shows how to contact the developer"
         ]
+        ### ▲▲▲ 変更箇所 ▲▲▲ ###
 
         if self.plana_repository:
             utility_cmds_ja.append(f"`/plana` - Plana (Bot)リポジトリ")
