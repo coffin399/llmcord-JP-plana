@@ -4,9 +4,10 @@ import yaml
 import logging
 import os
 import shutil
+from discord.gateway import DiscordWebSocket # モバイルステータス用にインポート
+import sys                                  # モバイルステータス用にインポート
 
-# --- ロギング設定の初期化（後でsetup_hookで上書きするため、ここでは最低限に） ---
-# discord.pyや他のライブラリのログレベル設定は残しておく
+# --- ロギング設定の初期化 ---
 logging.getLogger('discord').setLevel(logging.WARNING)
 logging.getLogger('openai').setLevel(logging.WARNING)
 logging.getLogger('google.generativeai').setLevel(logging.WARNING)
@@ -21,14 +22,27 @@ CONFIG_FILE = 'config.yaml'
 DEFAULT_CONFIG_FILE = 'config.default.yaml'
 
 
+# --- モバイルステータス用のカスタムWebSocketクラス ---
+class MobileWebSocket(DiscordWebSocket):
+    """
+    Botをモバイルステータスにするための、より強力なカスタムWebSocketクラス
+    """
+    async def send_as_json(self, data):
+        if data.get('op') == self.IDENTIFY:
+            data['d']['properties'] = {
+                '$os': sys.platform,
+                '$browser': 'Discord Android',
+                '$device': 'Discord Android',
+            }
+        await super().send_as_json(data)
+
+
 class Shittim(commands.Bot):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.config = None
-        # ステータスローテーション用の設定
         self.status_templates = []
         self.status_index = 0
-        # self.loop.set_debug(True) # デバッグが必要な場合にコメント解除
 
     async def setup_hook(self):
         """Botの初期セットアップ（ログイン後、接続準備完了前）"""
@@ -37,13 +51,10 @@ class Shittim(commands.Bot):
             if os.path.exists(DEFAULT_CONFIG_FILE):
                 try:
                     shutil.copyfile(DEFAULT_CONFIG_FILE, CONFIG_FILE)
-                    logging.info(
-                        f"{CONFIG_FILE} が見つからなかったため、{DEFAULT_CONFIG_FILE} をコピーして生成しました。")
+                    logging.info(f"{CONFIG_FILE} が見つからなかったため、{DEFAULT_CONFIG_FILE} をコピーして生成しました。")
                     logging.warning(f"生成された {CONFIG_FILE} を確認し、ボットトークンやAPIキーを設定してください。")
                 except Exception as e_copy:
-                    # ここではまだDiscordロギングは設定されていないので、標準出力にエラーを出す
-                    print(
-                        f"CRITICAL: {DEFAULT_CONFIG_FILE} から {CONFIG_FILE} のコピー中にエラーが発生しました: {e_copy}")
+                    print(f"CRITICAL: {DEFAULT_CONFIG_FILE} から {CONFIG_FILE} のコピー中にエラーが発生しました: {e_copy}")
                     raise RuntimeError(f"{CONFIG_FILE} の生成に失敗しました。")
             else:
                 print(f"CRITICAL: {CONFIG_FILE} も {DEFAULT_CONFIG_FILE} も見つかりません。設定ファイルがありません。")
@@ -62,18 +73,11 @@ class Shittim(commands.Bot):
             raise
 
         # ================================================================
-        # ===== ここから新しいロギング設定を追加 =========================
+        # ===== ロギング設定 =============================================
         # ================================================================
-        log_format = logging.Formatter(
-            '%(asctime)s - %(name)s - %(levelname)s - [%(funcName)s] %(message)s'
-        )
-
-        # ルートロガーを取得
+        log_format = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - [%(funcName)s] %(message)s')
         root_logger = logging.getLogger()
-        root_logger.setLevel(logging.INFO)  # ボット全体のログレベルを設定
-
-        # 既存のハンドラをクリア（basicConfigで設定されたものなど）
-        # これにより、重複したハンドラ追加を防ぎ、完全に制御下に置く
+        root_logger.setLevel(logging.INFO)
         root_logger.handlers = []
 
         # 1. コンソールへのハンドラ
@@ -81,20 +85,29 @@ class Shittim(commands.Bot):
         console_handler.setFormatter(log_format)
         root_logger.addHandler(console_handler)
 
-        # 2. Discordへのカスタムハンドラ
-        log_channel_id = self.config.get('log_channel_id')
-        if log_channel_id:
+        # 2. Discordへのカスタムハンドラ (複数チャンネル対応)
+        log_channel_ids = self.config.get('log_channel_ids')
+        if not log_channel_ids:
+            single_channel_id = self.config.get('log_channel_id')
+            if single_channel_id:
+                log_channel_ids = [single_channel_id]
+                logging.warning("設定 'log_channel_id' は非推奨です。今後は 'log_channel_ids' (リスト形式) を使用してください。")
+
+        if log_channel_ids and isinstance(log_channel_ids, list):
             try:
-                discord_handler = DiscordLogHandler(bot=self, channel_id=int(log_channel_id))
-                # DiscordにはINFO以上のログを送信する
-                discord_handler.setLevel(logging.INFO)
-                discord_handler.setFormatter(log_format)
-                root_logger.addHandler(discord_handler)
-                logging.info(f"DiscordへのロギングをチャンネルID {log_channel_id} で有効化しました。")
+                valid_ids = [int(cid) for cid in log_channel_ids if cid]
+                if valid_ids:
+                    discord_handler = DiscordLogHandler(bot=self, channel_ids=valid_ids)
+                    discord_handler.setLevel(logging.INFO)
+                    discord_handler.setFormatter(log_format)
+                    root_logger.addHandler(discord_handler)
+                    logging.info(f"DiscordへのロギングをチャンネルID {valid_ids} で有効化しました。")
+                else:
+                    logging.warning("log_channel_ids に有効なチャンネルIDが指定されていません。")
             except (ValueError, TypeError) as e:
-                logging.error(f"config.yamlの log_channel_id が不正です: {e}")
+                logging.error(f"config.yamlの log_channel_ids の値が不正です: {e}")
         else:
-            logging.warning("config.yamlに log_channel_id が設定されていないため、Discordへのロギングは無効です。")
+            logging.warning("config.yamlに log_channel_ids が設定されていないため、Discordへのロギングは無効です。")
         # ================================================================
         # ===== ロギング設定ここまで =====================================
         # ================================================================
@@ -109,8 +122,7 @@ class Shittim(commands.Bot):
                 except Exception as e:
                     logging.error(f"Cog '{cog_module_path}' のロード中にエラーが発生しました: {e}", exc_info=True)
         else:
-            logging.warning(
-                "config.yamlに 'enabled_cogs' が設定されていないか、リスト形式ではありません。Cogはロードされません。")
+            logging.warning("config.yamlに 'enabled_cogs' が設定されていないか、リスト形式ではありません。Cogはロードされません。")
 
         # --- スラッシュコマンドの同期 ---
         if self.config.get('sync_slash_commands', True):
@@ -119,8 +131,7 @@ class Shittim(commands.Bot):
                 if test_guild_id:
                     guild_obj = discord.Object(id=int(test_guild_id))
                     synced_commands = await self.tree.sync(guild=guild_obj)
-                    logging.info(
-                        f"{len(synced_commands)}個のスラッシュコマンドをテストギルド {test_guild_id} に同期しました。")
+                    logging.info(f"{len(synced_commands)}個のスラッシュコマンドをテストギルド {test_guild_id} に同期しました。")
                 else:
                     synced_commands = await self.tree.sync()
                     logging.info(f"{len(synced_commands)}個のグローバルスラッシュコマンドを同期しました。")
@@ -132,19 +143,13 @@ class Shittim(commands.Bot):
     @tasks.loop(seconds=10)
     async def rotate_status(self):
         """10秒ごとにボットのステータスをローテーションさせるタスク"""
-        # status_templatesが空の場合は何もしない
         if not self.status_templates:
             return
-
-        # 現在のテンプレートを取得
         current_template = self.status_templates[self.status_index]
-
-        # メッセージをフォーマット
         status_text = current_template.format(
             guild_count=len(self.guilds),
             prefix=self.config.get('prefix', '!!')
         )
-
         activity_type_str = self.config.get('status_activity_type', 'streaming').lower()
         activity_type_map = {
             'playing': discord.ActivityType.playing,
@@ -154,35 +159,27 @@ class Shittim(commands.Bot):
             'competing': discord.ActivityType.competing,
         }
         selected_activity_type = activity_type_map.get(activity_type_str, discord.ActivityType.streaming)
-
         if selected_activity_type == discord.ActivityType.streaming:
             stream_url = self.config.get('status_stream_url', 'https://www.twitch.tv/coffinnoob299')
             activity = discord.Streaming(name=status_text, url=stream_url)
         else:
             activity = discord.Activity(type=selected_activity_type, name=status_text)
-
         try:
             await self.change_presence(activity=activity, status=discord.Status.online)
         except Exception as e:
             logging.error(f"ステータスの更新中にエラーが発生しました: {e}", exc_info=True)
-
-        # 次のステータスのためにインデックスを更新
         self.status_index = (self.status_index + 1) % len(self.status_templates)
 
     @rotate_status.before_loop
     async def before_rotate_status(self):
-        # ボットが完全に準備完了になるまで待つ
         await self.wait_until_ready()
 
     async def on_ready(self):
         if not self.user:
             logging.error("on_ready: self.user が None です。処理をスキップします。")
             return
-
         logging.info(f'{self.user.name} ({self.user.id}) としてDiscordにログインし、準備が完了しました！')
         logging.info(f"現在 {len(self.guilds)} サーバーに参加しています。")
-
-        # config.yamlからステータスのリストを取得、なければデフォルト値を使用
         self.status_templates = self.config.get('status_rotation', [
             "plz type /help",
             "operating on {guild_count} servers",
@@ -191,100 +188,37 @@ class Shittim(commands.Bot):
             "SwitchModelsAvailable！",
             "type /switch-model"
         ])
-
-        # ステータスローテーションタスクを開始
         self.rotate_status.start()
 
     async def on_guild_join(self, guild: discord.Guild):
-        """ボットがサーバーに参加したときに呼ばれる"""
-        logging.info(
-            f"新しいサーバー '{guild.name}' (ID: {guild.id}) に参加しました。現在のサーバー数: {len(self.guilds)}")
-        # タスクが自動で更新するため、ここでは何もしない
+        logging.info(f"新しいサーバー '{guild.name}' (ID: {guild.id}) に参加しました。現在のサーバー数: {len(self.guilds)}")
 
     async def on_guild_remove(self, guild: discord.Guild):
-        """ボットがサーバーから退出したときに呼ばれる"""
         logging.info(f"サーバー '{guild.name}' (ID: {guild.id}) から退出しました。現在のサーバー数: {len(self.guilds)}")
-        # タスクが自動で更新するため、ここでは何もしない
 
     async def on_command_error(self, ctx: commands.Context, error: commands.CommandError):
         if isinstance(error, commands.CommandNotFound):
             return
         elif isinstance(error, commands.MissingRequiredArgument):
-            await ctx.send(
-                f"引数が不足しています: `{error.param.name}`\n`{ctx.prefix}{ctx.command.qualified_name} {ctx.command.signature}`")
+            await ctx.send(f"引数が不足しています: `{error.param.name}`\n`{ctx.prefix}{ctx.command.qualified_name} {ctx.command.signature}`")
         elif isinstance(error, commands.BadArgument):
-            await ctx.send(
-                f"引数の型が正しくありません。\n`{ctx.prefix}{ctx.command.qualified_name} {ctx.command.signature}`")
+            await ctx.send(f"引数の型が正しくありません。\n`{ctx.prefix}{ctx.command.qualified_name} {ctx.command.signature}`")
         elif isinstance(error, commands.CheckFailure):
             await ctx.send("このコマンドを実行する権限がありません。")
         elif isinstance(error, commands.CommandOnCooldown):
             await ctx.send(f"このコマンドはクールダウン中です。あと {error.retry_after:.2f} 秒お待ちください。")
         elif isinstance(error, commands.ExtensionError):
-            logging.error(
-                f"Cog関連のエラーが発生しました ({ctx.command.cog_name if ctx.command else 'UnknownCog'}): {error}",
-                exc_info=error)
+            logging.error(f"Cog関連のエラーが発生しました ({ctx.command.cog_name if ctx.command else 'UnknownCog'}): {error}", exc_info=error)
             await ctx.send("コマンドの処理中にCogエラーが発生しました。管理者に報告してください。")
         else:
-            logging.error(
-                f"コマンド '{ctx.command.qualified_name if ctx.command else ctx.invoked_with}' の実行中に予期しないエラーが発生しました:",
-                exc_info=error)
+            logging.error(f"コマンド '{ctx.command.qualified_name if ctx.command else ctx.invoked_with}' の実行中に予期しないエラーが発生しました:", exc_info=error)
             try:
                 await ctx.send("コマンドの実行中に予期しないエラーが発生しました。")
             except discord.errors.Forbidden:
                 logging.warning(f"エラーメッセージを送信できませんでした ({ctx.channel.id}): 権限不足")
 
+# (ASCIIアート消しちゃえ)
 
-"""
-=====================================================================++++++++++=====================
-===================+@=======================================&%&+=======++++++==+=++++===============
-====================@=+=====================================%%+=%%%=+==+++++++==++====+=============
-=====================&+++@====================================%%+===%%&+++++++++======++++==========
-=====================@======@==============+@++++++++++++##======%%++++&%%+++++++=+=================
-=====================+=========+=======#++++++++++++++++++++++#====+%%&++++%%++++++======++=========
-======================&=========@===+++++++++++++++++++++++++++++@++==+&%%&++%%++++++=+=============
-======================+==========++======++++++++++++++++++++++++++%++++++++%%%%%+++++++++==========
-=======================@=====%==&+======+%++++++++&&+++++++++++++++==@++++++++++++++++++++==========
-=========================%======@+===+=++@##################@+++++++%=+++++++++++++++++=++==========
-===========================+===#++=++==#######################+++++++@+++++++++++++++++++++=========
-================+@@@@+====@====&++++==####@@+%====+++++++==@@##+=+++++#+++++++++++++++++++==========
-=============@============+#==%++++++@%==+===&+==+++++++++==+++++++++++@+#++++++++++++++====+=======
-============================++++++++%+===+===+%=++++++++++++=+==+++++++=++&+++++++++++++++==========
-========@==================+&+@==+++++==+++++++++++++++++++++++++@+++++++++++++++++++++++++=========
-=========@+===============@&+++==++&+=+++++++&+%++++++++++%++++++++++++++&+&++++++++++++++++========
-===============#@@%+=====&==+++===+#+++++++++&++@+&++=++####@@%=++#=+++++%+#+++++++++++++++++===+===
-========================@+==+++===++++++++++++@==+++=+====+++@+====+++++++++++++++++++++++++++======
-=======================@++==++++++=++=++++=++++@=+=======@++++@====++++++=++++++++++++++++++++======
-======================@+++++==#+++=++++++=======&#=&====+++++++#++=+=+=++++++++++++++++++++++++=====
-=====================&+@+++++++++++++=++=========@++#==@%%++&@@@#%@===+++++++++++++++++++++++++=====
-===================%===+++@++++@++++===+======@==%====@#@@#####+++@%@===+++++++++++++++++++++++++===
-=======================+==+++++=@+=&===+=====+@=&==@%%++######=+++&@&@@==++@++++++++++++++++++++====
-=======================++++++++++@+++==@++=+@+&++++++++++#%%%@++++&&====+@+&++++++++++++++++++=+====
-=======================+++++&@====@@=++++++++++++++++++++++++++++@+======++++++++++++++++++++=======
-=======================+++++=@#&@===#%++++++++++++++++++++++++++@+&=====++#+++++++++++++++++++======
-=======================@++++=%@==&&&&#++&@&+++++++++++++++++@&&+++%====@#+&++++++++++++++++++++=====
-========================@+=+++++==+=@++==++++++@##@##%&&&&&&&&&&+&====%++++++++++++++++++++++++=====
-============================@+#+#=+==+=+&+&%++&&@&+&%&&++%&&&&&&&===#&=+++++++++++++++++++++++======
-============================@&=++++==@++@====@+==#&+%===@&+@#&&++=@&++=%@++++++++++++++++++++++=====
-============================@+++@++#++&%==&===++&&=@+@=&@+=+==@@++++++=@++++++++++++++++++++++======
-============================#++++#+@++&====+@==&#+#@++@+=@+======++++=+#++++++++++++++++++++++======
-============================++++++##@@&+=======+===#==%============@++@++++++++++++++++++++++++=====
-===========================++++++%@&+&&&&&@+@%&===&=@====%@=@#&%&&&+++@+++++++++++++++++++++++======
-===========================#++++++@@&++=====@&#=@===&@=+@=#=====@++++=++++++++++++++++++++++++======
-==========================+++++++++++@======#@@#=======&@+@=====&++++++@++++++++++++++++++++++======
-==========================&++++++++++#======@@++======&=#+======&+++++++%+++++++++++++++++++++======
-=========================#++++++++++++&&&&&&&=====+===#==++&&+&++++++++++#++++++++++++++++++++======
-=========================++++++++++++++++==#==@===&=======#===%++++++++@+=@+++++++++++++++++++++====
-========================@+++++++++++++++===@==+===#====&===+===+++++++++@+++++++++++++++++++++======
-========================+++++++++++++++@===&======@====#===#===%++#+++++++=+++++++++++++++++++======
-=======================++++++++++++++++===@+=@====@=============++&&+++++@&+=@++++++++++++++++======
-=======================++++%&++++++++++===@&======#=====@=+@@===@+@@++++++&++#++++++++++++++++======
-========================++++++++++++@+@==+%%@+++++@%%++++++%%====%+@++++++&%+@++++++++++++==========
-=========================+==++++++++++@==@%%@+++++@@#%++++&@#@==%&+++++++%%+@++++++++++++===========
-==========================@+=++++++++%+@=++++@++++@++&++++&@++=@&&@+====&&@+++++++++++++===+========
-=====================+=====+++@++++@++%+++++@+++++#++++++&&%@&#&&#+++@&+++++++++++++++==============
-=========================+++++++++++++++++++++#@@@@&&%@@@#&&&&&&&&&&&++++++++++++++++===============
-==========================+=+++===+++++++++++++@###&+@##&&&++++++++++++++++++++++=+=================
-"""
 if __name__ == "__main__":
     plana_art = r"""
 ██████╗ ██╗      █████╗ ███╗   ██╗ █████╗ 
@@ -296,19 +230,15 @@ if __name__ == "__main__":
     """
     print(plana_art)
 
-    # ここでのconfig読み込みは、ボットトークン取得のためのみ
     initial_config = {}
     try:
         if not os.path.exists(CONFIG_FILE) and os.path.exists(DEFAULT_CONFIG_FILE):
             try:
                 shutil.copyfile(DEFAULT_CONFIG_FILE, CONFIG_FILE)
-                # ここではまだロガーが完全に設定されていないため、printを使用
                 print(f"INFO: メイン実行: {CONFIG_FILE} が見つからず、{DEFAULT_CONFIG_FILE} からコピー生成しました。")
             except Exception as e_copy_main:
-                print(
-                    f"CRITICAL: メイン実行: {DEFAULT_CONFIG_FILE} から {CONFIG_FILE} のコピー中にエラー: {e_copy_main}")
+                print(f"CRITICAL: メイン実行: {DEFAULT_CONFIG_FILE} から {CONFIG_FILE} のコピー中にエラー: {e_copy_main}")
                 exit(1)
-
         with open(CONFIG_FILE, 'r', encoding='utf-8') as f_main_init:
             initial_config = yaml.safe_load(f_main_init)
             if not initial_config or not isinstance(initial_config, dict):
@@ -323,32 +253,22 @@ if __name__ == "__main__":
         print(f"CRITICAL: {CONFIG_FILE}にbot_tokenが未設定か無効、またはプレースホルダのままです。")
         exit(1)
 
-    # デフォルトのインテント設定から開始
     intents = discord.Intents.default()
-
-    # サーバーに関する基本的なイベントを取得するために必要
     intents.guilds = True
-
-    # ボイスチャット機能用のインテントを有効に保ちます
     intents.voice_states = True
-
-    # 特権インテントであるメッセージコンテントインテントを明確に「無効」にします
     intents.message_content = False
-
     allowed_mentions = discord.AllowedMentions(everyone=False, users=True, roles=False, replied_user=True)
 
-    # コマンドのトリガーを「メンションのみ」に限定します
-    # スラッシュコマンドとLLM(メンション)がメインなので、プレフィックスはメンションのみでOK
     bot_instance = Shittim(
         command_prefix=commands.when_mentioned,
         intents=intents,
         help_command=None,
-        allowed_mentions=allowed_mentions
+        allowed_mentions=allowed_mentions,
+        ws_options={'gateway': MobileWebSocket}
     )
 
     try:
         bot_instance.run(bot_token_val)
     except Exception as e:
-        # ここではロガーが完全に設定されているはずだが、念のためprintも残す
         logging.critical(f"ボットの実行中に致命的なエラーが発生しました: {e}", exc_info=True)
         print(f"CRITICAL: ボットの実行中に致命的なエラーが発生しました: {e}")
