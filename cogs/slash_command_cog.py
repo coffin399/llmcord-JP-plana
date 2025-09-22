@@ -367,8 +367,8 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
         music_help_cmd_ja = "• **音楽再生機能:** `/music_help`"
         music_help_cmd_en = "• **Music Playback:** `/music_help` (or `/music_help_en`)"
 
-        prefix_info_ja = f"プレフィックスコマンドも利用可能です (現在のプレフィックス: `{prefix}` )。"
-        prefix_info_en = f"(Prefix commands are also available. Current prefix: `{prefix}` )"
+        prefix_info_ja = f"プレフィックスコマンドも利用可能です (現在のプレフィックス: `none` )。"
+        prefix_info_en = f"(Prefix commands are also available. Current prefix: `none` )"
 
         embed.add_field(
             name="基本情報 / Basic Information",
@@ -419,7 +419,7 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
             f"`/roll <notation>` - Rolls dice in nDn format (e.g., 2d6+3)",
             f"`/diceroll <min> <max>` - Rolls a dice in a specified range",
             f"`/gacha` - Simulates Blue Archive gacha",
-            f"`/earthquake <channel>` - Sets channel for Earthquake Early Warnings",
+            f"`/earthquake <channel>` - Sets channel for Earthquake Early Warnings(JapanOnly)",
             f"`/test_earthquake` - Sends a test Earthquake Early Warning",
             f"`/ping` - Check bot's latency",
             f"`/serverinfo` - Display server info",
