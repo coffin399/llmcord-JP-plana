@@ -204,7 +204,6 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
         logger.info(
             f"/roll が実行されました。 (User: {interaction.user.id}, Expression: {expression}, Result: {final_result})")
 
-    ### ▼▼▼ 変更箇所 ▼▼▼ ###
     @app_commands.command(name="check",
                           description="ダイスロールと、任意で条件判定を行います。/ Rolls dice and optionally performs a check.")
     @app_commands.describe(
@@ -345,8 +344,6 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
                        f"{f' {condition} {target}' if is_check else ''}, Result: {final_result}"
                        f"{f', Success: {success}' if is_check else ''})")
         logger.info(log_message)
-
-    ### ▲▲▲ 変更箇所 ▲▲▲ ###
 
     @app_commands.command(name="ping",
                           description="Botの現在のレイテンシを表示します。/ Shows the bot's current latency.")
@@ -774,12 +771,13 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
 
         # --- 3. その他の便利なコマンド ---
         utility_title_ja = "便利なコマンド"
-        ### ▼▼▼ 変更箇所 ▼▼▼ ###
         utility_cmds_ja = [
             f"`/check <表記> [条件] [目標値]` - ダイスロールと任意での条件判定を行います。",
             f"`/roll <表記>` - nDn形式でダイスを振ります (例: 2d6+3)。",
             f"`/diceroll <最小値> <最大値>` - 指定範囲でダイスを振ります。",
             f"`/gacha` - ブルーアーカイブ風の募集（ガチャ）をシミュレートします。",
+            f"`/earthquake <チャンネル>` - 緊急地震速報の通知チャンネルを設定します。",
+            f"`/test_earthquake` - 緊急地震速報のテスト通知を送信します。",
             f"`/ping` - Botの応答速度を確認",
             f"`/serverinfo` - サーバー情報を表示",
             f"`/userinfo [ユーザー]` - ユーザー情報を表示",
@@ -793,6 +791,8 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
             f"`/roll <notation>` - Rolls dice in nDn format (e.g., 2d6+3).",
             f"`/diceroll <min_value> <max_value>` - Rolls a dice in a specified range.",
             f"`/gacha` - Simulates student recruitment (gacha) like in Blue Archive.",
+            f"`/earthquake <channel>` - Sets the channel for Earthquake Early Warning notifications.",
+            f"`/test_earthquake` - Sends a test Earthquake Early Warning notification.",
             f"`/ping` - Check bot's latency",
             f"`/serverinfo` - Display server info",
             f"`/userinfo [user]` - Display user info",
@@ -801,7 +801,6 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
             f"`/meow` - Displays a random cat picture",
             f"`/support` - Shows how to contact the developer"
         ]
-        ### ▲▲▲ 変更箇所 ▲▲▲ ###
 
         if self.plana_repository:
             utility_cmds_ja.append(f"`/plana` - Plana (Bot)リポジトリ")
