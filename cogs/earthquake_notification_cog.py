@@ -185,6 +185,26 @@ class EarthquakeTsunamiCog(commands.Cog):
         else:
             return f"{depth}km"
 
+    def is_eew_type(self, issue_type):
+        """緊急地震速報かどうかを判定"""
+        eew_keywords = [
+            '予報', 'EEW', '緊急地震速報', '緊急地震速報（予報）',
+            '緊急地震速報（警報）', '緊急地震速報(予報)', '緊急地震速報(警報)'
+        ]
+        return any(keyword in issue_type for keyword in eew_keywords)
+
+    def is_quake_type(self, issue_type):
+        """地震情報（確定情報）かどうかを判定"""
+        quake_keywords = [
+            '震度速報', '震源速報', '震源・震度情報', '地震情報',
+            '各地の震度', '震度・震源情報', '地震の概況'
+        ]
+        # 予報系でない場合の地震情報
+        is_quake = any(keyword in issue_type for keyword in quake_keywords)
+        is_not_eew = not self.is_eew_type(issue_type)
+
+        return is_quake and is_not_eew
+
     def get_tsunami_info(self, data):
         """津波情報の解析"""
         tsunami_info = {
@@ -263,7 +283,7 @@ class EarthquakeTsunamiCog(commands.Cog):
 
         await interaction.response.send_message(
             f"✅ **{info_type}** の通知チャンネルを {channel.mention} に設定しました。",
-            ephemeral=False
+            ephemeral=True
         )
 
     @app_commands.command(name="earthquake_test", description="地震・津波情報のテスト通知を送信します。")
@@ -395,7 +415,7 @@ class EarthquakeTsunamiCog(commands.Cog):
 
     @app_commands.command(name="earthquake_status", description="地震・津波情報システムの状態を確認します。")
     async def status_system(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=False)
+        await interaction.response.defer(ephemeral=True)
 
         embed = discord.Embed(
             title="🔧 地震・津波情報システム状態",
@@ -737,16 +757,18 @@ class EarthquakeTsunamiCog(commands.Cog):
                             codes_to_search = [552, 551]
 
                             for search_code in codes_to_search:
-                                search_url = f"{self.api_base_url}/history?codes={search_code}&limit=30"
+                                search_url = f"{self.api_base_url}/history?codes={search_code}&limit=100"  # 検索範囲を拡大
                                 async with self.session.get(search_url) as search_response:
                                     if search_response.status == 200:
                                         search_data = await search_response.json()
                                         if search_data:
                                             for item in search_data:
-                                                tsunami_info = self.get_tsunami_info(item)
-                                                if tsunami_info['has_tsunami']:
+                                                tsunami_info_check = self.get_tsunami_info(item)
+                                                if tsunami_info_check['has_tsunami']:
                                                     tsunami_data = item
-                                                    print(f"🔍 津波情報発見 (code: {search_code}): {item['id']}")
+                                                    issue_type = item.get('issue', {}).get('type', '不明')
+                                                    print(
+                                                        f"🔍 津波情報発見 (code: {search_code}): {item['id']} - {issue_type}")
                                                     break
                                         if tsunami_data:
                                             break
@@ -755,7 +777,12 @@ class EarthquakeTsunamiCog(commands.Cog):
                                 tsunami_info = self.get_tsunami_info(tsunami_data)
                                 await self.send_tsunami_info_to_user(interaction.followup, tsunami_data, tsunami_info)
                             else:
-                                await interaction.followup.send("⚠️ 最新の津波予報情報が見つかりませんでした。")
+                                # 詳細な検索結果を表示
+                                search_summary = f"検索範囲: Code 552, 551 各100件\n"
+                                search_summary += "津波関連キーワードでの詳細検索を実行しましたが、該当する情報が見つかりませんでした。\n"
+                                search_summary += "現在津波警報等が発表されていない可能性があります。"
+                                await interaction.followup.send(
+                                    f"⚠️ 最新の津波予報情報が見つかりませんでした。\n\n{search_summary}")
                     else:
                         await interaction.followup.send(f"⚠️ 最新の{info_type}が見つかりませんでした。")
                 else:
@@ -917,7 +944,7 @@ class EarthquakeTsunamiCog(commands.Cog):
     @app_commands.command(name="tsunami_search", description="津波情報を手動で検索します（デバッグ用）。")
     async def search_tsunami(self, interaction: discord.Interaction):
         """津波情報の手動検索（デバッグ用）"""
-        await interaction.response.defer(ephemeral=False)
+        await interaction.response.defer(ephemeral=True)
 
         embed = discord.Embed(
             title="🔍 津波情報検索結果",
@@ -933,7 +960,7 @@ class EarthquakeTsunamiCog(commands.Cog):
 
         for code in codes_to_search:
             try:
-                url = f"{self.api_base_url}/history?codes={code}&limit=50"
+                url = f"{self.api_base_url}/history?codes={code}&limit=100"  # 検索範囲拡大
                 async with self.session.get(url) as response:
                     if response.status == 200:
                         data = await response.json()
@@ -945,15 +972,16 @@ class EarthquakeTsunamiCog(commands.Cog):
                                 code_found += 1
                                 total_found += 1
 
-                                if code_found <= 3:  # 各コード上位3件表示
+                                if code_found <= 5:  # 各コード上位5件表示に増加
                                     issue_type = item.get('issue', {}).get('type', '不明')
                                     warning_level = tsunami_info.get('warning_level', '不明')
-                                    search_results += f"**Code {code}**: {warning_level} - {issue_type}\n"
+                                    item_id = item['id']
+                                    search_results += f"**Code {code}** ({item_id[:8]}): {warning_level} - {issue_type}\n"
 
                         if code_found == 0:
-                            search_results += f"**Code {code}**: 津波情報なし\n"
+                            search_results += f"**Code {code}**: 津波情報なし (100件中)\n"
                         else:
-                            search_results += f"**Code {code}**: {code_found}件発見\n"
+                            search_results += f"**Code {code}**: {code_found}件発見 (100件中)\n"
 
                     else:
                         search_results += f"**Code {code}**: API エラー ({response.status})\n"
@@ -1016,7 +1044,7 @@ class EarthquakeTsunamiCog(commands.Cog):
         embed.set_footer(text="データ提供: P2P地震情報 | 気象庁")
         embed.set_thumbnail(url="https://www.p2pquake.net/images/QuakeLogo_100x100.png")
 
-        await interaction.response.send_message(embed=embed, ephemeral=False)
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 
     @check_earthquake_info.before_loop
     async def before_check_earthquake_info(self):
