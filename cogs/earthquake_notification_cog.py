@@ -263,7 +263,7 @@ class EarthquakeTsunamiCog(commands.Cog):
 
         await interaction.response.send_message(
             f"✅ **{info_type}** の通知チャンネルを {channel.mention} に設定しました。",
-            ephemeral=True
+            ephemeral=False
         )
 
     @app_commands.command(name="earthquake_test", description="地震・津波情報のテスト通知を送信します。")
@@ -395,7 +395,7 @@ class EarthquakeTsunamiCog(commands.Cog):
 
     @app_commands.command(name="earthquake_status", description="地震・津波情報システムの状態を確認します。")
     async def status_system(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer(ephemeral=False)
 
         embed = discord.Embed(
             title="🔧 地震・津波情報システム状態",
@@ -917,7 +917,7 @@ class EarthquakeTsunamiCog(commands.Cog):
     @app_commands.command(name="tsunami_search", description="津波情報を手動で検索します（デバッグ用）。")
     async def search_tsunami(self, interaction: discord.Interaction):
         """津波情報の手動検索（デバッグ用）"""
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer(ephemeral=False)
 
         embed = discord.Embed(
             title="🔍 津波情報検索結果",
@@ -1016,7 +1016,7 @@ class EarthquakeTsunamiCog(commands.Cog):
         embed.set_footer(text="データ提供: P2P地震情報 | 気象庁")
         embed.set_thumbnail(url="https://www.p2pquake.net/images/QuakeLogo_100x100.png")
 
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        await interaction.response.send_message(embed=embed, ephemeral=False)
 
     @check_earthquake_info.before_loop
     async def before_check_earthquake_info(self):
