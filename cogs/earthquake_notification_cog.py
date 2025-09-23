@@ -25,9 +25,16 @@ class EarthquakeTsunamiCog(commands.Cog):
 
         # 各情報タイプの最後のID追跡
         self.last_ids = {
-            'eew': None,  # 緊急地震速報 (code: 551)
-            'quake': None,  # 地震情報 (code: 552)
-            'tsunami': None  # 津波予報 (code: 552で津波あり)
+            'eew': None,  # 緊急地震速報 (code: 551, 予報タイプ)
+            'quake': None,  # 地震情報 (code: 551, 確定タイプ)
+            'tsunami': None  # 津波予報 (code: 552)
+        }
+
+        # 処理済みID管理（重複処理防止）
+        self.processed_ids = {
+            'eew': set(),
+            'quake': set(),
+            'tsunami': set()
         }
 
         self.session = None
@@ -39,11 +46,11 @@ class EarthquakeTsunamiCog(commands.Cog):
             'User-Agent': 'Discord-Bot-EarthquakeTsunami/1.0'
         }
 
-        # 情報コード定義
+        # 情報コード定義（完全版）
         self.info_codes = {
             'eew': 551,  # 緊急地震速報
-            'quake': 552,  # 地震情報
-            'tsunami': 552  # 津波予報（地震情報に含まれる）
+            'quake': 551,  # 地震情報（EEWと同じコードだが内容で区別）
+            'tsunami': [552, 551]  # 津波予報（複数コードから検索）
         }
 
         print("✅ EarthquakeTsunamiCog 初期化完了")
@@ -405,7 +412,9 @@ class EarthquakeTsunamiCog(commands.Cog):
         # 最後のID状況
         id_status = ""
         for info_type, last_id in self.last_ids.items():
-            id_status += f"**{info_type.upper()}**: `{last_id or '未取得'}`\n"
+            type_names = {'eew': 'EEW', 'quake': 'QUAKE', 'tsunami': 'TSUNAMI'}
+            processed_count = len(self.processed_ids.get(info_type, set()))
+            id_status += f"**{type_names[info_type]}**: `{last_id or '未取得'}` (処理済み: {processed_count}件)\n"
         embed.add_field(name="🆔 最後のID", value=id_status, inline=False)
 
         # 通知チャンネル状況
@@ -440,10 +449,9 @@ class EarthquakeTsunamiCog(commands.Cog):
                 headers=self.request_headers
             )
 
-        # 各情報タイプをチェック
-        await self.check_info_type('eew', 551)  # 緊急地震速報
-        await self.check_info_type('quake', 552)  # 地震情報
-        # 津波情報は地震情報(552)に含まれるため、quakeと同時にチェック
+        # 地震情報監視（code: 551を両方のタイプで監視）
+        await self.check_earthquake_data()  # EEWとQUAKE両方をチェック
+        await self.check_tsunami_data()  # 津波情報を包括的にチェック
 
     async def check_info_type(self, info_type, code):
         """特定の情報タイプをチェック"""
@@ -475,11 +483,15 @@ class EarthquakeTsunamiCog(commands.Cog):
 
                     # 情報タイプに応じた処理
                     if info_type == 'eew':
-                        await self.send_eew_notification(latest_info)
-                    elif info_type == 'quake':
-                        # 津波情報も含めてチェック
-                        await self.send_quake_notification(latest_info)
+                        # 緊急地震速報と地震情報を区別
+                        issue_type = latest_info.get('issue', {}).get('type', '')
+                        if '予報' in issue_type or 'EEW' in issue_type or issue_type == '緊急地震速報':
+                            await self.send_eew_notification(latest_info)
+                        else:
+                            # 確定情報として扱う
+                            await self.send_quake_notification(latest_info)
 
+                    elif info_type == 'tsunami':
                         # 津波情報があるかチェック
                         tsunami_info = self.get_tsunami_info(latest_info)
                         if tsunami_info['has_tsunami']:
@@ -680,33 +692,70 @@ class EarthquakeTsunamiCog(commands.Cog):
             # 情報コードの決定
             code_mapping = {
                 "緊急地震速報": 551,
-                "地震情報": 552,
-                "津波予報": 552  # 津波情報は地震情報に含まれる
+                "地震情報": 551,  # 地震情報も551
+                "津波予報": 552
             }
 
-            code = code_mapping.get(info_type, 552)
-            url = f"{self.api_base_url}/history?codes={code}&limit=10"  # 津波情報を探すため多めに取得
+            code = code_mapping.get(info_type, 551)
+            url = f"{self.api_base_url}/history?codes={code}&limit=20"  # 多めに取得して分類
 
             async with self.session.get(url) as response:
                 if response.status == 200:
                     data = await response.json()
                     if data:
-                        if info_type == "津波予報":
-                            # 津波情報があるデータを探す
-                            tsunami_data = None
+                        if info_type == "緊急地震速報":
+                            # EEWタイプのデータを探す
+                            eew_data = None
                             for item in data:
-                                tsunami_info = self.get_tsunami_info(item)
-                                if tsunami_info['has_tsunami']:
-                                    tsunami_data = item
+                                issue_type = item.get('issue', {}).get('type', '')
+                                if self.is_eew_type(issue_type):
+                                    eew_data = item
                                     break
+
+                            if eew_data:
+                                await self.send_info_to_user(interaction.followup, eew_data, info_type)
+                            else:
+                                await interaction.followup.send("⚠️ 最新の緊急地震速報が見つかりませんでした。")
+
+                        elif info_type == "地震情報":
+                            # 地震情報タイプのデータを探す
+                            quake_data = None
+                            for item in data:
+                                issue_type = item.get('issue', {}).get('type', '')
+                                if self.is_quake_type(issue_type):
+                                    quake_data = item
+                                    break
+
+                            if quake_data:
+                                await self.send_info_to_user(interaction.followup, quake_data, info_type)
+                            else:
+                                await interaction.followup.send("⚠️ 最新の地震情報が見つかりませんでした。")
+
+                        elif info_type == "津波予報":
+                            # 津波情報を複数コードから検索
+                            tsunami_data = None
+                            codes_to_search = [552, 551]
+
+                            for search_code in codes_to_search:
+                                search_url = f"{self.api_base_url}/history?codes={search_code}&limit=30"
+                                async with self.session.get(search_url) as search_response:
+                                    if search_response.status == 200:
+                                        search_data = await search_response.json()
+                                        if search_data:
+                                            for item in search_data:
+                                                tsunami_info = self.get_tsunami_info(item)
+                                                if tsunami_info['has_tsunami']:
+                                                    tsunami_data = item
+                                                    print(f"🔍 津波情報発見 (code: {search_code}): {item['id']}")
+                                                    break
+                                        if tsunami_data:
+                                            break
 
                             if tsunami_data:
                                 tsunami_info = self.get_tsunami_info(tsunami_data)
                                 await self.send_tsunami_info_to_user(interaction.followup, tsunami_data, tsunami_info)
                             else:
                                 await interaction.followup.send("⚠️ 最新の津波予報情報が見つかりませんでした。")
-                        else:
-                            await self.send_info_to_user(interaction.followup, data[0], info_type)
                     else:
                         await interaction.followup.send(f"⚠️ 最新の{info_type}が見つかりませんでした。")
                 else:
@@ -865,7 +914,65 @@ class EarthquakeTsunamiCog(commands.Cog):
             print(error_msg)
             await followup.send(error_msg)
 
-    @app_commands.command(name="earthquake_help", description="地震・津波情報システムの使い方を表示します。")
+    @app_commands.command(name="tsunami_search", description="津波情報を手動で検索します（デバッグ用）。")
+    async def search_tsunami(self, interaction: discord.Interaction):
+        """津波情報の手動検索（デバッグ用）"""
+        await interaction.response.defer(ephemeral=True)
+
+        embed = discord.Embed(
+            title="🔍 津波情報検索結果",
+            color=discord.Color.purple(),
+            timestamp=datetime.now(self.jst)
+        )
+
+        total_found = 0
+        search_results = ""
+
+        # 複数のコードで検索
+        codes_to_search = [552, 551]
+
+        for code in codes_to_search:
+            try:
+                url = f"{self.api_base_url}/history?codes={code}&limit=50"
+                async with self.session.get(url) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        code_found = 0
+
+                        for item in data:
+                            tsunami_info = self.get_tsunami_info(item)
+                            if tsunami_info['has_tsunami']:
+                                code_found += 1
+                                total_found += 1
+
+                                if code_found <= 3:  # 各コード上位3件表示
+                                    issue_type = item.get('issue', {}).get('type', '不明')
+                                    warning_level = tsunami_info.get('warning_level', '不明')
+                                    search_results += f"**Code {code}**: {warning_level} - {issue_type}\n"
+
+                        if code_found == 0:
+                            search_results += f"**Code {code}**: 津波情報なし\n"
+                        else:
+                            search_results += f"**Code {code}**: {code_found}件発見\n"
+
+                    else:
+                        search_results += f"**Code {code}**: API エラー ({response.status})\n"
+
+            except Exception as e:
+                search_results += f"**Code {code}**: 検索エラー - {str(e)[:50]}\n"
+
+        embed.add_field(name="📊 検索結果", value=search_results or "検索結果なし", inline=False)
+        embed.add_field(name="📈 合計", value=f"津波情報: {total_found}件発見", inline=True)
+
+        # 現在の津波監視状態
+        status_text = f"最後のID: `{self.last_ids['tsunami'] or '未取得'}`\n"
+        status_text += f"処理済み: {len(self.processed_ids['tsunami'])}件"
+        embed.add_field(name="🔄 監視状態", value=status_text, inline=True)
+
+        embed.set_footer(text="津波情報デバッグ検索")
+
+        await interaction.followup.send(embed=embed)
+
     async def help_system(self, interaction: discord.Interaction):
         embed = discord.Embed(
             title="📚 地震・津波情報システム ヘルプ",
@@ -883,6 +990,7 @@ class EarthquakeTsunamiCog(commands.Cog):
 **📊 情報表示コマンド**  
 `/earthquake_latest` - 最新情報を表示
 `/earthquake_status` - システム状態を確認
+`/tsunami_search` - 津波情報を手動検索（デバッグ用）
 
 **❓ その他**
 `/earthquake_help` - このヘルプを表示
