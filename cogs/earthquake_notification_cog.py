@@ -62,8 +62,32 @@ class EarthquakeTsunamiCog(commands.Cog):
             timeout=aiohttp.ClientTimeout(total=15),
             headers=self.request_headers
         )
+
+        # 監視開始前に最新の情報を取得し、IDを初期化する
+        print("🔄 最新情報のIDを初期化中...")
+        await self.initialize_processed_ids()
+
         self.check_earthquake_info.start()
         print("✅ EarthquakeTsunamiCog セットアップ完了")
+
+    async def initialize_processed_ids(self):
+        """起動時に最新のIDを取得して、過去の通知を防ぐ"""
+        codes_to_check = [551, 552]
+        for code in codes_to_check:
+            try:
+                url = f"{self.api_base_url}/history?codes={code}&limit=50"
+                async with self.session.get(url) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        if data:
+                            for item in data:
+                                # すべてのIDを関連するセットに追加
+                                self.processed_ids['eew'].add(item['id'])
+                                self.processed_ids['quake'].add(item['id'])
+                                self.processed_ids['tsunami'].add(item['id'])
+                            print(f"✅ Code {code} のIDを初期化完了 ({len(data)}件を既処理に)")
+            except Exception as e:
+                print(f"❌ Code {code} のID初期化に失敗: {e}")
 
     async def cog_unload(self):
         print("🔄 EarthquakeTsunamiCog アンロード中...")
@@ -215,40 +239,48 @@ class EarthquakeTsunamiCog(commands.Cog):
         }
 
         # 津波情報の確認
-        tsunami = data.get('tsunami', {})
-        if tsunami:
-            tsunami_info['has_tsunami'] = True
+        tsunami_data = data.get('tsunami')
+        if not tsunami_data or tsunami_data.get('domesticTsunami') == 'None':
+            return tsunami_info
 
-            # 津波予報の種類
-            forecast = tsunami.get('forecast', {})
-            if forecast:
-                # 大津波警報・津波警報・津波注意報の判定
-                grade = forecast.get('grade', '')
-                if grade:
-                    if 'MajorWarning' in grade:
-                        tsunami_info['warning_level'] = '大津波警報'
-                    elif 'Warning' in grade:
-                        tsunami_info['warning_level'] = '津波警報'
-                    elif 'Watch' in grade:
-                        tsunami_info['warning_level'] = '津波注意報'
+        tsunami_info['has_tsunami'] = True
 
-                # 津波予報区域
-                areas = forecast.get('areas', [])
-                tsunami_areas = []
-                for area in areas:
-                    area_name = area.get('name', '')
-                    grade = area.get('grade', '')
-                    if area_name:
-                        tsunami_areas.append({
-                            'name': area_name,
-                            'grade': grade
-                        })
-                tsunami_info['areas'] = tsunami_areas
+        # 大津波警報・津波警報・津波注意報の判定
+        grades = {
+            'MajorWarning': '大津波警報',
+            'Warning': '津波警報',
+            'Watch': '津波注意報',
+        }
 
-            # 津波の説明文
-            comment = tsunami.get('comment', '')
-            if comment:
-                tsunami_info['description'] = comment
+        # 複数の津波情報エリアから最も高いレベルを特定
+        highest_grade_level = 0
+        warning_level_text = '津波予報'
+
+        for area in tsunami_data.get('areas', []):
+            grade = area.get('grade')
+            if grade == 'MajorWarning' and highest_grade_level < 3:
+                highest_grade_level = 3
+                warning_level_text = grades[grade]
+            elif grade == 'Warning' and highest_grade_level < 2:
+                highest_grade_level = 2
+                warning_level_text = grades[grade]
+            elif grade == 'Watch' and highest_grade_level < 1:
+                highest_grade_level = 1
+                warning_level_text = grades[grade]
+
+        tsunami_info['warning_level'] = warning_level_text
+
+        # 津波予報区域
+        tsunami_areas = []
+        for area in tsunami_data.get('areas', []):
+            area_name = area.get('name', '')
+            grade_text = grades.get(area.get('grade'), '情報')
+            if area_name:
+                tsunami_areas.append({
+                    'name': area_name,
+                    'grade': grade_text
+                })
+        tsunami_info['areas'] = tsunami_areas
 
         return tsunami_info
 
@@ -283,7 +315,7 @@ class EarthquakeTsunamiCog(commands.Cog):
 
         await interaction.response.send_message(
             f"✅ **{info_type}** の通知チャンネルを {channel.mention} に設定しました。",
-            ephemeral=True
+            ephemeral=False
         )
 
     @app_commands.command(name="earthquake_test", description="地震・津波情報のテスト通知を送信します。")
@@ -296,7 +328,7 @@ class EarthquakeTsunamiCog(commands.Cog):
                                 info_type: Literal["緊急地震速報", "地震情報", "津波予報"],
                                 max_scale: Optional[Literal["震度3", "震度5強", "震度7"]] = "震度5強",
                                 tsunami_level: Optional[Literal["津波注意報", "津波警報", "大津波警報"]] = "津波警報"):
-        await interaction.response.defer()
+        await interaction.response.defer(ephemeral=False)
 
         guild_id = str(interaction.guild.id)
 
@@ -415,7 +447,7 @@ class EarthquakeTsunamiCog(commands.Cog):
 
     @app_commands.command(name="earthquake_status", description="地震・津波情報システムの状態を確認します。")
     async def status_system(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer(ephemeral=False)
 
         embed = discord.Embed(
             title="🔧 地震・津波情報システム状態",
@@ -459,6 +491,86 @@ class EarthquakeTsunamiCog(commands.Cog):
         await interaction.followup.send(embed=embed)
 
     # --- バックグラウンドタスク ---
+    # ★★★★★ ここからが修正箇所です ★★★★★
+
+    async def check_earthquake_data(self):
+        """地震情報(EEW, Quake)をチェックし、関連する津波情報も処理する"""
+        try:
+            # code=551は緊急地震速報と震源・震度情報を含む
+            url = f"{self.api_base_url}/history?codes=551&limit=10"
+            async with self.session.get(url) as response:
+                if response.status != 200:
+                    print(f"⚠️ API応答エラー (Earthquake/551): {response.status}")
+                    return
+
+                data = await response.json()
+                if not data:
+                    return
+
+                # APIは新しい順なので、古い情報から処理するために逆順にする
+                for info in reversed(data):
+                    info_id = info['id']
+                    issue_type = info.get('issue', {}).get('type', '')
+
+                    # 緊急地震速報(EEW)の判定
+                    if self.is_eew_type(issue_type):
+                        if info_id not in self.processed_ids['eew']:
+                            print(f"🆕 新しいEEW情報を検知: {info_id}")
+                            await self.send_eew_notification(info)
+                            self.processed_ids['eew'].add(info_id)
+                            self.last_ids['eew'] = info_id
+
+                    # 地震情報(確定報)の判定
+                    elif self.is_quake_type(issue_type):
+                        if info_id not in self.processed_ids['quake']:
+                            print(f"🆕 新しい地震情報を検知: {info_id}")
+                            await self.send_quake_notification(info)
+                            self.processed_ids['quake'].add(info_id)
+                            self.last_ids['quake'] = info_id
+
+                    # 地震情報には津波情報が含まれることがあるため、ここでチェック
+                    tsunami_info = self.get_tsunami_info(info)
+                    if tsunami_info['has_tsunami']:
+                        if info_id not in self.processed_ids['tsunami']:
+                            print(f"🆕 新しい津波情報を検知 (from 551): {info_id}")
+                            await self.send_tsunami_notification(info, tsunami_info)
+                            self.processed_ids['tsunami'].add(info_id)
+                            self.last_ids['tsunami'] = info_id
+
+        except asyncio.TimeoutError:
+            print("⚠️ API接続タイムアウト (Earthquake/551)")
+        except Exception as e:
+            print(f"❌ 地震情報監視エラー: {e}")
+
+    async def check_tsunami_data(self):
+        """津波情報(code:552)を専門にチェックする"""
+        try:
+            # code=552は津波予報
+            url = f"{self.api_base_url}/history?codes=552&limit=10"
+            async with self.session.get(url) as response:
+                if response.status != 200:
+                    print(f"⚠️ API応答エラー (Tsunami/552): {response.status}")
+                    return
+
+                data = await response.json()
+                if not data:
+                    return
+
+                for info in reversed(data):
+                    info_id = info['id']
+                    if info_id not in self.processed_ids['tsunami']:
+                        tsunami_info = self.get_tsunami_info(info)
+                        if tsunami_info['has_tsunami']:
+                            print(f"🆕 新しい津波情報を検知 (from 552): {info_id}")
+                            await self.send_tsunami_notification(info, tsunami_info)
+                            self.processed_ids['tsunami'].add(info_id)
+                            self.last_ids['tsunami'] = info_id
+
+        except asyncio.TimeoutError:
+            print("⚠️ API接続タイムアウト (Tsunami/552)")
+        except Exception as e:
+            print(f"❌ 津波情報監視エラー: {e}")
+
     @tasks.loop(seconds=5)
     async def check_earthquake_info(self):
         """地震・津波情報の監視"""
@@ -473,54 +585,7 @@ class EarthquakeTsunamiCog(commands.Cog):
         await self.check_earthquake_data()  # EEWとQUAKE両方をチェック
         await self.check_tsunami_data()  # 津波情報を包括的にチェック
 
-    async def check_info_type(self, info_type, code):
-        """特定の情報タイプをチェック"""
-        url = f"{self.api_base_url}/history?codes={code}&limit=1"
-
-        try:
-            async with self.session.get(url) as response:
-                if response.status != 200:
-                    print(f"⚠️ API応答エラー ({info_type}): {response.status}")
-                    return
-
-                data = await response.json()
-                if not data:
-                    return
-
-                latest_info = data[0]
-                info_id = latest_info['id']
-
-                # 初回実行時の処理
-                if self.last_ids[info_type] is None:
-                    self.last_ids[info_type] = info_id
-                    print(f"🔄 初期ID設定 ({info_type}): {info_id}")
-                    return
-
-                # 新しい情報の検知
-                if self.last_ids[info_type] != info_id:
-                    print(f"🆕 新しい{info_type}情報を検知: {info_id}")
-                    self.last_ids[info_type] = info_id
-
-                    # 情報タイプに応じた処理
-                    if info_type == 'eew':
-                        # 緊急地震速報と地震情報を区別
-                        issue_type = latest_info.get('issue', {}).get('type', '')
-                        if '予報' in issue_type or 'EEW' in issue_type or issue_type == '緊急地震速報':
-                            await self.send_eew_notification(latest_info)
-                        else:
-                            # 確定情報として扱う
-                            await self.send_quake_notification(latest_info)
-
-                    elif info_type == 'tsunami':
-                        # 津波情報があるかチェック
-                        tsunami_info = self.get_tsunami_info(latest_info)
-                        if tsunami_info['has_tsunami']:
-                            await self.send_tsunami_notification(latest_info, tsunami_info)
-
-        except asyncio.TimeoutError:
-            print(f"⚠️ API接続タイムアウト ({info_type})")
-        except Exception as e:
-            print(f"❌ 情報監視エラー ({info_type}): {e}")
+    # ★★★★★ ここまでが修正箇所です ★★★★★
 
     async def send_eew_notification(self, data):
         """緊急地震速報の送信"""
@@ -575,8 +640,9 @@ class EarthquakeTsunamiCog(commands.Cog):
 
         embed.add_field(name="⚠️ 避難指示", value=warning_text, inline=False)
 
-        if tsunami_info['description']:
-            embed.add_field(name="ℹ️ 詳細情報", value=tsunami_info['description'][:500], inline=False)
+        description_text = tsunami_info.get('description', '')
+        if description_text:
+            embed.add_field(name="ℹ️ 詳細情報", value=description_text[:500], inline=False)
 
         embed.set_footer(text="気象庁 | 津波から身を守るため直ちに避難を")
         embed.set_thumbnail(url="https://www.p2pquake.net/images/QuakeLogo_100x100.png")
@@ -668,7 +734,7 @@ class EarthquakeTsunamiCog(commands.Cog):
     async def send_embed_to_channels(self, embed, info_type):
         """指定された情報タイプのチャンネルにEmbedを送信"""
         if not self.config:
-            print(f"⚠️ {info_type}通知チャンネルが設定されていません")
+            # print(f"⚠️ {info_type}通知チャンネルが設定されていません")
             return
 
         sent_count = 0
@@ -699,7 +765,8 @@ class EarthquakeTsunamiCog(commands.Cog):
                 print(f"⚠️ サーバー未発見: {guild_id}")
                 failed_count += 1
 
-        print(f"📤 {info_type}通知送信完了: 成功 {sent_count}件, 失敗 {failed_count}件")
+        if sent_count > 0 or failed_count > 0:
+            print(f"📤 {info_type}通知送信完了: 成功 {sent_count}件, 失敗 {failed_count}件")
 
     # --- 追加コマンド ---
     @app_commands.command(name="earthquake_latest", description="最新の地震・津波情報を表示します。")
@@ -944,7 +1011,7 @@ class EarthquakeTsunamiCog(commands.Cog):
     @app_commands.command(name="tsunami_search", description="津波情報を手動で検索します（デバッグ用）。")
     async def search_tsunami(self, interaction: discord.Interaction):
         """津波情報の手動検索（デバッグ用）"""
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer(ephemeral=False)
 
         embed = discord.Embed(
             title="🔍 津波情報検索結果",
@@ -1001,6 +1068,7 @@ class EarthquakeTsunamiCog(commands.Cog):
 
         await interaction.followup.send(embed=embed)
 
+    @app_commands.command(name="earthquake_help", description="このシステムのヘルプを表示します。")
     async def help_system(self, interaction: discord.Interaction):
         embed = discord.Embed(
             title="📚 地震・津波情報システム ヘルプ",
@@ -1044,7 +1112,7 @@ class EarthquakeTsunamiCog(commands.Cog):
         embed.set_footer(text="データ提供: P2P地震情報 | 気象庁")
         embed.set_thumbnail(url="https://www.p2pquake.net/images/QuakeLogo_100x100.png")
 
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        await interaction.response.send_message(embed=embed, ephemeral=False)
 
     @check_earthquake_info.before_loop
     async def before_check_earthquake_info(self):
