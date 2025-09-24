@@ -4,8 +4,8 @@ import yaml
 import logging
 import os
 import shutil
-from discord.gateway import DiscordWebSocket # モバイルステータス用にインポート
-import sys                                  # モバイルステータス用にインポート
+from discord.gateway import DiscordWebSocket  # モバイルステータス用にインポート
+import sys  # モバイルステータス用にインポート
 
 # --- ロギング設定の初期化 ---
 logging.getLogger('discord').setLevel(logging.WARNING)
@@ -15,9 +15,13 @@ logging.getLogger('google.ai').setLevel(logging.WARNING)
 logging.getLogger('httpx').setLevel(logging.WARNING)
 
 # --- カスタムDiscordロギングハンドラをインポート ---
-from PLANA.utilities.discord_handler import DiscordLogHandler
+from PLANA.services.discord_handler import DiscordLogHandler
 
+# ▼▼▼ 変更点 ▼▼▼
+# この変数は使用されなくなりますが、他の場所で参照される可能性を考慮して残しておきます。
 COGS_DIRECTORY_NAME = "cogs"
+# ▲▲▲ 変更点 ▲▲▲
+
 CONFIG_FILE = 'config.yaml'
 DEFAULT_CONFIG_FILE = 'config.default.yaml'
 
@@ -27,6 +31,7 @@ class MobileWebSocket(DiscordWebSocket):
     """
     Botをモバイルステータスにするための、より強力なカスタムWebSocketクラス
     """
+
     async def send_as_json(self, data):
         if data.get('op') == self.IDENTIFY:
             data['d']['properties'] = {
@@ -51,10 +56,12 @@ class Shittim(commands.Bot):
             if os.path.exists(DEFAULT_CONFIG_FILE):
                 try:
                     shutil.copyfile(DEFAULT_CONFIG_FILE, CONFIG_FILE)
-                    logging.info(f"{CONFIG_FILE} が見つからなかったため、{DEFAULT_CONFIG_FILE} をコピーして生成しました。")
+                    logging.info(
+                        f"{CONFIG_FILE} が見つからなかったため、{DEFAULT_CONFIG_FILE} をコピーして生成しました。")
                     logging.warning(f"生成された {CONFIG_FILE} を確認し、ボットトークンやAPIキーを設定してください。")
                 except Exception as e_copy:
-                    print(f"CRITICAL: {DEFAULT_CONFIG_FILE} から {CONFIG_FILE} のコピー中にエラーが発生しました: {e_copy}")
+                    print(
+                        f"CRITICAL: {DEFAULT_CONFIG_FILE} から {CONFIG_FILE} のコピー中にエラーが発生しました: {e_copy}")
                     raise RuntimeError(f"{CONFIG_FILE} の生成に失敗しました。")
             else:
                 print(f"CRITICAL: {CONFIG_FILE} も {DEFAULT_CONFIG_FILE} も見つかりません。設定ファイルがありません。")
@@ -91,7 +98,8 @@ class Shittim(commands.Bot):
             single_channel_id = self.config.get('log_channel_id')
             if single_channel_id:
                 log_channel_ids = [single_channel_id]
-                logging.warning("設定 'log_channel_id' は非推奨です。今後は 'log_channel_ids' (リスト形式) を使用してください。")
+                logging.warning(
+                    "設定 'log_channel_id' は非推奨です。今後は 'log_channel_ids' (リスト形式) を使用してください。")
 
         if log_channel_ids and isinstance(log_channel_ids, list):
             try:
@@ -112,17 +120,41 @@ class Shittim(commands.Bot):
         # ===== ロギング設定ここまで =====================================
         # ================================================================
 
+        # ▼▼▼ 変更点: ここからCogのロード処理を修正 ▼▼▼
         # --- Cogのロード ---
-        if self.config.get('enabled_cogs') and isinstance(self.config['enabled_cogs'], list):
-            for cog_name in self.config['enabled_cogs']:
-                cog_module_path = f"{COGS_DIRECTORY_NAME}.{str(cog_name).strip()}"
-                try:
-                    await self.load_extension(cog_module_path)
-                    logging.info(f"Cog '{cog_module_path}' のロードに成功しました。")
-                except Exception as e:
-                    logging.error(f"Cog '{cog_module_path}' のロード中にエラーが発生しました: {e}", exc_info=True)
-        else:
-            logging.warning("config.yamlに 'enabled_cogs' が設定されていないか、リスト形式ではありません。Cogはロードされません。")
+        # PLANAディレクトリ配下の全てのcogを再帰的にロードする
+        plana_dir = 'PLANA'
+        if not os.path.isdir(plana_dir):
+            logging.error(f"Cogを格納する '{plana_dir}' ディレクトリが見つかりません。Cogはロードされません。")
+            return
+
+        logging.info(f"'{plana_dir}' ディレクトリからCogのロードを開始します...")
+        loaded_cogs_count = 0
+
+        for root, _, files in os.walk(plana_dir):
+            for file in files:
+                # .pyファイルで、先頭がアンダースコアでないものを対象とする
+                if file.endswith('.py') and not file.startswith('_'):
+                    # ファイルパスからモジュールパスを生成
+                    # 例: PLANA/cogs/general.py -> PLANA.cogs.general
+                    module_path = os.path.join(root, file[:-3]).replace(os.sep, '.')
+
+                    try:
+                        await self.load_extension(module_path)
+                        logging.info(f"  > Cog '{module_path}' のロードに成功しました。")
+                        loaded_cogs_count += 1
+                    except commands.NoEntryPointError:
+                        # setup関数がないファイルはCogではないので、静かにスキップする
+                        # (例: ユーティリティ関数を集めたファイルなど)
+                        logging.debug(f"ファイル '{module_path}' はCogではないためスキップしました。")
+                    except commands.ExtensionAlreadyLoaded:
+                        # 既にロードされている場合は何もしない
+                        logging.debug(f"Cog '{module_path}' は既にロードされています。")
+                    except Exception as e:
+                        logging.error(f"  > Cog '{module_path}' のロード中にエラーが発生しました: {e}", exc_info=True)
+
+        logging.info(f"Cogのロードが完了しました。合計 {loaded_cogs_count} 個のCogをロードしました。")
+        # ▲▲▲ 変更点: ここまで ▲▲▲
 
         # --- スラッシュコマンドの同期 ---
         if self.config.get('sync_slash_commands', True):
@@ -131,7 +163,8 @@ class Shittim(commands.Bot):
                 if test_guild_id:
                     guild_obj = discord.Object(id=int(test_guild_id))
                     synced_commands = await self.tree.sync(guild=guild_obj)
-                    logging.info(f"{len(synced_commands)}個のスラッシュコマンドをテストギルド {test_guild_id} に同期しました。")
+                    logging.info(
+                        f"{len(synced_commands)}個のスラッシュコマンドをテストギルド {test_guild_id} に同期しました。")
                 else:
                     synced_commands = await self.tree.sync()
                     logging.info(f"{len(synced_commands)}個のグローバルスラッシュコマンドを同期しました。")
@@ -191,7 +224,8 @@ class Shittim(commands.Bot):
         self.rotate_status.start()
 
     async def on_guild_join(self, guild: discord.Guild):
-        logging.info(f"新しいサーバー '{guild.name}' (ID: {guild.id}) に参加しました。現在のサーバー数: {len(self.guilds)}")
+        logging.info(
+            f"新しいサーバー '{guild.name}' (ID: {guild.id}) に参加しました。現在のサーバー数: {len(self.guilds)}")
 
     async def on_guild_remove(self, guild: discord.Guild):
         logging.info(f"サーバー '{guild.name}' (ID: {guild.id}) から退出しました。現在のサーバー数: {len(self.guilds)}")
@@ -200,24 +234,31 @@ class Shittim(commands.Bot):
         if isinstance(error, commands.CommandNotFound):
             return
         elif isinstance(error, commands.MissingRequiredArgument):
-            await ctx.send(f"引数が不足しています: `{error.param.name}`\n`{ctx.prefix}{ctx.command.qualified_name} {ctx.command.signature}`")
+            await ctx.send(
+                f"引数が不足しています: `{error.param.name}`\n`{ctx.prefix}{ctx.command.qualified_name} {ctx.command.signature}`")
         elif isinstance(error, commands.BadArgument):
-            await ctx.send(f"引数の型が正しくありません。\n`{ctx.prefix}{ctx.command.qualified_name} {ctx.command.signature}`")
+            await ctx.send(
+                f"引数の型が正しくありません。\n`{ctx.prefix}{ctx.command.qualified_name} {ctx.command.signature}`")
         elif isinstance(error, commands.CheckFailure):
             await ctx.send("このコマンドを実行する権限がありません。")
         elif isinstance(error, commands.CommandOnCooldown):
             await ctx.send(f"このコマンドはクールダウン中です。あと {error.retry_after:.2f} 秒お待ちください。")
         elif isinstance(error, commands.ExtensionError):
-            logging.error(f"Cog関連のエラーが発生しました ({ctx.command.cog_name if ctx.command else 'UnknownCog'}): {error}", exc_info=error)
+            logging.error(
+                f"Cog関連のエラーが発生しました ({ctx.command.cog_name if ctx.command else 'UnknownCog'}): {error}",
+                exc_info=error)
             await ctx.send("コマンドの処理中にCogエラーが発生しました。管理者に報告してください。")
         else:
-            logging.error(f"コマンド '{ctx.command.qualified_name if ctx.command else ctx.invoked_with}' の実行中に予期しないエラーが発生しました:", exc_info=error)
+            logging.error(
+                f"コマンド '{ctx.command.qualified_name if ctx.command else ctx.invoked_with}' の実行中に予期しないエラーが発生しました:",
+                exc_info=error)
             try:
                 await ctx.send("コマンドの実行中に予期しないエラーが発生しました。")
             except discord.errors.Forbidden:
                 logging.warning(f"エラーメッセージを送信できませんでした ({ctx.channel.id}): 権限不足")
 
-# (ASCIIアート消しちゃえ)
+
+# (ASCIIアートは変更なし)
 
 if __name__ == "__main__":
     plana_art = r"""
@@ -237,7 +278,8 @@ if __name__ == "__main__":
                 shutil.copyfile(DEFAULT_CONFIG_FILE, CONFIG_FILE)
                 print(f"INFO: メイン実行: {CONFIG_FILE} が見つからず、{DEFAULT_CONFIG_FILE} からコピー生成しました。")
             except Exception as e_copy_main:
-                print(f"CRITICAL: メイン実行: {DEFAULT_CONFIG_FILE} から {CONFIG_FILE} のコピー中にエラー: {e_copy_main}")
+                print(
+                    f"CRITICAL: メイン実行: {DEFAULT_CONFIG_FILE} から {CONFIG_FILE} のコピー中にエラー: {e_copy_main}")
                 exit(1)
         with open(CONFIG_FILE, 'r', encoding='utf-8') as f_main_init:
             initial_config = yaml.safe_load(f_main_init)
