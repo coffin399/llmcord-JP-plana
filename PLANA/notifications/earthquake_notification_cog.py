@@ -14,7 +14,7 @@ from discord import app_commands
 from discord.ext import commands, tasks
 
 # --- エラーハンドラのインポート ---
-from .error.errors import (
+from PLANA.notifications.error.earthquake_errors import (
     EarthquakeTsunamiExceptionHandler,
     APIError,
     DataParsingError,

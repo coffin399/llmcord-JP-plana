@@ -145,6 +145,14 @@ image_commands:
   thecatapi_api_key: "YOUR_THECATAPI_KEY_HERE" # (任意だが推奨)
 
 # =============================================================================
+# Twitch Notification Cog Settings (Twitch通知開始設定)
+# =============================================================================
+# Twitch APIの認証情報
+twitch:
+  client_id: "YOUR_TWITCH_CLIENT_ID"
+  client_secret: "YOUR_TWITCH_CLIENT_SECRET"
+
+# =============================================================================
 # Music Cog Settings (音楽再生機能)
 # =============================================================================
 music:
