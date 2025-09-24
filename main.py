@@ -15,7 +15,7 @@ logging.getLogger('google.ai').setLevel(logging.WARNING)
 logging.getLogger('httpx').setLevel(logging.WARNING)
 
 # --- カスタムDiscordロギングハンドラをインポート ---
-from services.discord_handler import DiscordLogHandler
+from PLANA.utilities.discord_handler import DiscordLogHandler
 
 COGS_DIRECTORY_NAME = "cogs"
 CONFIG_FILE = 'config.yaml'
