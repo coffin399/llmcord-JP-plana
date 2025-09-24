@@ -3,7 +3,7 @@
 # =============================================================================
 bot_token: YOUR_BOT_TOKEN_HERE # Discord Developer Portalで取得したBotのトークン
 client_id: YOUR_CLIENT_ID_HERE # BotのクライアントID (招待URL生成などに使用)
-prefix: "!!" # メッセージコマンドのプレフィックス (現在は主にMusic Cogで使用)
+prefix: "!!" # メッセージコマンドのプレフィックス [廃止] 特権インテント回避のため、この設定は現在使用されません
 status_message: "on {guild_count} servers" # Botのステータスメッセージ
 allowed_channel_ids: [] # Botが反応するチャンネルIDのリスト (空の場合は全チャンネルで反応)
 # allowed_role_ids: []  # [廃止] 特権インテント回避のため、この設定は現在使用されません
