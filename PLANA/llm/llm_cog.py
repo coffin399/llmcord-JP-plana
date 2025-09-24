@@ -1,3 +1,4 @@
+# PLANA/llm/llmcog.py
 from __future__ import annotations
 
 import base64
@@ -13,6 +14,13 @@ import discord
 import openai
 from discord import app_commands
 from discord.ext import commands
+
+from PLANA.llm.error.errors import (
+    LLMExceptionHandler,
+    SearchAgentError,
+    SearchAPIRateLimitError,
+    SearchAPIServerError
+)
 
 try:
     import aiofiles
@@ -54,6 +62,8 @@ class LLMCog(commands.Cog, name="LLM"):
         self.conversation_threads: Dict[int, List[Dict[str, Any]]] = {}
         self.message_to_thread: Dict[int, int] = {}
         self.llm_clients: Dict[str, openai.AsyncOpenAI] = {}
+
+        self.exception_handler = LLMExceptionHandler(self.llm_config)
 
         self.channel_settings_path = "data/channel_llm_models.json"
         self.channel_models: Dict[str, str] = self._load_channel_models()
@@ -278,7 +288,7 @@ class LLMCog(commands.Cog, name="LLM"):
                 return
         except Exception as e:
             logger.error(f"Failed to get LLM client for channel {message.channel.id}: {e}", exc_info=True)
-            await message.reply(self._handle_llm_exception(e), silent=True)
+            await message.reply(self.exception_handler.handle_exception(e), silent=True)
             return
         image_contents, text_content = await self._prepare_multimodal_content(message)
         text_content = text_content.replace(f'<@!{self.bot.user.id}>', '').replace(f'<@{self.bot.user.id}>', '').strip()
@@ -326,7 +336,7 @@ class LLMCog(commands.Cog, name="LLM"):
                                                                              "Received an empty response from the AI."),
                                     silent=True)
         except Exception as e:
-            await message.reply(self._handle_llm_exception(e), silent=True)
+            await message.reply(self.exception_handler.handle_exception(e), silent=True)
 
     def _cleanup_old_threads(self):
         max_threads = 100
@@ -370,58 +380,54 @@ class LLMCog(commands.Cog, name="LLM"):
         logger.warning(f"Tool processing exceeded max iterations ({max_iterations})")
         return self.llm_config.get('error_msg', {}).get('tool_loop_timeout', "Tool processing exceeded max iterations.")
 
+    # --- 変更: SearchAgentのカスタム例外を処理する ---
     async def _process_tool_calls(self, tool_calls: List[Any], messages: List[Dict[str, Any]],
                                   log_context: str, channel_id: int) -> None:
         for tool_call in tool_calls:
             function_name = tool_call.function.name
             if self.search_agent and function_name == self.search_agent.name:
+                error_content = None
                 try:
                     function_args = json.loads(tool_call.function.arguments)
                     query_text = function_args.get('query', 'N/A')
                     logger.info(f"Executing SearchAgent | {log_context} | query='{query_text}'")
+
                     search_results = await self.search_agent.run(arguments=function_args, bot=self.bot,
                                                                  channel_id=channel_id)
+
                     tool_response = {"tool_call_id": tool_call.id, "role": "tool", "name": function_name,
                                      "content": str(search_results)}
                     messages.append(tool_response)
                     logger.info(f"SearchAgent completed | {log_context} | result_length={len(str(search_results))}")
+
+                except json.JSONDecodeError as e:
+                    logger.error(f"Error decoding tool arguments for {function_name}: {e}", exc_info=True)
+                    error_content = f"Error: Invalid JSON arguments - {str(e)}"
+
+                except SearchAPIRateLimitError as e:
+                    logger.warning(f"SearchAgent rate limit hit: {e}")
+                    error_content = "[Google Search Error]\nGoogle検索APIの利用制限に達しました。時間を置いてから再試行するようにユーザーに伝えてください。"
+
+                except SearchAPIServerError as e:
+                    logger.error(f"SearchAgent server error: {e}")
+                    error_content = "[Google Search Error]\n検索サービスで一時的なサーバーエラーが発生しました。時間を置いてから再試行するようにユーザーに伝えてください。"
+
+                except SearchAgentError as e:
+                    logger.error(f"Error during SearchAgent execution for {function_name}: {e}", exc_info=True)
+                    error_content = f"[Google Search Error]\n検索の実行中にエラーが発生しました: {str(e)}"
+
                 except Exception as e:
-                    logger.error(f"Error during tool call for {function_name}: {e}", exc_info=True)
-                    error_content = f"Error: Invalid JSON arguments - {str(e)}" if isinstance(e,
-                                                                                              json.JSONDecodeError) else f"Error executing search: {str(e)}"
+                    logger.error(f"Unexpected error during tool call for {function_name}: {e}", exc_info=True)
+                    error_content = f"[Google Search Error]\n予期しないエラーが発生しました: {str(e)}"
+
+                if error_content:
                     messages.append(
-                        {"tool_call_id": tool_call.id, "role": "tool", "name": function_name, "content": error_content})
+                        {"tool_call_id": tool_call.id, "role": "tool", "name": function_name, "content": error_content}
+                    )
             else:
                 logger.warning(f"Received a call for an unsupported tool: {function_name} | {log_context}")
                 messages.append({"tool_call_id": tool_call.id, "role": "tool", "name": function_name,
                                  "content": f"Error: Tool '{function_name}' is not available."})
-
-    def _handle_llm_exception(self, e: Exception) -> str:
-        error_detail = ""
-        if isinstance(e, openai.RateLimitError):
-            logger.warning(f"LLM API rate limit exceeded: {e.status_code} - {e.response.text if e.response else 'N/A'}")
-            base_msg_key, default_msg = 'ratelimit_error', "⚠️ 生成AIが現在非常に混雑しています。(Code: {status_code})"
-        elif isinstance(e, (openai.APIConnectionError, openai.APITimeoutError)):
-            logger.error(f"LLM API connection error: {e}")
-            return self.llm_config.get('error_msg', {}).get('general_error', "Failed to connect to the AI service.")
-        elif isinstance(e, openai.APIStatusError):
-            logger.error(f"LLM API status error: {e.status_code} - {e.response.text if e.response else 'N/A'}")
-            base_msg_key, default_msg = 'api_status_error', "AIとの通信でエラーが発生しました。(Code: {status_code})"
-        else:
-            logger.error(f"An unexpected error occurred during LLM interaction: {e}", exc_info=True)
-            return self.llm_config.get('error_msg', {}).get('general_error', "An unexpected error occurred.")
-
-        if hasattr(e, 'response') and e.response:
-            try:
-                error_data = e.response.json()
-                detail = error_data.get('detail') or error_data.get('message') or error_data.get('title')
-                error_detail = f"\n> **Details**: {detail}" if detail else f"\n> **Response**: `{str(error_data)[:500]}`"
-            except json.JSONDecodeError:
-                error_detail = f"\n> **Raw Response**: `{e.response.text[:500]}`"
-
-        base_message = self.llm_config.get('error_msg', {}).get(base_msg_key, default_msg).format(
-            status_code=e.status_code)
-        return f"{base_message}{error_detail}"[:DISCORD_MESSAGE_MAX_LENGTH]
 
     async def _send_reply_chunks(self, message: discord.Message, text_content: str) -> Optional[discord.Message]:
         if not text_content: return None
@@ -451,8 +457,7 @@ class LLMCog(commands.Cog, name="LLM"):
         if final_chunk := current_chunk.getvalue(): chunks.append(final_chunk)
         return chunks if chunks else [""]
 
-    # --- ここからコマンド定義 ---
-
+    # --- ここからコマンド定義 (変更なし) ---
     async def model_autocomplete(self, interaction: discord.Interaction, current: str) -> List[
         app_commands.Choice[str]]:
         available_models = self.llm_config.get('available_models', [])
@@ -489,7 +494,6 @@ class LLMCog(commands.Cog, name="LLM"):
             logger.error(f"Failed to save channel model settings: {e}", exc_info=True)
             await interaction.followup.send("❌ 設定の保存に失敗しました。")
 
-    # --- 新規追加: /switch-models-default コマンド ---
     @app_commands.command(
         name="switch-models-default",
         description="このチャンネルのAIモデルをデフォルトに切り替えます。Switch to default"
@@ -500,7 +504,6 @@ class LLMCog(commands.Cog, name="LLM"):
         model_to_set = "mistral/mistral-medium-latest"
         available_models = self.llm_config.get('available_models', [])
 
-        # 推奨モデルが利用可能リストに含まれているかチェック
         if model_to_set not in available_models:
             await interaction.followup.send(
                 f"⚠️ 推奨モデル `{model_to_set}` が設定ファイルで利用可能になっていません。\n"
@@ -523,8 +526,6 @@ class LLMCog(commands.Cog, name="LLM"):
         except Exception as e:
             logger.error(f"Failed to save channel model settings for default model: {e}", exc_info=True)
             await interaction.followup.send("❌ 設定の保存に失敗しました。")
-
-    # --- 新規追加ここまで ---
 
     @app_commands.command(
         name="switch-models-default-server",

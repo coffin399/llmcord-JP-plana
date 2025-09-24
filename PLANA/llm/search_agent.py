@@ -2,8 +2,20 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from typing import TYPE_CHECKING
 
 from google import genai
+
+# 作成したカスタム例外をインポート
+from PLANA.llm.error.errors import (
+    SearchAPIRateLimitError,
+    SearchAPIServerError,
+    SearchAPIError,
+    SearchExecutionError
+)
+
+if TYPE_CHECKING:
+    from discord.ext import commands
 
 
 class SearchAgent():
@@ -14,19 +26,18 @@ class SearchAgent():
             "name": name,
             "description": "Run a Google web search and return a report.",
             "parameters": {
-                    "type": "object",
-                    "properties": {"query": {"type": "string"}},
-                    "required": ["query"],
+                "type": "object",
+                "properties": {"query": {"type": "string"}},
+                "required": ["query"],
             },
         },
     }
 
-    def __init__(self, bot) -> None:
+    def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
 
     async def _google_search(self, query: str) -> str:
         gcfg = self.bot.cfg["search_agent"]
-
 
         client = genai.Client(api_key=gcfg["api_key"])
         retries = 2
@@ -45,28 +56,38 @@ class SearchAgent():
             except genai.errors.APIError as e:
                 code = getattr(e, "code", None)
                 if code == 429:
-                    return "[Google Search Error]\n Google検索APIの利用制限 (429: Too Many Requests) に遭遇しました。 Userには時間を置いてから再試行するように伝えてください"
+                    # エラー文字列を返す代わりに例外を発生させる
+                    raise SearchAPIRateLimitError("Google Search API rate limit (429) was reached.",
+                                                  original_exception=e)
                 elif code in [500, 502, 503]:
                     last_exception = e
                     if attempt < retries:
                         await asyncio.sleep(delay)
                         continue
-                    return f"[Google Search Error]\n サーバー側の一時的な問題 ({code}) により検索に失敗しました。Userには時間を置いてから再試行するように伝えてください"
+                    # リトライ後も失敗した場合に例外を発生させる
+                    raise SearchAPIServerError(f"Google Search API server-side error ({code}).", original_exception=e)
                 else:
-                    logging.error(f"Search Agentの予期しないAPIエラー: {e}")
-                    return f"[Google Search Error]\n APIエラーが発生しました: {str(e)}"
+                    logging.error(f"Search Agent unexpected API error: {e}")
+                    raise SearchAPIError(f"An unexpected API error occurred: {str(e)}", original_exception=e)
             except Exception as e:
-                logging.error(f"Search Agentの予期しないエラー: {e}")
-                return f"[Google Search Error]\n 予期しないエラーが発生しました: {str(e)}"
+                logging.error(f"Search Agent unexpected error: {e}")
+                # 予期しないエラーもカスタム例外でラップする
+                raise SearchExecutionError(f"An unexpected error occurred during search: {str(e)}",
+                                           original_exception=e)
 
-        return "[Google Search Error]\n 何らかの理由で検索に失敗しました。"
+        # ループが正常に完了しなかった場合 (リトライが尽きた場合など)
+        if last_exception:
+            raise SearchAPIServerError(f"Google Search failed after multiple retries.",
+                                       original_exception=last_exception)
+
+        raise SearchExecutionError("Search failed for an unknown reason after all retries.")
 
     async def run(self, *, arguments: dict, bot, channel_id: int) -> str:
         query = arguments.get("query", "")
         if not query:
-            return "[Google Search Error] query が空です。"
-        try:
-            return await self._google_search(query)
-        except Exception as e:
-            logging.error(f"Search Agentの予期しないエラー: {e}")
-            return f"[Google Search Error]\n予期しないエラーが発生しました: {str(e)}"
+            # queryが空の場合も例外を発生させるのが一貫性がある
+            raise SearchExecutionError("Query is empty.")
+
+        # _google_searchが例外を発生させるようになったため、このtry-exceptは不要かもしれないが、
+        # runメソッドの呼び出し側でハンドリングする想定のため、ここではそのまま呼び出す。
+        return await self._google_search(query)

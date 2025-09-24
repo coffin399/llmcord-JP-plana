@@ -1,9 +1,12 @@
-import logging
+# PLANA/cogs/images/image_commands_cog.py
 
+import logging
 import aiohttp
 import discord
 from discord import app_commands
 from discord.ext import commands
+
+from PLANA.images.error import errors
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +46,9 @@ class ImageCommandsCog(commands.Cog, name="画像検索"):
                                              headers=request_headers) as response:
                 if response.status == 200:
                     data = await response.json()
+                    # 正常なデータかチェック
                     if data and isinstance(data, list) and len(data) > 0 and data[0].get("url"):
+                        # --- 成功時の処理 ---
                         cat_url = data[0]["url"]
                         embed = discord.Embed(title="にゃーん！ / Meow!", color=discord.Color.random())
                         embed.set_image(url=cat_url)
@@ -51,24 +56,16 @@ class ImageCommandsCog(commands.Cog, name="画像検索"):
                         await interaction.followup.send(embed=embed, ephemeral=False)
                         logger.info(f"/meow: 猫画像送信成功 - {cat_url} (User: {interaction.user.id})")
                     else:
-                        await interaction.followup.send(
-                            "猫の画像が見つかりませんでした。\nCould not find a cat picture.", ephemeral=True)
-                        logger.warning("/meow: TheCatAPIからのデータ形式が不正または空です。")
+                        await errors.handle_meow_invalid_data(interaction)
                 else:
-                    error_text = await response.text()
-                    await interaction.followup.send(
-                        f"猫の画像の取得に失敗しました (ステータス: {response.status})。\nFailed to fetch a cat picture (Status: {response.status}).",
-                        ephemeral=True)
-                    logger.error(f"/meow: TheCatAPIエラー - Status: {response.status}, Response: {error_text[:200]}")
-        except aiohttp.ClientConnectorError as e:
-            logger.error(f"/meow コマンド実行中に接続エラー: {e}", exc_info=True)
-            await interaction.followup.send(
-                "猫画像サイトへの接続に失敗しました。\nFailed to connect to the cat picture site.", ephemeral=True)
+                    await errors.handle_meow_api_error(interaction, response)
+
+        # ▼▼▼ 変更点: 各エラーハンドリングを委譲 ▼▼▼
+        except aiohttp.ClientError as e: # aiohttpの接続関連エラーを広く捕捉
+            await errors.handle_meow_connection_error(interaction, e)
         except Exception as e:
-            logger.error(f"/meow コマンド実行中に予期せぬエラー: {e}", exc_info=True)
-            await interaction.followup.send(
-                "猫の画像の取得中に予期せぬエラーが発生しました。\nAn unexpected error occurred while fetching a cat picture.",
-                ephemeral=True)
+            await errors.handle_meow_unexpected_error(interaction, e)
+
 
 async def setup(bot: commands.Bot):
     if not hasattr(bot, 'config') or not bot.config:
