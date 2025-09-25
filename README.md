@@ -138,8 +138,8 @@ Please read the following guidelines carefully before using the AI features of t
     `config.default.yaml` をコピーして `config.yaml` を作成します。初回起動時に自動で生成もされます。
     Copy `config.default.yaml` to create `config.yaml`. It will also be generated automatically on the first run.
     
-    **生成された `config.yaml` を開き、少なくとも `bot_token` とLLM関連の設定を編集してください。**
-    **Open the generated `config.yaml` and edit at least the `bot_token` and LLM-related settings.**
+    **生成された `config.yaml` を開き、必要な設定を編集してください。**
+    **Open the generated `config.yaml` and edit the necessary settings.**
 
     <details>
     <summary><b>主要な設定項目一覧 (クリックで展開) / Key Configuration Options (Click to expand)</b></summary>
@@ -176,6 +176,92 @@ Please read the following guidelines carefully before using the AI features of t
     | `max_queue_size` | キューに追加できる曲の最大数。(デフォルト: `9000`)<br>Maximum number of songs in the queue. (Default: `9000`) |
     | `auto_leave_timeout` | VCに誰もいなくなってから自動退出するまでの秒数。(デフォルト: `10`)<br>Seconds to wait before auto-leaving an empty voice channel. (Default: `10`) |
     | `max_guilds` | Botが同時に接続できるサーバーの最大数。<br>Maximum number of guilds the bot can be connected to simultaneously. |
+
+    </details>
+
+    <details>
+    <summary><b>Twitch通知機能の設定 (クリックで展開) / Twitch Notification Setup (Click to expand)</b></summary>
+    
+    Twitchの配信開始を通知する機能を有効にするには、`config.yaml`にTwitch APIの認証情報を追加する必要があります。
+    To enable Twitch stream notifications, you need to add your Twitch API credentials to `config.yaml`.
+
+    1.  **`config.yaml` に以下の項目を追加します / Add the following to `config.yaml`:**
+        ```yaml
+        # Twitch APIの認証情報
+        twitch:
+          client_id: "YOUR_TWITCH_CLIENT_ID"
+          client_secret: "YOUR_TWITCH_CLIENT_SECRET"
+        ```
+
+    2.  **Twitch APIキーを取得します / Get your Twitch API keys:**
+        *   [Twitchデベロッパーコンソール](https://dev.twitch.tv/console)にアクセスし、Twitchアカウントでログインします。
+        *   「**Applications**」セクションで、「**Register Your Application**」をクリックします。
+        *   以下の情報でアプリケーションを登録します:
+            *   **Name:** 任意 (例: `MyDiscordBot`)
+            *   **OAuth Redirect URLs:** `http://localhost` (必須入力ですが、このBotでは使用しません)
+            *   **Category:** **`Chat Bot`** (チャットボット)
+        *   「**Create**」をクリックして作成します。
+
+    3.  **クライアントIDとシークレットをコピーします / Copy your Client ID and Secret:**
+        *   作成したアプリケーションの「**Manage**」ボタンをクリックします。
+        *   表示された「**Client ID**」をコピーし、`config.yaml`の`client_id`に貼り付けます。
+        *   「Client Secret」の隣にある「**New Secret**」ボタンをクリックして、**クライアントシークレット**を生成します。
+        *   **表示されたシークレットをすぐにコピーし**、`config.yaml`の`client_secret`に貼り付けます。(このシークレットは一度しか表示されません！)
+
+    4.  **トラブルシューティング / Troubleshooting:**
+        *   **問題:** 「Client Secret」が生成されない、または「Client Type」が「公開 (Public)」に強制変更される。
+        *   **原因:** アプリケーションのカテゴリが正しく設定されていない可能性があります。
+        *   **解決策:**
+            1.  アプリケーションを一度削除し、**最初からカテゴリを「Chat Bot」に設定して**作り直してください。
+            2.  それでも解決しない場合は、ブラウザのキャッシュや拡張機能が原因の可能性があります。**別のブラウザ（Chrome, Edge, Firefoxなど）や、シークレットモードで試してみてください。**
+
+    5.  **Cogを有効化します / Enable the Cog:**
+        `config.yaml`の`enabled_cogs`リストに`"PLANA.notification.twitch_notification"`が記載されていることを確認してください。
+        Make sure `"PLANA.notification.twitch_notification"` is listed in the `enabled_cogs` list in `config.yaml`.
+
+    </details>
+
+    <details>
+    <summary><b>メディアダウンロード機能の設定 (クリックで展開) / Media Downloader Setup (Click to expand)</b></summary>
+    
+    メディアダウンロード機能 (`/ytdlp_video`, `/ytdlp_audio`) を有効にするには、Google Drive APIの設定が必要です。この機能は、ダウンロードしたファイルを一時的にあなたのGoogle Driveにアップロードし、共有リンクを生成します。
+
+    To enable the media downloader (`/ytdlp_video`, `/ytdlp_audio`), you need to set up the Google Drive API. This feature temporarily uploads downloaded files to your Google Drive to generate a shareable link.
+
+    1.  **Google Cloudプロジェクトの準備 / Prepare your Google Cloud Project:**
+        *   [Google Cloud Console](https://console.cloud.google.com/)にアクセスし、新しいプロジェクトを作成します（または既存のプロジェクトを選択します）。
+        *   ナビゲーションメニューから「APIとサービス」>「ライブラリ」に進み、「**Google Drive API**」を検索して**有効化**します。
+
+    2.  **OAuthクライアントIDの作成 / Create an OAuth Client ID:**
+        *   「APIとサービス」>「認証情報」に進みます。
+        *   「＋認証情報を作成」をクリックし、「**OAuthクライアントID**」を選択します。
+        *   「アプリケーションの種類」で「**デスクトップアプリ**」を選択し、名前を付けて「作成」をクリックします。
+        *   作成後、「**JSONをダウンロード**」をクリックし、ダウンロードしたファイルを `client_secrets.json` という名前に変更して、Botのルートディレクトリ（`main.py`と同じ場所）に配置します。
+
+    3.  **Google Driveでフォルダを作成 / Create a folder in Google Drive:**
+        *   あなたのGoogle Driveに、Botがファイルをアップロードするための新しいフォルダを作成します（例: `DiscordBotUploads`）。
+        *   作成したフォルダを開き、ブラウザのアドレスバーから**フォルダID**をコピーします。
+            *   URLが `https://drive.google.com/drive/folders/1a2b3c4d5e6f7g8h9i0j` の場合、`1a2b3c4d5e6f7g8h9i0j` の部分がフォルダIDです。
+
+    4.  **Cogファイルの設定を編集 / Edit the Cog file settings:**
+        *   `cogs/ytdlp_gdrive_cog.py` ファイルを開きます。
+        *   ファイル上部の設定項目 `GDRIVE_FOLDER_ID` の値を、ステップ3でコピーしたあなたのフォルダIDに書き換えます。
+            ```python
+            # cogs/ytdlp_gdrive_cog.py
+            ...
+            GDRIVE_FOLDER_ID = 'YOUR_GDRIVE_FOLDER_ID' # ← ここを書き換える
+            ...
+            ```
+    
+    5.  **初回認証の実行 / Perform initial authentication:**
+        *   Botを起動します (`python main.py`)。
+        *   **コンソール（ターミナル）**に認証用のURLが表示されます。
+        *   そのURLをブラウザで開き、あなたのGoogleアカウントでログインし、権限を許可してください。
+        *   認証が成功すると、`token.json` というファイルが自動で生成され、次回以降は自動でログインします。
+
+    6.  **Cogを有効化します / Enable the Cog:**
+        `config.yaml`の`enabled_cogs`リストに`"PLANA.downloader.ytdlp_downloader_cog"`が記載されていることを確認してください。
+        Make sure `"PLANA.downloader.ytdlp_downloader_cog"` is listed in the `enabled_cogs` list in `config.yaml`.
 
     </details>
 
