@@ -123,10 +123,10 @@ Please read the following guidelines carefully before using the AI features of t
 ### 前提条件 / Prerequisites
 *   Python 3.8以上
 *   Git
-*   FFmpeg (音楽機能・メディアダウンロード機能を有効にする場合)
-*   Docker & Docker Compose (任意、推奨)
+*   FFmpeg (音楽機能・メディアダウンロード機能を有効にする場合 / Required for Music & Media Downloader features)
+*   Docker & Docker Compose (任意、推奨 / Optional, Recommended)
 
-### 手順 / Instructions
+### 手順1：基本設定 / Step 1: Basic Setup
 
 1.  **リポジトリをクローンします / Clone the repository:**
     ```bash
@@ -135,180 +135,113 @@ Please read the following guidelines carefully before using the AI features of t
     ```
 
 2.  **`config.yaml` の設定 / Configure `config.yaml`:**
-    `config.default.yaml` をコピーして `config.yaml` を作成します。初回起動時に自動で生成もされます。
-    Copy `config.default.yaml` to create `config.yaml`. It will also be generated automatically on the first run.
+    `config.default.yaml` をコピーして `config.yaml` を作成します。（初回起動時に自動で生成もされます）
+    Copy `config.default.yaml` to create `config.yaml`. (It will also be generated automatically on the first run).
     
-    **生成された `config.yaml` を開き、必要な設定を編集してください。**
-    **Open the generated `config.yaml` and edit the necessary settings.**
+    生成された `config.yaml` を開き、**最低限以下の項目を設定してください。**
+    Open the generated `config.yaml` and **configure at least the following settings.**
 
-    <details>
-    <summary><b>主要な設定項目一覧 (クリックで展開) / Key Configuration Options (Click to expand)</b></summary>
+    *   `bot_token`: **必須。**[Discord Developer Portal](https://discord.com/developers/applications) で取得したBotのトークン。
+    *   `llm:` セクション: 使用するLLMの `model`, `providers` (APIキーなど)。
 
-    #### 全般設定 / General Settings:
-    | 設定 (Setting) | 説明 (Description) |
-    |---|---|
-    | **`bot_token`** | **必須。**[Discord Developer Portal](https://discord.com/developers/applications) で取得したBotのトークン。<br>**Required.** Your bot's token from the [Discord Developer Portal](https://discord.com/developers/applications). |
-    | `enabled_cogs` | ロードする機能 (Cog) のリスト。不要な機能はここから削除できます。<br>List of features (Cogs) to load. You can remove unwanted features here. |
-    | `status_rotation` | Botのステータスにローテーションで表示するメッセージのリスト。<br>A list of messages to be rotated in the bot's status. |
-    | `allowed_channel_ids` | Botが反応するチャンネルIDのリスト。空白で全チャンネル対応。<br>List of channel IDs where the bot will respond. Leave blank for all channels. |
-    | `allowed_role_ids` | Botを使用できるロールIDのリスト。空白で全員利用可。<br>List of role IDs that can use the bot. Leave blank for everyone. |
-    | `sync_slash_commands` | `true` の場合、起動時にスラッシュコマンドをDiscordに同期します。<br>If `true`, syncs slash commands with Discord on startup. |
-    | `test_guild_id` | 開発中、スラッシュコマンドを即時反映させるためのテストサーバーID。<br>Test server ID for immediate slash command updates during development. |
-    | `bot_invite_url` | `/invite` コマンドで表示されるBotの招待URL。<br>The bot's invitation URL displayed by the `/invite` command. |
+    その他の設定項目については、`config.default.yaml` 内のコメントを参照してください。
+    For other settings, please refer to the comments in `config.default.yaml`.
 
-    #### LLM 設定 ( `llm:` ) / LLM Settings (under `llm:`):
-    | 設定 (Setting) | 説明 (Description) |
-    |---|---|
-    | **`model`** | **必須。** 使用するメインLLMモデル。`<provider name>/<model name>` 形式。(例: `openai/gpt-4o`)<br>**Required.** Main LLM model to use. Format `<provider name>/<model name>`. (e.g., `openai/gpt-4o`) |
-    | **`providers`** | **必須。** 各LLMプロバイダーの `base_url` と `api_key` を設定します。(OpenAI互換APIのみ)<br>**Required.** Configure each LLM provider with `base_url` and `api_key`. (OpenAI-compatible APIs only) |
-    | `available_models` | `/switch-models` コマンドでユーザーが選択できるモデルのリスト。<br>A list of models users can select with the `/switch-models` command.<br>(例/e.g., `["openai/gpt-4o", "mistral/mistral-large-latest"]`) |
-    | `system_prompt` | AIの性格や役割を定義するシステムプロンプト。<br>System prompt to define the AI's personality and role. |
-    | `max_messages` | 会話履歴として記憶する最大メッセージ数。(デフォルト: `10`)<br>Max messages to keep in a reply chain. (Default: `10`) |
-    | `max_images` | 一度に認識できる最大画像数。(デフォルト: `1`)<br>Max image attachments per message. (Default: `1`) |
-    | `active_tools` | 有効にするツールのリスト (例: `["search"]`)。<br>List of tools to enable (e.g., `["search"]`). |
-    | `search_agent` | ウェブ検索エージェントの設定。`api_key` に **Google AI Studio APIキー** を設定します。<br>Settings for the web search agent. Set your **Google AI Studio API key** in `api_key`. |
-    | `extra_api_parameters` | `temperature` や `max_tokens` などのAPIパラメータ。<br>API parameters like `temperature` and `max_tokens`. |
+### 手順2：追加機能のセットアップ (任意) / Step 2: Setup for Additional Features (Optional)
+Twitch通知やメディアダウンロード機能を利用するには、追加の設定が必要です。
+Additional setup is required to use features like Twitch notifications and the media downloader.
 
-    #### 音楽再生設定 ( `music:` ) / Music Playback Settings (under `music:`):
-    | 設定 (Setting) | 説明 (Description) |
-    |---|---|
-    | `default_volume` | デフォルトの再生音量 (0-200)。(デフォルト: `50`)<br>Default playback volume (0-200). (Default: `50`) |
-    | `max_queue_size` | キューに追加できる曲の最大数。(デフォルト: `9000`)<br>Maximum number of songs in the queue. (Default: `9000`) |
-    | `auto_leave_timeout` | VCに誰もいなくなってから自動退出するまでの秒数。(デフォルト: `10`)<br>Seconds to wait before auto-leaving an empty voice channel. (Default: `10`) |
-    | `max_guilds` | Botが同時に接続できるサーバーの最大数。<br>Maximum number of guilds the bot can be connected to simultaneously. |
+#### Twitch通知機能の設定 / Twitch Notification Setup
+Twitchの配信開始を通知するには、Twitch APIの認証情報が必要です。
+To enable Twitch stream notifications, you need Twitch API credentials.
 
-    </details>
+1.  **Twitch APIキーを取得します / Get your Twitch API keys:**
+    - [Twitchデベロッパーコンソール](https://dev.twitch.tv/console)にアクセスし、「Applications」で「Register Your Application」をクリックします。
+    - **Category** を **`Chat Bot`** に設定してアプリケーションを登録します。(OAuth Redirect URLsは `http://localhost` でOKです)
+    - 作成したアプリケーションの「Manage」ページで、**Client ID** と **Client Secret** を取得します。(シークレットは「New Secret」ボタンで生成します)
 
-    <details>
-    <summary><b>Twitch通知機能の設定 (クリックで展開) / Twitch Notification Setup (Click to expand)</b></summary>
-    
-    Twitchの配信開始を通知する機能を有効にするには、`config.yaml`にTwitch APIの認証情報を追加する必要があります。
-    To enable Twitch stream notifications, you need to add your Twitch API credentials to `config.yaml`.
-
-    1.  **`config.yaml` に以下の項目を追加します / Add the following to `config.yaml`:**
-        ```yaml
-        # Twitch APIの認証情報
-        twitch:
-          client_id: "YOUR_TWITCH_CLIENT_ID"
-          client_secret: "YOUR_TWITCH_CLIENT_SECRET"
-        ```
-
-    2.  **Twitch APIキーを取得します / Get your Twitch API keys:**
-        *   [Twitchデベロッパーコンソール](https://dev.twitch.tv/console)にアクセスし、Twitchアカウントでログインします。
-        *   「**Applications**」セクションで、「**Register Your Application**」をクリックします。
-        *   以下の情報でアプリケーションを登録します:
-            *   **Name:** 任意 (例: `MyDiscordBot`)
-            *   **OAuth Redirect URLs:** `http://localhost` (必須入力ですが、このBotでは使用しません)
-            *   **Category:** **`Chat Bot`** (チャットボット)
-        *   「**Create**」をクリックして作成します。
-
-    3.  **クライアントIDとシークレットをコピーします / Copy your Client ID and Secret:**
-        *   作成したアプリケーションの「**Manage**」ボタンをクリックします。
-        *   表示された「**Client ID**」をコピーし、`config.yaml`の`client_id`に貼り付けます。
-        *   「Client Secret」の隣にある「**New Secret**」ボタンをクリックして、**クライアントシークレット**を生成します。
-        *   **表示されたシークレットをすぐにコピーし**、`config.yaml`の`client_secret`に貼り付けます。(このシークレットは一度しか表示されません！)
-
-    4.  **トラブルシューティング / Troubleshooting:**
-        *   **問題:** 「Client Secret」が生成されない、または「Client Type」が「公開 (Public)」に強制変更される。
-        *   **原因:** アプリケーションのカテゴリが正しく設定されていない可能性があります。
-        *   **解決策:**
-            1.  アプリケーションを一度削除し、**最初からカテゴリを「Chat Bot」に設定して**作り直してください。
-            2.  それでも解決しない場合は、ブラウザのキャッシュや拡張機能が原因の可能性があります。**別のブラウザ（Chrome, Edge, Firefoxなど）や、シークレットモードで試してみてください。**
-
-    5.  **Cogを有効化します / Enable the Cog:**
-        `config.yaml`の`enabled_cogs`リストに`"PLANA.notification.twitch_notification"`が記載されていることを確認してください。
-        Make sure `"PLANA.notification.twitch_notification"` is listed in the `enabled_cogs` list in `config.yaml`.
-
-    </details>
-
-    <details>
-    <summary><b>メディアダウンロード機能の設定 (クリックで展開) / Media Downloader Setup (Click to expand)</b></summary>
-    
-    メディアダウンロード機能 (`/ytdlp_video`, `/ytdlp_audio`) を有効にするには、Google Drive APIの設定が必要です。この機能は、ダウンロードしたファイルを一時的にあなたのGoogle Driveにアップロードし、共有リンクを生成します。
-
-    To enable the media downloader (`/ytdlp_video`, `/ytdlp_audio`), you need to set up the Google Drive API. This feature temporarily uploads downloaded files to your Google Drive to generate a shareable link.
-
-    1.  **Google Cloudプロジェクトの準備 / Prepare your Google Cloud Project:**
-        *   [Google Cloud Console](https://console.cloud.google.com/)にアクセスし、新しいプロジェクトを作成します（または既存のプロジェクトを選択します）。
-        *   ナビゲーションメニューから「APIとサービス」>「ライブラリ」に進み、「**Google Drive API**」を検索して**有効化**します。
-
-    2.  **OAuthクライアントIDの作成 / Create an OAuth Client ID:**
-        *   「APIとサービス」>「認証情報」に進みます。
-        *   「＋認証情報を作成」をクリックし、「**OAuthクライアントID**」を選択します。
-        *   「アプリケーションの種類」で「**デスクトップアプリ**」を選択し、名前を付けて「作成」をクリックします。
-        *   作成後、「**JSONをダウンロード**」をクリックし、ダウンロードしたファイルを `client_secrets.json` という名前に変更して、Botのルートディレクトリ（`main.py`と同じ場所）に配置します。
-
-    3.  **Google Driveでフォルダを作成 / Create a folder in Google Drive:**
-        *   あなたのGoogle Driveに、Botがファイルをアップロードするための新しいフォルダを作成します（例: `DiscordBotUploads`）。
-        *   作成したフォルダを開き、ブラウザのアドレスバーから**フォルダID**をコピーします。
-            *   URLが `https://drive.google.com/drive/folders/1a2b3c4d5e6f7g8h9i0j` の場合、`1a2b3c4d5e6f7g8h9i0j` の部分がフォルダIDです。
-
-    4.  **Cogファイルの設定を編集 / Edit the Cog file settings:**
-        *   `cogs/ytdlp_gdrive_cog.py` ファイルを開きます。
-        *   ファイル上部の設定項目 `GDRIVE_FOLDER_ID` の値を、ステップ3でコピーしたあなたのフォルダIDに書き換えます。
-            ```python
-            # cogs/ytdlp_gdrive_cog.py
-            ...
-            GDRIVE_FOLDER_ID = 'YOUR_GDRIVE_FOLDER_ID' # ← ここを書き換える
-            ...
-            ```
-    
-    5.  **初回認証の実行 / Perform initial authentication:**
-        *   Botを起動します (`python main.py`)。
-        *   **コンソール（ターミナル）**に認証用のURLが表示されます。
-        *   そのURLをブラウザで開き、あなたのGoogleアカウントでログインし、権限を許可してください。
-        *   認証が成功すると、`token.json` というファイルが自動で生成され、次回以降は自動でログインします。
-
-    6.  **Cogを有効化します / Enable the Cog:**
-        `config.yaml`の`enabled_cogs`リストに`"PLANA.downloader.ytdlp_downloader_cog"`が記載されていることを確認してください。
-        Make sure `"PLANA.downloader.ytdlp_downloader_cog"` is listed in the `enabled_cogs` list in `config.yaml`.
-
-    </details>
-
-3.  **Botを起動します / Start the Bot:**
-
-    いくつかの起動方法があります。自分に合った方法を選んでください。
-    There are several ways to start the bot. Choose the one that suits you best.
-
-    ---
-
-    #### 🚀 一番簡単な方法 (Windows) / The Easiest Way (Windows)
-    
-    `start_plana.bat` ファイルをダブルクリックするだけです。
-    初回起動時に、必要なライブラリ (`requirements.txt` の内容) が自動的にインストールされます。
-    
-    Simply double-click the `start_plana.bat` file.
-    On the first run, it will also automatically install the necessary libraries from `requirements.txt`.
-
-    ---
-    
-    #### 💻 標準的な方法 (Windows, Linux, macOS) / Standard Method (Windows, Linux, macOS)
-
-    1.  **依存関係をインストールします / Install dependencies:**
-        ターミナル（コマンドプロンプト）で以下のコマンドを実行します。
-        Run the following command in your terminal (or command prompt).
-        ```bash
-        pip install -r requirements.txt
-        ```
-
-    2.  **Botを起動します / Start the bot:**
-        ```bash
-        python main.py
-        ```
-
-    ---
-
-    #### 🐳 Dockerを使う方法 (推奨) / Using Docker (Recommended)
-
-    Dockerがインストールされている場合、この方法が最も簡単で環境を汚しません。
-    If you have Docker installed, this is the easiest method and keeps your environment clean.
-    ```bash
-    docker compose up --build -d
+2.  **`config.yaml` に追記します / Add to `config.yaml`:**
+    ```yaml
+    # Twitch APIの認証情報
+    twitch:
+      client_id: "YOUR_TWITCH_CLIENT_ID"
+      client_secret: "YOUR_TWITCH_CLIENT_SECRET"
     ```
-    (2回目以降は `--build` は不要です / `--build` is not needed after the first run)
 
-<p align="center">
-現在開発中です。仕様は変更される可能性があります。
-<br>
-Currently in development. Specifications are subject to change.
-</p>
+3.  **Cogを有効化します / Enable the Cog:**
+    `config.yaml`の`enabled_cogs`リストに`"PLANA.notification.twitch_notification"`が記載されていることを確認してください。
+
+#### メディアダウンロード機能の設定 / Media Downloader Setup
+`/ytdlp_video`, `/ytdlp_audio` を有効にするには、Google Drive APIの設定が必要です。
+To enable `/ytdlp_video` and `/ytdlp_audio`, you need to set up the Google Drive API.
+
+1.  **Google Cloudプロジェクトの準備 / Prepare your Google Cloud Project:**
+    - [Google Cloud Console](https://console.cloud.google.com/)でプロジェクトを作成（または選択）します。
+    - 「APIとサービス」>「ライブラリ」で、「**Google Drive API**」を検索して**有効化**します。
+
+2.  **OAuthクライアントIDの作成 / Create an OAuth Client ID:**
+    - 「APIとサービス」>「認証情報」で、「＋認証情報を作成」>「**OAuthクライアントID**」を選択します。
+    - アプリケーションの種類を「**デスクトップアプリ**」に設定して作成します。
+    - 作成後、「**JSONをダウンロード**」をクリックし、ファイルを `client_secrets.json` という名前でBotのルートディレクトリ（`main.py`と同じ場所）に保存します。
+
+3.  **Google Driveフォルダの準備 / Prepare a Google Drive folder:**
+    - あなたのGoogle Driveに、Botがファイルをアップロードするための新しいフォルダを作成します（例: `DiscordBotUploads`）。
+    - フォルダを開き、ブラウザのアドレスバーから**フォルダID**をコピーします。
+      - URLが `.../folders/1a2b3c4d5e6f7g8h9i0j` の場合、`1a2b3c4d5e6f7g8h9i0j` の部分がIDです。
+
+4.  **Cogファイルの設定 / Configure the Cog file:**
+    - `cogs/ytdlp_gdrive_cog.py` ファイルを開きます。
+    - ファイル上部の `GDRIVE_FOLDER_ID` の値を、ステップ3でコピーしたあなたのフォルダIDに書き換えます。
+      ```python
+      # PLANA/media_downloader/ytdlp_downloader_cog.py
+      ...
+      GDRIVE_FOLDER_ID = 'YOUR_GDRIVE_FOLDER_ID' # ← ここを書き換える / Change this
+      ...
+      ```
+
+5.  **初回認証の実行 / Perform initial authentication:**
+    - Botを起動すると、**コンソール（ターミナル）**に認証用URLが表示されます。
+    - URLをブラウザで開き、あなたのGoogleアカウントでログインして権限を許可してください。
+    - 認証が成功すると、`token.json` ファイルが自動で生成されます。
+
+6.  **Cogを有効化します / Enable the Cog:**
+    `config.yaml`の`enabled_cogs`リストに`"PLANA.downloader.ytdlp_downloader_cog"`が記載されていることを確認してください。
+
+### 手順3：Botの起動 / Step 3: Start the Bot
+いくつかの起動方法があります。自分に合った方法を選んでください。
+There are several ways to start the bot. Choose the one that suits you best.
+
+---
+
+#### 🚀 一番簡単な方法 (Windows) / The Easiest Way (Windows)
+    
+`start_plana.bat` ファイルをダブルクリックするだけです。
+初回起動時に、必要なライブラリ (`requirements.txt` の内容) が自動的にインストールされます。
+    
+Simply double-click the `start_plana.bat` file.
+On the first run, it will also automatically install the necessary libraries from `requirements.txt`.
+
+---
+    
+#### 💻 標準的な方法 (Windows, Linux, macOS) / Standard Method (Windows, Linux, macOS)
+
+1.  **依存関係をインストールします / Install dependencies:**
+    ターミナル（コマンドプロンプト）で以下のコマンドを実行します。
+    Run the following command in your terminal (or command prompt).
+    ```bash
+    pip install -r requirements.txt
+    ```
+
+2.  **Botを起動します / Start the bot:**
+    ```bash
+    python main.py
+    ```
+
+---
+
+#### 🐳 Dockerを使う方法 (推奨) / Using Docker (Recommended)
+
+Dockerがインストールされている場合、この方法が最も簡単で環境を汚しません。
+If you have Docker installed, this is the easiest method and keeps your environment clean.
+```bash
+docker compose up --build -d
