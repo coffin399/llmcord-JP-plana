@@ -6,6 +6,7 @@ import logging
 from typing import TYPE_CHECKING, Dict, Any
 
 import discord
+from discord import app_commands
 
 if TYPE_CHECKING:
     from PLANA.music.ytdlp_wrapper import Track
@@ -75,3 +76,28 @@ class MusicCogExceptionHandler:
 
         # --- Generic Fallback ---
         return self.get_message("error_playing", error=f"予期せぬエラーが発生しました: {type(error).__name__}")
+
+    async def handle_generic_command_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
+        """
+        コマンドで発生した予期せぬエラーを処理し、ユーザーに応答する汎用ハンドラ。
+
+        Args:
+            interaction (discord.Interaction): エラーが発生したインタラクション。
+            error (app_commands.AppCommandError): 発生したエラー。
+        """
+        command_name = interaction.command.qualified_name if interaction.command else "Unknown Command"
+        logger.error(f"An unexpected error occurred in command '{command_name}': {error}", exc_info=True)
+
+        # ユーザーに表示するメッセージ
+        message = "コマンドの実行中に予期せぬエラーが発生しました。\nAn unexpected error occurred while executing the command."
+
+        try:
+            # 応答がまだ送信されていないか確認
+            if not interaction.response.is_done():
+                await interaction.response.send_message(message, ephemeral=True)
+            else:
+                # 既に応答済み（deferなど）の場合はfollowupを使用
+                await interaction.followup.send(message, ephemeral=True)
+        except discord.errors.HTTPException as e:
+            # 応答送信に失敗した場合のログ
+            logger.error(f"Failed to send error message for command '{command_name}': {e}")

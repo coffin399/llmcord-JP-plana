@@ -1,3 +1,4 @@
+#main.py
 import discord
 from discord.ext import commands, tasks
 import yaml
@@ -17,10 +18,8 @@ logging.getLogger('httpx').setLevel(logging.WARNING)
 # --- カスタムDiscordロギングハンドラをインポート ---
 from PLANA.services.discord_handler import DiscordLogHandler
 
-# ▼▼▼ 変更点 ▼▼▼
 # この変数は使用されなくなりますが、他の場所で参照される可能性を考慮して残しておきます。
 COGS_DIRECTORY_NAME = "cogs"
-# ▲▲▲ 変更点 ▲▲▲
 
 CONFIG_FILE = 'config.yaml'
 DEFAULT_CONFIG_FILE = 'config.default.yaml'
@@ -258,7 +257,7 @@ class Shittim(commands.Bot):
                 logging.warning(f"エラーメッセージを送信できませんでした ({ctx.channel.id}): 権限不足")
 
 
-# (ASCIIアートは変更なし)
+# (ASCIIアート削除)
 
 if __name__ == "__main__":
     plana_art = r"""
