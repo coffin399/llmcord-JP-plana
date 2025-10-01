@@ -1,12 +1,15 @@
+# PLANA/utilities/slash_command_cog.py
 import datetime
 import logging
-import random  # ガチャ機能のために追加
-import re  # nDnダイスロールのために追加
+import random
+import re
 from typing import Optional
 
 import discord
 from discord import app_commands
 from discord.ext import commands
+
+from PLANA.utilities.error.errors import InvalidDiceNotationError, DiceValueError
 
 logger = logging.getLogger(__name__)
 
@@ -15,8 +18,8 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         # configから必要な値を取得
-        self.arona_repository = self.bot.config.get("arona_repository_url", "")
-        self.plana_repository = self.bot.config.get("plana_repository_url", "")
+        self.arona_repository = self.bot.config.get("arona_repository_url", "https://github.com/coffin399/music-bot-arona")
+        self.plana_repository = self.bot.config.get("plana_repository_url", "https://github.com/coffin399/llmcord-JP-plana")
 
         # サポート連絡先の設定
         self.support_x_url = self.bot.config.get("support_x_url", "https://x.com/coffin299")
@@ -42,7 +45,21 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
                 prefix = cfg_prefix
         return prefix
 
-    # (gacha, diceroll, roll, check, ping, serverinfo, userinfo, avatar, arona, plana, support, invite コマンドは変更なし)
+    def _get_single_recruit(self, guaranteed_star2: bool = False) -> int:
+        """
+        単発の生徒募集（ガチャ）を行い、レアリティを返す。
+        :param guaranteed_star2: Trueの場合、☆2以上が確定する。
+        :return: レアリティ (1, 2, or 3)
+        """
+        if guaranteed_star2:
+            population = [3, 2]
+            weights = [3.0, 18.5]
+            return random.choices(population, weights=weights, k=1)[0]
+        else:
+            population = [3, 2, 1]
+            weights = [3.0, 18.5, 78.5]
+            return random.choices(population, weights=weights, k=1)[0]
+
     @app_commands.command(name="gacha",
                           description="ブルーアーカイブ風の生徒募集（ガチャ）を行います。/ Recruits students like in Blue Archive.")
     @app_commands.describe(rolls="募集回数を選択します。/ Select the number of recruitments.")
@@ -55,20 +72,28 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
         num_rolls = rolls.value
         results = []
         if num_rolls == 10:
-            for _ in range(9): results.append(self._get_single_recruit())
+            for _ in range(9):
+                results.append(self._get_single_recruit())
             results.append(self._get_single_recruit(guaranteed_star2=True))
+            random.shuffle(results)
         else:
             results.append(self._get_single_recruit())
+
         has_star_3 = 3 in results
-        embed_color = discord.Color.purple() if has_star_3 else discord.Color.gold()
+        embed_color = discord.Color.from_rgb(230, 13, 138) if has_star_3 else discord.Color.gold()
+
         rarity_to_emoji = {1: "🟦", 2: "🟨", 3: "🟪"}
         emoji_results = [rarity_to_emoji[r] for r in results]
+
         if num_rolls == 10:
             result_text = "".join(emoji_results[:5]) + "\n" + "".join(emoji_results[5:])
         else:
             result_text = emoji_results[0]
-        embed = discord.Embed(title="生徒募集 結果 / Recruitment Results", description=f"{interaction.user.mention} 先生の募集結果です。", color=embed_color)
-        embed.add_field(name="ガチャ結果/Gacha results", value=result_text, inline=False)
+
+        embed = discord.Embed(title="生徒募集 結果 / Recruitment Results",
+                              description=f"{interaction.user.mention} 先生の募集結果です。",
+                              color=embed_color)
+        embed.add_field(name="結果 / Results", value=result_text, inline=False)
         embed.set_footer(text="提供割合: 🟪(☆3): 3.0%, 🟨(☆2): 18.5%, 🟦(☆1): 78.5%")
         await interaction.followup.send(embed=embed)
         logger.info(f"/gacha ({num_rolls}回) が実行されました。 (User: {interaction.user.id})")
@@ -78,8 +103,8 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
     @app_commands.describe(min_value="ダイスの最小値 / The minimum value of the dice", max_value="ダイスの最大値 / The maximum value of the dice")
     async def diceroll(self, interaction: discord.Interaction, min_value: int, max_value: int):
         if min_value > max_value:
-            await interaction.response.send_message("エラー: 最小値は最大値より大きくできません。\nError: The minimum value cannot be greater than the maximum value.", ephemeral=True)
-            return
+            raise DiceValueError("最小値は最大値より大きくできません。")
+
         result = random.randint(min_value, max_value)
         embed = discord.Embed(title="🎲 ダイスロール結果 / Dice Roll Result", description=f"{interaction.user.mention} がダイスを振りました！", color=discord.Color.green())
         embed.add_field(name="指定範囲 / Range", value=f"`{min_value}` ～ `{max_value}`", inline=False)
@@ -94,16 +119,16 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
     async def roll(self, interaction: discord.Interaction, expression: str):
         match = re.match(r'(\d*)d(\d+)\s*([+-]\s*\d+)?', expression.lower().strip())
         if not match:
-            await interaction.response.send_message("エラー: 不正なダイス表記です。`1d100`や`2d6+5`のような形式で入力してください。\nError: Invalid dice notation. Please use a format like `1d100` or `2d6+5`.", ephemeral=True)
-            return
+            raise InvalidDiceNotationError()
+
         dice_count_str, dice_sides_str, modifier_str = match.groups()
         dice_count = int(dice_count_str) if dice_count_str else 1
         dice_sides = int(dice_sides_str)
         modifier = int(modifier_str.replace(" ", "")) if modifier_str else 0
         MAX_DICE_COUNT, MAX_DICE_SIDES = 100, 10000
         if not (1 <= dice_count <= MAX_DICE_COUNT and 1 <= dice_sides <= MAX_DICE_SIDES):
-            await interaction.response.send_message(f"エラー: ダイスの数(1〜{MAX_DICE_COUNT})または面(1〜{MAX_DICE_SIDES})が不正です。\nError: Invalid number of dice (1-{MAX_DICE_COUNT}) or sides (1-{MAX_DICE_SIDES}).", ephemeral=True)
-            return
+            raise DiceValueError(f"ダイスの数(1〜{MAX_DICE_COUNT})または面(1〜{MAX_DICE_SIDES})が不正です。")
+
         rolls = [random.randint(1, dice_sides) for _ in range(dice_count)]
         total = sum(rolls)
         final_result = total + modifier
@@ -133,20 +158,22 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
     @app_commands.choices(condition=[app_commands.Choice(name="< (より小さい)", value="<"), app_commands.Choice(name="<= (以下)", value="<="), app_commands.Choice(name="> (より大きい)", value=">"), app_commands.Choice(name=">= (以上)", value=">="), app_commands.Choice(name="= (等しい)", value="==")])
     async def check(self, interaction: discord.Interaction, expression: str, condition: Optional[str] = None, target: Optional[int] = None):
         if (condition is None and target is not None) or (condition is not None and target is None):
+            # このエラーはダイス関連ではないので、直接送信するか、別のカスタム例外を作成します。
             await interaction.response.send_message("エラー: 判定を行うには、`条件`と`目標値`の両方を指定してください。\nError: To perform a check, you must specify both a `condition` and a `target` number.", ephemeral=True)
             return
+
         match = re.match(r'(\d*)d(\d+)\s*([+-]\s*\d+)?', expression.lower().strip())
         if not match:
-            await interaction.response.send_message("エラー: 不正なダイス表記です。`1d100`や`2d6+5`のような形式で入力してください。\nError: Invalid dice notation. Please use a format like `1d100` or `2d6+5`.", ephemeral=True)
-            return
+            raise InvalidDiceNotationError()
+
         dice_count_str, dice_sides_str, modifier_str = match.groups()
         dice_count = int(dice_count_str) if dice_count_str else 1
         dice_sides = int(dice_sides_str)
         modifier = int(modifier_str.replace(" ", "")) if modifier_str else 0
         MAX_DICE_COUNT, MAX_DICE_SIDES = 100, 10000
         if not (1 <= dice_count <= MAX_DICE_COUNT and 1 <= dice_sides <= MAX_DICE_SIDES):
-            await interaction.response.send_message(f"エラー: ダイスの数(1〜{MAX_DICE_COUNT})または面(1〜{MAX_DICE_SIDES})が不正です。\nError: Invalid number of dice (1-{MAX_DICE_COUNT}) or sides (1-{MAX_DICE_SIDES}).", ephemeral=True)
-            return
+            raise DiceValueError(f"ダイスの数(1〜{MAX_DICE_COUNT})または面(1〜{MAX_DICE_SIDES})が不正です。")
+
         rolls = [random.randint(1, dice_sides) for _ in range(dice_count)]
         total = sum(rolls)
         final_result = total + modifier
@@ -339,19 +366,14 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
             await interaction.response.send_message("エラー: Botの招待URLが `config.yaml` に正しく設定されていません。\nBotの管理者にご連絡ください。\n\nError: The bot's invitation URL is not set correctly in `config.yaml`.\nPlease contact the bot administrator.", ephemeral=True)
             logger.error(f"/invite が実行されましたが、招待URLがconfig.yamlに未設定またはプレースホルダです。 (User: {interaction.user.id})")
 
-    # ================================================================
-    # ▼▼▼ 統合されたヘルプコマンド ▼▼▼
-    # ================================================================
     @app_commands.command(name="help",
                           description="Botのヘルプ情報を表示します。/ Displays help information for the bot.")
     async def help_slash_command(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=False)
-
         bot_name_ja = self.bot.user.name if self.bot.user else "当Bot"
         bot_name_en = self.bot.user.name if self.bot.user else "This Bot"
         bot_avatar_url = self.bot.user.avatar.url if self.bot.user and self.bot.user.avatar else None
         prefix = await self.get_prefix_from_config()
-
         embed = discord.Embed(
             title=f"📜 {bot_name_ja} ヘルプ / {bot_name_en} Help",
             description=f"{self.generic_help_message_text_ja}\n\n{self.generic_help_message_text_en}",
@@ -359,25 +381,20 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
         )
         if bot_avatar_url:
             embed.set_thumbnail(url=bot_avatar_url)
-
-        # --- 1. 基本的な使い方 ---
         desc_ja_detail = "より詳細な情報は、以下のコマンドで確認できます。"
         desc_en_detail = "For more detailed information, please check the following commands:"
         llm_help_cmd_ja = "• **AI対話機能:** `/llm_help` (または `/llm_help_en`)"
         llm_help_cmd_en = "• **AI Chat (LLM):** `/llm_help` (or `/llm_help_en`)"
         music_help_cmd_ja = "• **音楽再生機能:** `/music_help`"
         music_help_cmd_en = "• **Music Playback:** `/music_help` (or `/music_help_en`)"
-
         prefix_info_ja = f"プレフィックスコマンドも利用可能です (現在のプレフィックス: `none` )。"
         prefix_info_en = f"(Prefix commands are also available. Current prefix: `none` )"
-
         embed.add_field(
             name="基本情報 / Basic Information",
             value=f"{desc_ja_detail}\n{llm_help_cmd_ja}\n{music_help_cmd_ja}\n{prefix_info_ja}\n\n"
                   f"{desc_en_detail}\n{llm_help_cmd_en}\n{music_help_cmd_en}\n{prefix_info_en}",
             inline=False
         )
-
         main_features_title_ja = "主な機能"
         main_features_ja_val = (
             "- **AIとの対話 (LLM):** メンションで話しかけるとAIが応答します。画像も認識可能です。\n"
@@ -396,10 +413,6 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
             value=f"{main_features_ja_val}\n\n{main_features_en_val}",
             inline=False
         )
-
-        # --- AI利用ガイドラインのセクションはここから削除 ---
-
-        # --- 3. その他の便利なコマンド ---
         utility_cmds_ja = [
             f"`/check <表記> [条件] [目標値]` - ダイスロールと任意での条件判定",
             f"`/roll <表記>` - nDn形式でダイスロール (例: 2d6+3)",
@@ -430,43 +443,60 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
             f"`/meow` - Displays a random cat picture",
             f"`/support` - Shows how to contact the developer"
         ]
-
         if self.plana_repository:
             utility_cmds_ja.append(f"`/plana` - Plana (Bot)リポジトリ")
             utility_cmds_en.append(f"`/plana` - Plana (Bot) repository")
         if self.arona_repository:
             utility_cmds_ja.append(f"`/arona` - Arona (Music)リポジトリ")
             utility_cmds_en.append(f"`/arona` - Arona (Music) repository")
-
-        # フィールドを日本語と英語に分割して文字数制限エラーを回避
-        embed.add_field(
-            name="便利なコマンド (Japanese)",
-            value="\n".join(utility_cmds_ja),
-            inline=False
-        )
-        embed.add_field(
-            name="Useful Commands (English)",
-            value="\n".join(utility_cmds_en),
-            inline=False
-        )
-
+        embed.add_field(name="便利なコマンド (Japanese)", value="\n".join(utility_cmds_ja), inline=False)
+        embed.add_field(name="Useful Commands (English)", value="\n".join(utility_cmds_en), inline=False)
         footer_ja = "<> は必須引数、[] は任意引数を表します。"
         footer_en = "<> denotes a required argument, [] denotes an optional argument."
         embed.set_footer(text=f"{footer_ja}\n{footer_en}")
-
         view_items = []
         if self.bot_invite_url and self.bot_invite_url not in ["YOUR_BOT_INVITE_LINK_HERE", "HOGE_FUGA_PIYO"]:
-            view_items.append(discord.ui.Button(label="Botを招待 / Invite Bot", style=discord.ButtonStyle.link,
-                                                url=self.bot_invite_url))
-
+            view_items.append(discord.ui.Button(label="Botを招待 / Invite Bot", style=discord.ButtonStyle.link, url=self.bot_invite_url))
         if view_items:
             view = discord.ui.View()
             for item in view_items: view.add_item(item)
             await interaction.followup.send(embed=embed, view=view, ephemeral=False)
         else:
             await interaction.followup.send(embed=embed, ephemeral=False)
-
         logger.info(f"/help が実行されました。 (User: {interaction.user.id})")
+
+    # Cog全体のエラーを処理するイベントハンドラを追加
+    @commands.Cog.listener()
+    async def on_app_command_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
+        """
+        スラッシュコマンドで発生したエラーを処理する。
+        """
+        original_error = getattr(error, 'original', error)
+
+        # 自分で定義したカスタムエラーかどうかをチェック
+        if isinstance(original_error, (InvalidDiceNotationError, DiceValueError)):
+            error_message = f"エラー: {original_error.message}"
+            await interaction.response.send_message(error_message, ephemeral=True)
+            logger.warning(f"コマンド '{interaction.command.name}' でエラーが発生: {original_error} (User: {interaction.user.id})")
+
+        # その他の予期しないエラー
+        else:
+            logger.error(f"コマンド '{interaction.command.name}' で予期しないエラーが発生しました。", exc_info=error)
+            try:
+                if not interaction.response.is_done():
+                    await interaction.response.send_message(
+                        "コマンドの実行中に予期しないエラーが発生しました。開発者に連絡してください。\n"
+                        "An unexpected error occurred while executing the command. Please contact the developer.",
+                        ephemeral=True
+                    )
+                else:
+                    await interaction.followup.send(
+                        "コマンドの実行中に予期しないエラーが発生しました。開発者に連絡してください。\n"
+                        "An unexpected error occurred while executing the command. Please contact the developer.",
+                        ephemeral=True
+                    )
+            except discord.HTTPException as e:
+                logger.error(f"エラーメッセージの送信に失敗しました: {e}")
 
 
 async def setup(bot: commands.Bot):
