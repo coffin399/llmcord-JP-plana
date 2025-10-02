@@ -216,9 +216,9 @@ class Shittim(commands.Bot):
             "plz type /help",
             "operating on {guild_count} servers",
             "operating on {guild_count} servers",
-            "Version20250916",
-            "SwitchModelsAvailable！",
-            "type /switch-model"
+            "Version20251002",
+            "/llm_help",
+            "/llm_help_en"
         ])
         self.rotate_status.start()
 
