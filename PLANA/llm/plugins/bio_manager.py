@@ -78,8 +78,17 @@ class BioManager:
             return True
         return False
 
-    async def set_user_bio(self, user_id: int, bio: str) -> None:
-        self.user_bios[str(user_id)] = bio
+    async def set_user_bio(self, user_id: int, bio: str, mode: str = 'overwrite') -> None:
+        user_id_str = str(user_id)
+        if mode == 'append':
+            existing_bio = self.user_bios.get(user_id_str, "")
+            if existing_bio:
+                self.user_bios[user_id_str] = f"{existing_bio}\n{bio}"
+            else:
+                self.user_bios[user_id_str] = bio
+        else:  # 'overwrite' or default
+            self.user_bios[user_id_str] = bio
+
         await self._save_user_bios()
 
     def get_user_bio(self, user_id: int) -> str | None:
