@@ -135,9 +135,11 @@ class BioManager:
             if os.path.exists(path):
                 with open(path, 'r', encoding='utf-8') as f:
                     data = json.load(f)
+                    # 読み込んだデータを辞書として返し、キーを文字列に変換する
                     return {str(k): v for k, v in data.items()}
         except (IOError, json.JSONDecodeError) as e:
             logger.error(f"Failed to load JSON file '{path}': {e}")
+        # ファイルが存在しない、またはエラーの場合は空の辞書を返す
         return {}
 
     async def _save_json_data(self, data: Dict[str, Any], path: str) -> None:
