@@ -242,7 +242,13 @@ class LLMCog(commands.Cog, name="LLM"):
                     text_content = text_content.replace(f'<@!{self.bot.user.id}>', '').replace(f'<@{self.bot.user.id}>',
                                                                                                '').strip()
                     if text_content or image_contents:
-                        user_content_parts = [{"type": "text", "text": text_content}] if text_content else []
+                        user_content_parts = []
+                        if text_content:
+                            # 変更点: 履歴のユーザープロンプトにもタイムスタンプを追加
+                            timestamp = parent_msg.created_at.astimezone(self.jst).strftime('[%H:%M]')
+                            formatted_text = f"{timestamp} {text_content}"
+                            user_content_parts.append({"type": "text", "text": formatted_text})
+
                         user_content_parts.extend(image_contents)
                         history.append({"role": "user", "content": user_content_parts})
                 else:
@@ -361,11 +367,10 @@ class LLMCog(commands.Cog, name="LLM"):
             user_display_name=message.author.display_name
         )
 
-        # 変更点: システムプロンプトに現在の日付と時刻を埋め込む
         try:
             now = datetime.now(self.jst)
             current_date_str = now.strftime('%Y年%m月%d日')
-            current_time_str = now.strftime('%H:%M') # 時刻を取得
+            current_time_str = now.strftime('%H:%M')
             system_prompt = system_prompt.format(current_date=current_date_str, current_time=current_time_str)
         except (KeyError, ValueError) as e:
             logger.warning(
@@ -376,7 +381,14 @@ class LLMCog(commands.Cog, name="LLM"):
 
         messages_for_api: List[Dict[str, Any]] = [{"role": "system", "content": system_prompt}]
         messages_for_api.extend(await self._collect_conversation_history(message))
-        user_content_parts = [{"type": "text", "text": text_content}] if text_content else []
+
+        user_content_parts = []
+        if text_content:
+            # 変更点: ユーザープロンプトにタイムスタンプを追加
+            timestamp = message.created_at.astimezone(self.jst).strftime('[%H:%M]')
+            formatted_text = f"{timestamp} {text_content}"
+            user_content_parts.append({"type": "text", "text": formatted_text})
+
         user_content_parts.extend(image_contents)
         user_message_for_api = {"role": "user", "content": user_content_parts}
         messages_for_api.append(user_message_for_api)
@@ -574,14 +586,13 @@ class LLMCog(commands.Cog, name="LLM"):
             color = discord.Color.blue()
         else:
             default_prompt = self.llm_config.get('system_prompt', "設定されていません。")
-            # 変更点: デフォルトプロンプト表示時にも日付と時刻を埋め込む
             try:
                 now = datetime.now(self.jst)
                 current_date_str = now.strftime('%Y年%m月%d日')
                 current_time_str = now.strftime('%H:%M')
                 formatted_prompt = default_prompt.format(current_date=current_date_str, current_time=current_time_str)
             except (KeyError, ValueError):
-                formatted_prompt = default_prompt  # フォーマット失敗時はそのまま表示
+                formatted_prompt = default_prompt
 
             title = "現在のAIのbio"
             description = f"このチャンネルには専用のAI bioが設定されていません。\nサーバーのデフォルト設定が使用されます。\n\n**デフォルト設定:**\n```\n{formatted_prompt}\n```"
@@ -603,7 +614,6 @@ class LLMCog(commands.Cog, name="LLM"):
             if await self.bio_manager.reset_channel_bio(interaction.channel_id):
                 logger.info(f"AI bio for channel {interaction.channel_id} reset by {interaction.user.name}")
                 default_prompt = self.llm_config.get('system_prompt', '未設定')
-                # 変更点: デフォルトプロンプト表示時にも日付と時刻を埋め込む
                 try:
                     now = datetime.now(self.jst)
                     current_date_str = now.strftime('%Y年%m月%d日')
