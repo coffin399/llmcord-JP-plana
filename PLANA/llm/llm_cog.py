@@ -8,6 +8,7 @@ import logging
 import os
 import re
 from typing import List, Dict, Any, Tuple, Optional
+from datetime import datetime, timezone, timedelta
 
 import aiohttp
 import discord
@@ -81,6 +82,8 @@ class LLMCog(commands.Cog, name="LLM"):
         self.channel_models: Dict[str, str] = self._load_json_data(self.channel_settings_path)
         logger.info(
             f"Loaded {len(self.channel_models)} channel-specific model settings from '{self.channel_settings_path}'.")
+
+        self.jst = timezone(timedelta(hours=+9))
 
         # プラグインの初期化
         self.search_agent = self._initialize_search_agent()
@@ -358,6 +361,16 @@ class LLMCog(commands.Cog, name="LLM"):
             user_display_name=message.author.display_name
         )
 
+        # 変更点: システムプロンプトに現在の日付と時刻を埋め込む
+        try:
+            now = datetime.now(self.jst)
+            current_date_str = now.strftime('%Y年%m月%d日')
+            current_time_str = now.strftime('%H:%M') # 時刻を取得
+            system_prompt = system_prompt.format(current_date=current_date_str, current_time=current_time_str)
+        except (KeyError, ValueError) as e:
+            logger.warning(
+                f"Could not format system_prompt with date/time. It might be missing placeholders. Error: {e}")
+
         if formatted_memories := self.memory_manager.get_formatted_memories():
             system_prompt += f"\n\n{formatted_memories}"
 
@@ -561,8 +574,17 @@ class LLMCog(commands.Cog, name="LLM"):
             color = discord.Color.blue()
         else:
             default_prompt = self.llm_config.get('system_prompt', "設定されていません。")
+            # 変更点: デフォルトプロンプト表示時にも日付と時刻を埋め込む
+            try:
+                now = datetime.now(self.jst)
+                current_date_str = now.strftime('%Y年%m月%d日')
+                current_time_str = now.strftime('%H:%M')
+                formatted_prompt = default_prompt.format(current_date=current_date_str, current_time=current_time_str)
+            except (KeyError, ValueError):
+                formatted_prompt = default_prompt  # フォーマット失敗時はそのまま表示
+
             title = "現在のAIのbio"
-            description = f"このチャンネルには専用のAI bioが設定されていません。\nサーバーのデフォルト設定が使用されます。\n\n**デフォルト設定:**\n```\n{default_prompt}\n```"
+            description = f"このチャンネルには専用のAI bioが設定されていません。\nサーバーのデフォルト設定が使用されます。\n\n**デフォルト設定:**\n```\n{formatted_prompt}\n```"
             color = discord.Color.greyple()
         embed = discord.Embed(title=title, description=description, color=color)
         await interaction.followup.send(embed=embed, ephemeral=False)
@@ -581,8 +603,20 @@ class LLMCog(commands.Cog, name="LLM"):
             if await self.bio_manager.reset_channel_bio(interaction.channel_id):
                 logger.info(f"AI bio for channel {interaction.channel_id} reset by {interaction.user.name}")
                 default_prompt = self.llm_config.get('system_prompt', '未設定')
+                # 変更点: デフォルトプロンプト表示時にも日付と時刻を埋め込む
+                try:
+                    now = datetime.now(self.jst)
+                    current_date_str = now.strftime('%Y年%m月%d日')
+                    current_time_str = now.strftime('%H:%M')
+                    formatted_prompt = default_prompt.format(current_date=current_date_str, current_time=current_time_str)
+                except (KeyError, ValueError):
+                    formatted_prompt = default_prompt
+
+                display_prompt = (formatted_prompt[:100] + '...') if len(
+                    formatted_prompt) > 103 else formatted_prompt
+
                 await interaction.followup.send(
-                    f"✅ このチャンネルのAIのbioをデフォルト設定に戻しました。\n> 現在のデフォルト: `{default_prompt}`",
+                    f"✅ このチャンネルのAIのbioをデフォルト設定に戻しました。\n> 現在のデフォルト: `{display_prompt}`",
                     ephemeral=False
                 )
             else:
