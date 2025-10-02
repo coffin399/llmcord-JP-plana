@@ -35,6 +35,12 @@ except ImportError:
     BioManager = None
 
 try:
+    from PLANA.llm.plugins.memory_manager import MemoryManager
+except ImportError:
+    logging.error("Could not import MemoryManager. Memory functionality will be disabled.")
+    MemoryManager = None
+
+try:
     import aiofiles
 except ImportError:
     aiofiles = None
@@ -71,15 +77,15 @@ class LLMCog(commands.Cog, name="LLM"):
 
         self.exception_handler = LLMExceptionHandler(self.llm_config)
 
-        # --- 変更: モデル設定の読み込みのみ残す ---
         self.channel_settings_path = "data/channel_llm_models.json"
         self.channel_models: Dict[str, str] = self._load_json_data(self.channel_settings_path)
         logger.info(
             f"Loaded {len(self.channel_models)} channel-specific model settings from '{self.channel_settings_path}'.")
 
-        # --- 変更: プラグインの初期化 ---
+        # プラグインの初期化
         self.search_agent = self._initialize_search_agent()
         self.bio_manager = self._initialize_bio_manager()
+        self.memory_manager = self._initialize_memory_manager()
 
         default_model_string = self.llm_config.get('model')
         if default_model_string:
@@ -96,7 +102,6 @@ class LLMCog(commands.Cog, name="LLM"):
         await self.http_session.close()
         logger.info("LLMCog's aiohttp session has been closed.")
 
-    # --- 変更: bio関連の読み書きロジックを削除し、モデル設定専用にする ---
     def _load_json_data(self, path: str) -> Dict[str, Any]:
         try:
             if os.path.exists(path):
@@ -156,7 +161,6 @@ class LLMCog(commands.Cog, name="LLM"):
             self.llm_clients[model_string] = client
         return client
 
-    # --- 変更: プラグイン初期化メソッド ---
     def _initialize_search_agent(self) -> Optional[SearchAgent]:
         if 'search' not in self.llm_config.get('active_tools', []) or not SearchAgent:
             return None
@@ -179,16 +183,25 @@ class LLMCog(commands.Cog, name="LLM"):
             logger.error(f"Failed to initialize BioManager: {e}", exc_info=True)
             return None
 
-    # --- 変更: ツール定義を各プラグインから取得 ---
+    def _initialize_memory_manager(self) -> Optional[MemoryManager]:
+        if not MemoryManager:
+            return None
+        try:
+            return MemoryManager(self.bot)
+        except Exception as e:
+            logger.error(f"Failed to initialize MemoryManager: {e}", exc_info=True)
+            return None
+
     def get_tools_definition(self) -> Optional[List[Dict[str, Any]]]:
         definitions = []
         active_tools = self.llm_config.get('active_tools', [])
 
         if 'search' in active_tools and self.search_agent:
             definitions.append(self.search_agent.tool_spec)
-
         if 'user_bio' in active_tools and self.bio_manager:
             definitions.append(self.bio_manager.tool_spec)
+        if 'memory' in active_tools and self.memory_manager:
+            definitions.append(self.memory_manager.tool_spec)
 
         return definitions or None
 
@@ -335,8 +348,8 @@ class LLMCog(commands.Cog, name="LLM"):
 
         thread_id = await self._get_conversation_thread_id(message)
 
-        if not self.bio_manager:
-            await message.reply("BioManagerが初期化されていないため、応答できません。", silent=True)
+        if not self.bio_manager or not self.memory_manager:
+            await message.reply("必要なプラグインが初期化されていないため、応答できません。", silent=True)
             return
 
         system_prompt = self.bio_manager.get_system_prompt(
@@ -344,6 +357,9 @@ class LLMCog(commands.Cog, name="LLM"):
             user_id=message.author.id,
             user_display_name=message.author.display_name
         )
+
+        if formatted_memories := self.memory_manager.get_formatted_memories():
+            system_prompt += f"\n\n{formatted_memories}"
 
         messages_for_api: List[Dict[str, Any]] = [{"role": "system", "content": system_prompt}]
         messages_for_api.extend(await self._collect_conversation_history(message))
@@ -437,6 +453,9 @@ class LLMCog(commands.Cog, name="LLM"):
                 elif self.bio_manager and function_name == self.bio_manager.name:
                     tool_response_content = await self.bio_manager.run_tool(arguments=function_args, user_id=user_id)
 
+                elif self.memory_manager and function_name == self.memory_manager.name:
+                    tool_response_content = await self.memory_manager.run_tool(arguments=function_args)
+
                 else:
                     logger.warning(f"Received a call for an unsupported tool: {function_name} | {log_context}")
                     error_content = f"Error: Tool '{function_name}' is not available."
@@ -492,7 +511,7 @@ class LLMCog(commands.Cog, name="LLM"):
         if final_chunk := current_chunk.getvalue(): chunks.append(final_chunk)
         return chunks if chunks else [""]
 
-    # --- ここからコマンド定義 (BioManagerを使用するように変更) ---
+    # --- ここからコマンド定義 ---
 
     # --- AIのbio (チャンネルごと) ---
     @app_commands.command(
@@ -650,6 +669,98 @@ class LLMCog(commands.Cog, name="LLM"):
             logger.error(f"Failed to save user bio settings after reset: {e}", exc_info=True)
             await interaction.followup.send("❌ あなたの情報の削除に失敗しました。", ephemeral=True)
 
+    # --- グローバル共有メモリ関連コマンド ---
+    @app_commands.command(
+        name="memory-save",
+        description="グローバル共有メモリに情報を保存します。/ Save information to the global shared memory."
+    )
+    @app_commands.describe(
+        key="情報のキー（項目名） 例: '開発者からのお知らせ'",
+        value="情報の内容 例: '次回のメンテナンスは...'"
+    )
+    async def memory_save_slash(self, interaction: discord.Interaction, key: str, value: str):
+        await interaction.response.defer(ephemeral=True)
+        if not self.memory_manager:
+            await interaction.followup.send("❌ MemoryManagerが利用できません。", ephemeral=True)
+            return
+
+        try:
+            await self.memory_manager.save_memory(key, value)
+            embed = discord.Embed(
+                title="✅ グローバル共有メモリに保存しました",
+                color=discord.Color.green()
+            )
+            embed.add_field(name="キー", value=f"```{key}```", inline=False)
+            embed.add_field(name="値", value=f"```{value}```", inline=False)
+            await interaction.followup.send(embed=embed, ephemeral=True)
+        except Exception as e:
+            logger.error(f"Failed to save global memory via command: {e}", exc_info=True)
+            await interaction.followup.send("❌ グローバル共有メモリへの保存に失敗しました。", ephemeral=True)
+
+    @app_commands.command(
+        name="memory-list",
+        description="グローバル共有メモリの情報を一覧表示します。/ List all global shared memories."
+    )
+    async def memory_list_slash(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=False)
+        if not self.memory_manager:
+            await interaction.followup.send("❌ MemoryManagerが利用できません。", ephemeral=True)
+            return
+
+        memories = self.memory_manager.list_memories()
+        if not memories:
+            await interaction.followup.send("ℹ️ グローバル共有メモリには何も保存されていません。", ephemeral=True)
+            return
+
+        embed = discord.Embed(
+            title="🌐 グローバル共有メモリ",
+            color=discord.Color.blue()
+        )
+        description = ""
+        for key, value in memories.items():
+            field_text = f"**{key}**: {value}\n"
+            if len(description) + len(field_text) > 4000:
+                description += "\n... (表示制限のため一部省略)"
+                break
+            description += field_text
+
+        embed.description = description
+        await interaction.followup.send(embed=embed, ephemeral=False)
+
+    async def memory_key_autocomplete(self, interaction: discord.Interaction, current: str) -> List[
+        app_commands.Choice[str]]:
+        if not self.memory_manager:
+            return []
+        keys = self.memory_manager.list_memories().keys()
+        return [
+            app_commands.Choice(name=key, value=key)
+            for key in keys if current.lower() in key.lower()
+        ][:25]
+
+    @app_commands.command(
+        name="memory-delete",
+        description="グローバル共有メモリから情報を削除します。/ Delete a global shared memory."
+    )
+    @app_commands.describe(key="削除したい情報のキー")
+    @app_commands.autocomplete(key=memory_key_autocomplete)
+    async def memory_delete_slash(self, interaction: discord.Interaction, key: str):
+        await interaction.response.defer(ephemeral=True)
+        if not self.memory_manager:
+            await interaction.followup.send("❌ MemoryManagerが利用できません。", ephemeral=True)
+            return
+
+        try:
+            if await self.memory_manager.delete_memory(key):
+                await interaction.followup.send(f"✅ グローバル共有メモリからキー '{key}' を削除しました。",
+                                                ephemeral=True)
+            else:
+                await interaction.followup.send(f"⚠️ キー '{key}' はグローバル共有メモリに存在しません。",
+                                                ephemeral=True)
+        except Exception as e:
+            logger.error(f"Failed to delete global memory via command: {e}", exc_info=True)
+            await interaction.followup.send("❌ グローバル共有メモリからの削除に失敗しました。", ephemeral=True)
+
+    # --- モデル切り替え関連コマンド ---
     async def model_autocomplete(self, interaction: discord.Interaction, current: str) -> List[
         app_commands.Choice[str]]:
         available_models = self.llm_config.get('available_models', [])
@@ -716,6 +827,7 @@ class LLMCog(commands.Cog, name="LLM"):
         else:
             await interaction.followup.send(f"予期せぬエラーが発生しました: {error}", ephemeral=True)
 
+    # --- ヘルプと履歴クリア ---
     @app_commands.command(name="llm_help", description="LLM (AI対話) 機能のヘルプと利用ガイドラインを表示します。")
     async def llm_help_slash(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=False)
@@ -747,6 +859,10 @@ class LLMCog(commands.Cog, name="LLM"):
                 "• `/set-user-bio`: AIに覚えてほしいあなたの情報を設定します。\n"
                 "• `/show-user-bio`: AIが記憶しているあなたの情報を確認します。\n"
                 "• `/reset-user-bio`: あなたの情報をAIの記憶から削除します。\n"
+                "**【グローバルメモリ】**\n"
+                "• `/memory-save`: 全サーバー共通のメモリに情報を保存します。\n"
+                "• `/memory-list`: グローバルメモリの情報を一覧表示します。\n"
+                "• `/memory-delete`: グローバルメモリから情報を削除します。\n"
                 "**【その他】**\n"
                 "• `/clear_history`: 会話履歴をリセットします。"
             ),
