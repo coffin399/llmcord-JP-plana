@@ -900,10 +900,10 @@ class LLMCog(commands.Cog, name="LLM"):
                         inline=False)
         embed.add_field(name="--- 📜 AI利用ガイドライン ---",
                         value="AI機能を安全にご利用いただくため、以下の内容を必ずご確認ください。", inline=False)
-        embed.add_field(name="⚠️ 2. データ入力時の注意", value=(
+        embed.add_field(name="⚠️ 1. データ入力時の注意", value=(
             "AIに記憶させる情報には、氏名、連絡先、パスワードなどの**個人情報や秘密情報を絶対に含めないでください。**"),
                         inline=False)
-        embed.add_field(name="✅ 3. 生成物利用時の注意", value=(
+        embed.add_field(name="✅ 2. 生成物利用時の注意", value=(
             "AIの応答には虚偽や偏見が含まれる可能性があります。**必ずファクトチェックを行い、自己の責任で利用してください。**"),
                         inline=False)
         embed.set_footer(text="ガイドラインは予告なく変更される場合があります。")
@@ -971,10 +971,10 @@ class LLMCog(commands.Cog, name="LLM"):
                         inline=False)
         embed.add_field(name="--- 📜 AI Usage Guidelines ---",
                         value="Please review the following to ensure safe use of the AI features.", inline=False)
-        embed.add_field(name="⚠️ 2. Precautions for Data Input", value=(
+        embed.add_field(name="⚠️ 1. Precautions for Data Input", value=(
             "**NEVER include personal or confidential information** such as your name, contact details, or passwords in the information you ask the AI to remember."),
                         inline=False)
-        embed.add_field(name="✅ 3. Precautions for Using Generated Output", value=(
+        embed.add_field(name="✅ 2. Precautions for Using Generated Output", value=(
             "The AI's responses may contain inaccuracies or biases. **Always fact-check and use them at your own risk.**"),
                         inline=False)
         embed.set_footer(text="These guidelines are subject to change without notice.")
