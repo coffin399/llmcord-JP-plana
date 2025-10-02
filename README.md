@@ -42,16 +42,39 @@ Start a conversation with the AI by mentioning the bot (`@PLANA`) or replying to
 
 *   **継続的な会話 / Continuous Conversations:** 返信を続けることで文脈を維持した会話が可能です。
 *   **画像認識 / Image Recognition:** メッセージと一緒に画像を添付すると、AIが画像の内容も理解しようとします (ビジョンモデル対応の場合)。
-*   **チャンネル毎のモデル切り替え / Per-Channel Model Switching:** チャンネルごとに使用するAIモデルを柔軟に変更できます。会話の目的に合わせて、最適なモデル（例: 高性能モデル、高速応答モデルなど）を使い分けることが可能です。
-    *   `/switch-models [model]`: 利用可能なモデルリストから選択して切り替えます。
-    *   `/switch-models-default`: モデルをデフォルト設定に戻します。
 *   **ツール利用 (ウェブ検索) / Tool Use (Web Search):** AIが必要と判断した場合、インターネットで情報を検索して応答に利用します (Google AI Studio APIキーが必要です)。
 *   **会話履歴の管理 / Conversation History Management:** `/clear_history` コマンドで現在のチャンネルの会話履歴をリセットできます。
-*   **カスタマイズ可能なAIパーソナリティ / Customizable AI Personality:** `config.yaml` のシステムプロンプトを編集することで、AIの性格や応答スタイルを自由に変更できます。
+*   **カスタマイズ可能なAIパーソナリティ / Customizable AI Personality:** `config.yaml` のシステムプロンプトを編集することで、AIの基本的な性格や応答スタイルを自由に変更できます。
 
 <p align="center">
   <img src="https://i.imgur.com/wjdPNFQ.png" alt="PLANA MODEL CHANGE">
 </p>
+
+#### 🧠 パーソナリティ & 記憶機能 / Personality & Memory Features
+PLANAは、会話をより豊かにするための高度なパーソナリティ設定と記憶機能を備えています。
+
+*   **チャンネル別AIパーソナリティ (AI Bio) / Per-Channel AI Personality (AI Bio):**
+    チャンネルごとにAIの性格や役割を個別に設定できます。例えば、あるチャンネルでは「猫になりきって話すAI」、別のチャンネルでは「専門的な技術サポートAI」として振る舞わせることが可能です。
+    *   `/set-ai-bio [bio]`: チャンネルのAIパーソナリティを設定します。
+    *   `/show-ai-bio`: 現在のAIパーソナリティ設定を表示します。
+    *   `/reset-ai-bio`: 設定をデフォルトに戻します。
+
+*   **ユーザー別記憶 (User Bio) / Per-User Memory (User Bio):**
+    AIはユーザー一人ひとりの情報を記憶できます。「私の名前は〇〇です」と教えたり、`/set-user-bio` コマンドを使ったりすることで、AIはあなたの名前や好みを覚え、以降の会話でそれを活用します。この情報はサーバーをまたいで保持されます。
+    *   `/set-user-bio [bio] [mode]`: あなたの情報をAIに記憶させます（上書き/追記モードあり）。
+    *   `/show-user-bio`: AIが記憶しているあなたの情報を表示します。
+    *   `/reset-user-bio`: あなたの情報をAIの記憶から削除します。
+
+*   **グローバル共有メモリ / Global Shared Memory:**
+    Botが参加している全てのサーバーで共有される情報を記憶させることができます。Bot全体で共有したいルールや、開発者からのお知らせなどを保存するのに便利です。
+    *   `/memory-save [key] [value]`: グローバルメモリに情報を保存します。
+    *   `/memory-list`: 保存されている全ての情報を一覧表示します。
+    *   `/memory-delete [key]`: 指定した情報を削除します。
+
+*   **モデル切り替え / Model Switching:**
+    チャンネルごとに使用するAIモデルを柔軟に変更できます。会話の目的に合わせて、最適なモデル（例: 高性能モデル、高速応答モデルなど）を使い分けることが可能です。
+    *   `/switch-models [model]`: 利用可能なモデルリストから選択して切り替えます。
+    *   `/switch-models-default-server`: モデルをサーバーのデフォルト設定に戻します。
 
 ### 🎶 高機能な音楽再生 / Advanced Music Playback
 ボイスチャンネルで高品質な音楽を楽しめます。
@@ -72,7 +95,7 @@ Enjoy high-quality music in your voice channels.
 サーバー管理や情報確認に役立つ便利なスラッシュコマンドを提供します。
 Provides useful slash commands for server management and information retrieval.
 
-*   **/help, /llm_help:** Botの全機能のヘルプとAI利用ガイドラインをまとめた総合的なヘルプパネルを表示します。
+*   **/help, /llm_help, /llm_help_en:** Botの全機能のヘルプとAI利用ガイドラインをまとめた総合的なヘルプパネルを表示します。
 *   **/ping:** Botの現在の応答速度（レイテンシ）を表示します。
 *   **/serverinfo:** サーバーの作成日、メンバー数、チャンネル数などの詳細情報を表示します。
 *   **/userinfo [user]:** 指定したユーザー（または自分）のアカウント作成日やサーバー参加日、ロールなどの情報を表示します。
