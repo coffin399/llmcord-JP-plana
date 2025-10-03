@@ -38,16 +38,31 @@ def format_duration(duration_seconds: int) -> str:
 def parse_time_to_seconds(time_str: str) -> Optional[int]:
     """時刻文字列(MM:SS or HH:MM:SS or 秒数)を秒数に変換"""
     try:
+        # 前後の空白を除去
+        time_str = time_str.strip()
+
         # 単純な数値の場合
         if ':' not in time_str:
             return max(0, int(time_str))
 
+        # コロン区切りの場合
+        # 末尾のコロンを除去（例: "1:30:" -> "1:30"）
+        time_str = time_str.rstrip(':')
+
         # MM:SS or HH:MM:SS形式
-        parts = list(map(int, time_str.split(':')))
+        parts = [int(p) for p in time_str.split(':')]
+
+        # 空要素や負の値をチェック
+        if not parts or any(p < 0 for p in parts):
+            return None
+
         if len(parts) == 2:  # MM:SS
             return max(0, parts[0] * 60 + parts[1])
         elif len(parts) == 3:  # HH:MM:SS
             return max(0, parts[0] * 3600 + parts[1] * 60 + parts[2])
+        else:
+            # 2または3要素以外はエラー
+            return None
     except (ValueError, AttributeError):
         pass
     return None

@@ -155,13 +155,15 @@ twitch:
 # =============================================================================
 music:
   default_volume: 50 # デフォルト音量 (0-200)
-  max_queue_size: 1000
-  auto_leave_timeout: 30 # ユーザー不在時の自動退出までの秒数
-  max_playlist_items: 500 # プレイリストから一度に読み込む最大曲数
+  max_queue_size: 10000
+  auto_leave_timeout: 3 # ユーザー不在時の自動退出までの秒数
+  max_playlist_items: 5000 # プレイリストから一度に読み込む最大曲数
+  inactive_timeout_minutes: 3
 
   # FFmpeg settings
   ffmpeg_before_options: "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5"
   ffmpeg_options: "-vn"
+
 
   # Niconico account (オプション)
   niconico:
@@ -170,48 +172,47 @@ music:
 
   # Music Cogのメッセージ (必要に応じてカスタマイズ)
   messages:
-    join_voice_channel_first: ":warning: You need to be in a voice channel first."
-    bot_not_in_voice_channel: ":warning: The bot is not in a voice channel."
-    already_connected: ":information_source: Already connected to a voice channel."
-    not_connected_to_your_channel: ":warning: Not connected to your voice channel."
-    must_be_in_same_channel: ":warning: You must be in the same voice channel as the bot."
+    # Connection
+    join_voice_channel_first: "❌ Please join a voice channel first."
+    bot_not_in_voice_channel: "❌ The bot is not connected to a voice channel."
+    already_connected: "✅ Already connected to a voice channel."
+    leaving_voice_channel: "👋 Left the voice channel."
+    auto_left_empty_channel: "👋 Auto-left the voice channel as it became empty."
 
-    now_playing: ":notes: Now Playing: **{title}** (`{duration}`) - Requested by: **{requester_display_name}**"
-    added_to_queue: ":ballot_box_with_check: Added to queue: **{title}** (`{duration}`) - Requested by: **{requester_display_name}**"
-    added_playlist_to_queue: ":ballot_box_with_check: Added **{count}** songs from the playlist to the queue."
+    # Playback
+    now_playing: "🎵 **Now Playing:** {title}\n⏱️ **Duration:** {duration}\n👤 **Requested by:** {requester_display_name}"
+    now_playing_nothing: "❌ Nothing is currently playing."
+    added_to_queue: "➕ **Added to queue:** {title}\n⏱️ **Duration:** {duration}\n👤 **Requested by:** {requester_display_name}"
+    added_playlist_to_queue: "➕ Added **{count} songs** from playlist to queue."
+    playback_paused: "⏸️ Playback paused."
+    playback_resumed: "▶️ Playback resumed."
+    stopped_playback: "⏹️ Stopped playback and cleared queue."
+    skipped_song: "⏭️ Skipped **{title}**."
+    nothing_to_skip: "❌ Nothing to skip."
+    volume_set: "🔊 Volume set to **{volume}%**."
 
-    queue_empty: ":page_facing_up: The queue is empty."
-    queue_ended: ":information_source: Playback queue has ended."
-    queue_title: "queue"
+    # Seek
+    seeked_to_position: "⏩ Seeked to **{position}**."
+    invalid_time_format: "❌ Invalid time format. Example: `1:30` or `90`"
+    seek_beyond_duration: "❌ The specified time exceeds the song duration (**{duration}**)."
 
-    skipped_song: ":track_next: Skipped: **{title}**"
-    nothing_to_skip: ":information_source: There is nothing to skip."
-    stopped_playback: ":stop_button: Playback stopped and queue cleared."
-    playback_paused: ":pause_button: Playback paused."
-    playback_resumed: ":arrow_forward: Playback resumed."
+    # Queue
+    queue_title: "📜 **Queue** ({count} songs)"
+    queue_empty: "📭 The queue is empty."
+    queue_ended: "📭 Queue finished. Disconnecting from voice channel."
+    queue_shuffled: "🔀 Queue shuffled."
+    queue_cleared: "🗑️ Queue cleared."
+    song_removed: "➖ Removed **{title}** from queue."
+    invalid_queue_number: "❌ Invalid queue number."
+    max_queue_size_reached: "❌ Queue limit reached ({max_size} songs)."
 
-    volume_set: ":loud_sound: Volume set to **{volume}%**."
-    invalid_volume: ":warning: Volume must be between 0 and 200."
-    queue_shuffled: ":twisted_rightwards_arrows: Queue shuffled."
-    now_playing_nothing: ":information_source: Nothing is currently playing."
-    queue_cleared: ":wastebasket: Queue cleared."
+    # Loop
+    loop_off: "🔁 Loop mode: OFF"
+    loop_one: "🔂 Loop mode: ONE (current song)"
+    loop_all: "🔁 Loop mode: ALL (entire queue)"
 
-    loop_off: ":arrow_right_hook: Loop turned off."
-    loop_one: ":repeat_one: Looping current song."
-    loop_all: ":repeat: Looping entire queue."
-    invalid_loop_option: ":warning: Invalid loop option. Please specify `off`, `one`, or `all`."
-
-    song_removed: ":x: Removed from queue: **{title}**"
-    invalid_queue_number: ":warning: Invalid queue number. Check with `{prefix}queue`."
-
-    error_playing: ":x: An error occurred during playback: `{error}`"
-    error_playing_stream: ":x: Failed to get stream URL or prepare for playback: `{error}`"
-    error_fetching_song: ":x: Failed to fetch song information. Check the URL/search query or try another song. Error: `{error}`"
-
-    leaving_voice_channel: ":wave: Leaving voice channel."
-    auto_leave_empty_channel_countdown: ":timer: Auto-leaving in {timeout} seconds as the channel is empty..."
-    auto_leave_countdown_cancelled: ":white_check_mark: Auto-leave countdown cancelled."
-    auto_left_empty_channel: ":door: Left the voice channel because it became empty."
-
-    search_no_results: ":mag: No results found for \"{query}\"."
-    max_queue_size_reached: ":no_entry_sign: Max queue size ({max_size} songs) reached. Cannot add more."
+    # Errors
+    error_playing: "❌ An error occurred: {error}"
+    error_fetching_song: "❌ Error fetching song: {error}"
+    search_no_results: "🔍 No results found for **{query}**."
+    error_message_wrapper: "❌ {error}"
