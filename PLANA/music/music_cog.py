@@ -38,30 +38,22 @@ def format_duration(duration_seconds: int) -> str:
 def parse_time_to_seconds(time_str: str) -> Optional[int]:
     """時刻文字列(MM:SS or HH:MM:SS or 秒数)を秒数に変換"""
     try:
-        # 前後の空白を除去
         time_str = time_str.strip()
 
-        # 単純な数値の場合
         if ':' not in time_str:
             return max(0, int(time_str))
 
-        # コロン区切りの場合
-        # 末尾のコロンを除去（例: "1:30:" -> "1:30"）
         time_str = time_str.rstrip(':')
-
-        # MM:SS or HH:MM:SS形式
         parts = [int(p) for p in time_str.split(':')]
 
-        # 空要素や負の値をチェック
         if not parts or any(p < 0 for p in parts):
             return None
 
-        if len(parts) == 2:  # MM:SS
+        if len(parts) == 2:
             return max(0, parts[0] * 60 + parts[1])
-        elif len(parts) == 3:  # HH:MM:SS
+        elif len(parts) == 3:
             return max(0, parts[0] * 3600 + parts[1] * 60 + parts[2])
         else:
-            # 2または3要素以外はエラー
             return None
     except (ValueError, AttributeError):
         pass
@@ -90,10 +82,9 @@ class GuildState:
         self.connection_lock = asyncio.Lock()
         self.last_activity = datetime.now()
         self.cleanup_in_progress = False
-        # Seek用の追加フィールド
-        self.playback_start_time: Optional[float] = None  # 再生開始時刻(Unix timestamp)
-        self.seek_position: int = 0  # 現在のシーク位置(秒)
-        self.paused_at: Optional[float] = None  # 一時停止時刻
+        self.playback_start_time: Optional[float] = None
+        self.seek_position: int = 0
+        self.paused_at: Optional[float] = None
 
     def update_activity(self):
         self.last_activity = datetime.now()
@@ -108,7 +99,6 @@ class GuildState:
             return self.seek_position
 
         if self.is_paused and self.paused_at:
-            # 一時停止中は一時停止時の位置
             elapsed = self.paused_at - self.playback_start_time
             return self.seek_position + int(elapsed)
 
@@ -356,13 +346,14 @@ class MusicCog(commands.Cog, name="music_cog"):
             return
 
         track_to_play: Optional[Track] = None
+        is_seek_operation = seek_seconds > 0
 
         # seek操作の場合は常に現在の曲を使用
-        if seek_seconds > 0 and state.current_track:
+        if is_seek_operation and state.current_track:
             track_to_play = state.current_track
-        elif state.loop_mode == LoopMode.ONE and state.current_track:
+        elif state.loop_mode == LoopMode.ONE and state.current_track and not is_seek_operation:
             track_to_play = state.current_track
-        elif not state.queue.empty():
+        elif not state.queue.empty() and not is_seek_operation:
             try:
                 track_to_play = await state.queue.get()
                 state.queue.task_done()
@@ -380,7 +371,10 @@ class MusicCog(commands.Cog, name="music_cog"):
             await state.cleanup_voice_client()
             return
 
-        state.current_track = track_to_play
+        # seek操作でない場合のみcurrent_trackを更新
+        if not is_seek_operation:
+            state.current_track = track_to_play
+
         state.is_playing = True
         state.is_paused = False
         state.update_activity()
@@ -592,7 +586,7 @@ class MusicCog(commands.Cog, name="music_cog"):
         if not await self._ensure_voice(interaction, connect_if_not_in=False):
             return
 
-        if not state.current_track or not state.is_playing:
+        if not state.current_track:
             await self._send_response(interaction, "nothing_to_skip", ephemeral=True)
             return
 
@@ -607,8 +601,6 @@ class MusicCog(commands.Cog, name="music_cog"):
             return
 
         # 現在の再生を停止して、新しい位置から再生
-        # is_playing フラグを維持して、_play_next_songが正しく動作するようにする
-        state.is_playing = False
         if state.voice_client and state.voice_client.is_playing():
             state.voice_client.stop()
 
