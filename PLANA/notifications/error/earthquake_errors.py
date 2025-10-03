@@ -1,4 +1,4 @@
-# PLANA/notifications/error/errors.py
+# PLANA/notifications/error/earthquake_errors.py
 from __future__ import annotations
 
 import asyncio

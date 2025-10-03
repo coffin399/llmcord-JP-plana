@@ -542,28 +542,47 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
         except Exception as e:
             raise NotificationError(f"津波通知処理エラー: {e}")
 
-    # 修正: ログを詳細化し、権限チェックを追加して通知の失敗原因を特定しやすくした
     async def send_embed_to_channels(self, embed, info_type):
+        """Embedを設定されたチャンネルに送信する（デバッグ強化版）"""
         if not self.config:
+            logger.warning(f"通知送信スキップ ({info_type}): config が空です")
             return
-        sent_count, failed_count = 0, 0
-        for guild_id, guild_config in self.config.copy().items():
-            channel_id = guild_config.get(info_type)
-            if not channel_id:
-                continue
 
+        logger.info(f"📤 {info_type}通知送信開始 - 設定ギルド数: {len(self.config)}")
+        sent_count, failed_count, skipped_count = 0, 0, 0
+
+        for guild_id, guild_config in self.config.copy().items():
             try:
+                # guild_configの型チェック
+                if not isinstance(guild_config, dict):
+                    logger.warning(
+                        f"送信スキップ ({info_type}): ギルド {guild_id} の設定が辞書型ではありません: {type(guild_config)}")
+                    skipped_count += 1
+                    continue
+
+                channel_id = guild_config.get(info_type)
+                if not channel_id:
+                    logger.debug(f"送信スキップ ({info_type}): ギルド {guild_id} に {info_type} の設定がありません")
+                    skipped_count += 1
+                    continue
+
+                # ギルド取得
                 guild = self.bot.get_guild(int(guild_id))
                 if not guild:
                     logger.warning(
-                        f"送信スキップ ({info_type}): ギルド {guild_id} が見つかりません。Botが参加していないか、Intents不足の可能性があります。")
+                        f"送信スキップ ({info_type}): ギルド {guild_id} が見つかりません。"
+                        f"Botが参加していないか、Intents不足の可能性があります。"
+                    )
                     failed_count += 1
                     continue
 
+                # チャンネル取得
                 channel = guild.get_channel(channel_id)
                 if not channel:
                     logger.warning(
-                        f"送信スキップ ({info_type}): チャンネル {channel_id} がギルド '{guild.name}' に見つかりません。削除されたか、Botから見えない設定になっている可能性があります。")
+                        f"送信スキップ ({info_type}): チャンネル {channel_id} がギルド '{guild.name}' (ID: {guild_id}) に見つかりません。"
+                        f"削除されたか、Botから見えない設定になっている可能性があります。"
+                    )
                     failed_count += 1
                     continue
 
@@ -571,34 +590,155 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
                 permissions = channel.permissions_for(guild.me)
                 if not permissions.send_messages:
                     logger.error(
-                        f"送信失敗 ({info_type}): チャンネル '{channel.name}' ({channel_id}) への 'メッセージを送信' 権限がありません。")
+                        f"送信失敗 ({info_type}): チャンネル '{channel.name}' ({channel_id}) への 'メッセージを送信' 権限がありません。"
+                    )
                     failed_count += 1
                     continue
                 if not permissions.embed_links:
                     logger.error(
-                        f"送信失敗 ({info_type}): チャンネル '{channel.name}' ({channel_id}) への '埋め込みリンク' 権限がありません。")
+                        f"送信失敗 ({info_type}): チャンネル '{channel.name}' ({channel_id}) への '埋め込みリンク' 権限がありません。"
+                    )
                     failed_count += 1
                     continue
 
+                # メッセージ送信
+                logger.info(f"📨 送信試行: ギルド '{guild.name}' のチャンネル '{channel.name}' ({channel_id})")
                 await channel.send(embed=embed)
                 sent_count += 1
-            except discord.Forbidden:
+                logger.info(f"✅ 送信成功: ギルド '{guild.name}' のチャンネル '{channel.name}'")
+
+            except discord.Forbidden as e:
                 logger.error(
-                    f"送信失敗 ({info_type}): ギルド {guild_id} のチャンネル {channel_id} へのアクセスが拒否されました（権限不足）。")
+                    f"送信失敗 ({info_type}): ギルド {guild_id} のチャンネル {channel_id} へのアクセスが拒否されました（権限不足）。"
+                    f"詳細: {e}"
+                )
                 failed_count += 1
             except discord.HTTPException as e:
                 logger.error(
-                    f"送信失敗 ({info_type}): Discord APIエラー。ギルド {guild_id}, チャンネル {channel_id} - {e.status}: {e.text}")
+                    f"送信失敗 ({info_type}): Discord APIエラー。ギルド {guild_id}, チャンネル {channel_id} - {e.status}: {e.text}"
+                )
                 failed_count += 1
-            except Exception:
-                logger.error(f"予期せぬ送信失敗 ({info_type}): ギルド {guild_id}, チャンネル {channel_id}",
-                             exc_info=True)
+            except Exception as e:
+                logger.error(
+                    f"予期せぬ送信失敗 ({info_type}): ギルド {guild_id}, チャンネル {channel_id}",
+                    exc_info=True
+                )
                 failed_count += 1
 
-        if sent_count > 0 or failed_count > 0:
-            logger.info(f"{info_type}通知送信完了: 成功 {sent_count}件, 失敗 {failed_count}件")
+        # 結果サマリー
+        logger.info(
+            f"📊 {info_type}通知送信完了: "
+            f"成功 {sent_count}件, 失敗 {failed_count}件, スキップ {skipped_count}件"
+        )
 
-    # (以降のコマンド部分は変更なし)
+        # 全て失敗した場合は警告
+        if sent_count == 0 and (failed_count > 0 or skipped_count > 0):
+            logger.warning(f"⚠️ {info_type}の通知が1件も送信されませんでした！設定を確認してください。")
+
+    async def process_single_info(self, info: Dict[str, Any]):
+        """個別の情報を処理して通知を送信する（デバッグ強化版）"""
+        info_id = self.extract_id_safe(info)
+        if not info_id:
+            logger.debug("情報IDが取得できませんでした")
+            return
+
+        info_type = self.classify_info_type(info)
+        if info_type == InfoType.UNKNOWN:
+            self.processing_stats['unknown_skipped'] += 1
+            logger.debug(f"UNKNOWN情報をスキップ: ID {info_id}")
+            return
+
+        if info_id in self.processed_ids[info_type.value]:
+            logger.debug(f"既に処理済みの情報: {info_type.value} ID {info_id}")
+            return
+
+        logger.info(f"🆕 新しい{info_type.value}情報を検知: ID {info_id}")
+
+        try:
+            # 通知送信前にログ出力
+            logger.info(f"🔔 {info_type.value}の通知処理を開始します")
+
+            if info_type == InfoType.EEW:
+                await self.send_eew_notification(info)
+            elif info_type == InfoType.QUAKE:
+                await self.send_quake_notification(info)
+            elif info_type == InfoType.TSUNAMI:
+                tsunami_info = self.get_tsunami_info(info)
+                if tsunami_info.get('has_tsunami', False):
+                    await self.send_tsunami_notification(info, tsunami_info)
+                else:
+                    logger.info(f"津波情報なしのためスキップ: ID {info_id}")
+                    return
+
+            # 成功した場合のみIDを記録
+            self.processing_stats[f'{info_type.value}_processed'] += 1
+            self.processed_ids[info_type.value].add(info_id)
+            self.last_ids[info_type.value] = info_id
+            self.manage_processed_ids(info_type.value)
+            logger.info(f"✅ {info_type.value}情報の処理完了: ID {info_id}")
+
+        except NotificationError as e:
+            # 通知関連のエラーはログに記録し、処理を続行
+            logger.error(f"❌ 通知エラー ({info_type.value}, ID: {info_id}): {e}", exc_info=True)
+        except Exception as e:
+            # 予期せぬエラーもログに記録
+            self.exception_handler.log_generic_error(e, f"{info_type.value}通知処理 (ID: {info_id})")
+            logger.error(f"❌ 予期せぬエラー ({info_type.value}, ID: {info_id}): {e}", exc_info=True)
+
+    @app_commands.command(name="earthquake_debug", description="通知設定の詳細診断")
+    async def debug_config(self, interaction: discord.Interaction):
+        """通知設定とチャンネル状態の詳細診断"""
+        try:
+            await interaction.response.defer(ephemeral=False)
+
+            guild_id = str(interaction.guild.id)
+            embed = discord.Embed(
+                title="🔍 通知設定診断",
+                color=discord.Color.blue(),
+                timestamp=datetime.now(self.jst)
+            )
+
+            # 設定ファイル全体の確認
+            embed.add_field(
+                name="📁 設定ファイル",
+                value=f"```json\n{json.dumps(self.config, indent=2, ensure_ascii=False)[:500]}```",
+                inline=False
+            )
+
+            # 現在のギルドの設定
+            if guild_id in self.config:
+                guild_config = self.config[guild_id]
+                config_text = ""
+                for info_type, channel_id in guild_config.items():
+                    channel = interaction.guild.get_channel(channel_id)
+                    if channel:
+                        perms = channel.permissions_for(interaction.guild.me)
+                        config_text += f"**{info_type}**:\n"
+                        config_text += f"  チャンネル: {channel.mention} (ID: {channel_id})\n"
+                        config_text += f"  メッセージ送信: {'✅' if perms.send_messages else '❌'}\n"
+                        config_text += f"  埋め込みリンク: {'✅' if perms.embed_links else '❌'}\n"
+                    else:
+                        config_text += f"**{info_type}**: ❌ チャンネル {channel_id} が見つかりません\n"
+
+                embed.add_field(name="⚙️ このサーバーの設定", value=config_text or "設定なし", inline=False)
+            else:
+                embed.add_field(name="⚙️ このサーバーの設定", value="❌ 未設定", inline=False)
+
+            # Botの状態
+            embed.add_field(
+                name="🤖 Bot状態",
+                value=f"ギルド数: {len(self.bot.guilds)}\n"
+                      f"監視中: {'✅' if self.check_earthquake_info.is_running() else '❌'}\n"
+                      f"セッション: {'✅' if self.session and not self.session.closed else '❌'}",
+                inline=False
+            )
+
+            await interaction.followup.send(embed=embed, ephemeral=True)
+
+        except Exception as e:
+            logger.error(f"診断コマンドエラー: {e}", exc_info=True)
+            await interaction.followup.send(f"❌ エラーが発生しました: {e}", ephemeral=True)
+
     @app_commands.command(name="earthquake_channel", description="地震・津波情報の通知チャンネルを設定します。")
     @app_commands.describe(channel="通知を送信するチャンネル", info_type="通知したい情報の種類")
     async def set_channel(self, interaction: discord.Interaction, channel: discord.TextChannel,
