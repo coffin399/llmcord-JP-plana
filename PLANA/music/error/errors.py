@@ -1,4 +1,3 @@
-# PLANA/music/error/errors.py
 from __future__ import annotations
 
 import asyncio
