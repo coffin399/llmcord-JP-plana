@@ -351,21 +351,23 @@ class MusicCog(commands.Cog, name="music_cog"):
         if state.auto_leave_task and not state.auto_leave_task.done():
             state.auto_leave_task.cancel()
 
-        if state.is_paused or (state.voice_client and state.voice_client.is_playing()):
+        # seek操作でない場合のみ再生状態をチェック
+        if seek_seconds == 0 and (state.is_paused or (state.voice_client and state.voice_client.is_playing())):
             return
 
         track_to_play: Optional[Track] = None
-        if state.loop_mode == LoopMode.ONE and state.current_track and seek_seconds == 0:
+
+        # seek操作の場合は常に現在の曲を使用
+        if seek_seconds > 0 and state.current_track:
             track_to_play = state.current_track
-        elif not state.queue.empty() and seek_seconds == 0:
+        elif state.loop_mode == LoopMode.ONE and state.current_track:
+            track_to_play = state.current_track
+        elif not state.queue.empty():
             try:
                 track_to_play = await state.queue.get()
                 state.queue.task_done()
             except:
                 pass
-        elif state.current_track and seek_seconds > 0:
-            # シーク操作の場合は現在の曲を再利用
-            track_to_play = state.current_track
 
         if not track_to_play:
             state.current_track = None
@@ -590,7 +592,7 @@ class MusicCog(commands.Cog, name="music_cog"):
         if not await self._ensure_voice(interaction, connect_if_not_in=False):
             return
 
-        if not state.current_track:
+        if not state.current_track or not state.is_playing:
             await self._send_response(interaction, "nothing_to_skip", ephemeral=True)
             return
 
@@ -605,6 +607,8 @@ class MusicCog(commands.Cog, name="music_cog"):
             return
 
         # 現在の再生を停止して、新しい位置から再生
+        # is_playing フラグを維持して、_play_next_songが正しく動作するようにする
+        state.is_playing = False
         if state.voice_client and state.voice_client.is_playing():
             state.voice_client.stop()
 
