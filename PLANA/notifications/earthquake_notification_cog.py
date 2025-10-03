@@ -101,6 +101,7 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
         if fallback_count > 0:
             logger.info(f"  ✅ {fallback_count}個の情報タイプにフォールバックID設定完了")
 
+    # 修正: エラー発生時のみ last_error_time を更新するように修正
     async def safe_api_request(self, url: str, timeout: int = 15) -> Optional[Dict[str, Any]]:
         try:
             if not self.session or self.session.closed:
@@ -110,15 +111,16 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
                     try:
                         return await response.json()
                     except json.JSONDecodeError as e:
+                        self.error_stats['last_error_time'] = datetime.now(self.jst)
                         raise self.exception_handler.handle_json_decode_error(e, url)
                 else:
+                    self.error_stats['last_error_time'] = datetime.now(self.jst)
                     raise self.exception_handler.handle_api_response_error(response.status, url)
         except Exception as e:
-            if not isinstance(e, (APIError, DataParsingError)):
-                raise self.exception_handler.handle_api_error(e, url)
-            raise e
-        finally:
+            if isinstance(e, (APIError, DataParsingError)):
+                raise e
             self.error_stats['last_error_time'] = datetime.now(self.jst)
+            raise self.exception_handler.handle_api_error(e, url)
 
     async def recreate_session(self):
         if self.session and not self.session.closed:
@@ -222,36 +224,18 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
 
             # code=551の地震関連情報
             if code == 551:
-                # EEWの判定（P2P地震情報APIの仕様に基づく）
                 earthquake_data = item.get('earthquake', {})
-
-                # Foreignは確実にEEW
-                if issue_type == 'foreign':
-                    logger.debug(f"EEW検出: issue.type=Foreign")
+                # EEWの判定
+                if issue_type in ['foreign', 'eew'] or 'eew' in issue_type:
                     return InfoType.EEW
-
-                # ScalePrompt + domesticTsunami=Unknown もEEWの可能性が高い
                 if issue_type == 'scaleprompt':
                     domestic_tsunami = earthquake_data.get('domesticTsunami', '')
-                    if domestic_tsunami == 'Unknown' or domestic_tsunami == '':
-                        logger.debug(f"EEW検出: issue.type=ScalePrompt, tsunami=Unknown")
+                    if domestic_tsunami in ['Unknown', '']:
                         return InfoType.EEW
-
-                # 明示的にEEWキーワードがある場合
-                if 'eew' in issue_type:
-                    logger.debug(f"EEW検出: issue.typeにeew含む")
-                    return InfoType.EEW
-
-                # 確定情報の判定（DetailScale, Destination, ScaleAndDetail）
-                if issue_type in ['detailscale', 'destination', 'scaleanddetail']:
+                # 確定情報の判定
+                if issue_type in ['detailscale', 'destination', 'scaleanddetail', 'scaleprompt']:
                     return InfoType.QUAKE
-
-                # ScalePrompt で津波情報が確定している場合は確定情報
-                if issue_type == 'scaleprompt' and earthquake_data:
-                    return InfoType.QUAKE
-
-                # earthquakeデータがあり、上記に該当しない場合は確定情報
-                if earthquake_data and issue_type not in ['foreign', '']:
+                if earthquake_data and issue_type:
                     return InfoType.QUAKE
 
             logger.debug(f"UNKNOWN情報: code={code}, issue.type={issue_type}")
@@ -409,6 +393,7 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
         except Exception as e:
             self.exception_handler.log_generic_error(e, "津波情報監視")
 
+    # 修正: エラーが発生してもループが止まらないように、例外をここで捕捉してログに出力
     async def process_single_info(self, info: Dict[str, Any]):
         info_id = self.extract_id_safe(info)
         if not info_id:
@@ -419,6 +404,7 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
             return
         if info_id in self.processed_ids[info_type.value]:
             return
+
         logger.info(f"🆕 新しい{info_type.value}情報を検知: {info_id}")
         try:
             if info_type == InfoType.EEW:
@@ -429,12 +415,18 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
                 tsunami_info = self.get_tsunami_info(info)
                 if tsunami_info.get('has_tsunami', False):
                     await self.send_tsunami_notification(info, tsunami_info)
+
+            # 成功した場合のみIDを記録
             self.processing_stats[f'{info_type.value}_processed'] += 1
             self.processed_ids[info_type.value].add(info_id)
             self.last_ids[info_type.value] = info_id
             self.manage_processed_ids(info_type.value)
+        except NotificationError as e:
+            # 通知関連のエラーはログに記録し、処理を続行
+            logger.error(f"通知エラー ({info_type.value}, ID: {info_id}): {e}", exc_info=True)
         except Exception as e:
-            raise NotificationError(f"{info_type.value}通知送信中にエラー: {e}")
+            # 予期せぬエラーもログに記録
+            self.exception_handler.log_generic_error(e, f"{info_type.value}通知処理 (ID: {info_id})")
 
     async def send_eew_notification(self, data):
         await self.send_notification(data, InfoType.EEW.value, "🚨 緊急地震速報")
@@ -454,16 +446,10 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
             report_type = issue_data.get('type', '情報')
             max_scale = earthquake.get('maxScale', -1)
             quake_time = self.parse_earthquake_time(earthquake.get('time', ''), issue_data.get('time', ''))
-
-            # マグニチュードの取得（大文字・小文字両対応）
             magnitude = earthquake.get('magnitude') or earthquake.get('Magnitude', -1)
 
-            # EEW用の特別な説明文
             if info_type == InfoType.EEW.value:
-                if max_scale == -1:
-                    description = f"強い揺れに警戒してください。"
-                else:
-                    description = f"**最大震度 {self.scale_to_japanese(max_scale)}** 程度の揺れが予想されます。"
+                description = f"強い揺れに警戒してください。" if max_scale == -1 else f"**最大震度 {self.scale_to_japanese(max_scale)}** 程度の揺れが予想されます。"
                 description += "\n⚠️ **これは速報です。情報が更新される可能性があります。**"
             else:
                 description = f"**最大震度 {self.scale_to_japanese(max_scale)}** の地震が発生しました。"
@@ -474,70 +460,42 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
                 color=self.get_embed_color(max_scale, info_type),
                 timestamp=quake_time
             )
-
-            # 震源地情報（EEWでは不明な場合がある）
             hypocenter_name = hypocenter.get('name', '不明')
-            if hypocenter_name and hypocenter_name != '不明':
-                embed.add_field(name="🌏 震源地", value=f"```{hypocenter_name}```", inline=True)
-            else:
-                embed.add_field(name="🌏 震源地", value=f"```調査中```", inline=True)
-
-            # マグニチュード（EEWでは推定値）
+            embed.add_field(name="🌏 震源地", value=f"```{hypocenter_name or '調査中'}```", inline=True)
             mag_prefix = "推定 " if info_type == InfoType.EEW.value else ""
-            embed.add_field(
-                name="📊 マグニチュード",
-                value=f"```{mag_prefix}{self.format_magnitude(magnitude)}```",
-                inline=True
-            )
-
-            # 深さ（大文字・小文字両対応）
+            embed.add_field(name="📊 マグニチュード", value=f"```{mag_prefix}{self.format_magnitude(magnitude)}```",
+                            inline=True)
             depth = hypocenter.get('depth') or hypocenter.get('Depth', -1)
             embed.add_field(name="📏 深さ", value=f"```{self.format_depth(depth)}```", inline=True)
 
-            # 各地の震度情報（EEWでは予測震度、確定情報では観測震度）
             points = data.get('points', [])
             if points and isinstance(points, list):
                 areas_text = ""
                 field_name = "📍 予測震度" if info_type == InfoType.EEW.value else "📍 各地の震度"
-
                 for point in sorted(points, key=lambda p: p.get('scale', 0), reverse=True)[:8]:
                     scale, addr = point.get('scale', -1), point.get('addr', '不明')
                     emoji = "🔴" if scale >= 55 else "🟠" if scale >= 50 else "🟡" if scale >= 40 else "🟢" if scale >= 30 else "🔵"
                     scale_suffix = " 程度" if info_type == InfoType.EEW.value else ""
                     areas_text += f"{emoji} **{self.scale_to_japanese(scale)}{scale_suffix}** - {addr}\n"
-
                 if areas_text:
                     embed.add_field(name=field_name, value=areas_text[:1024], inline=False)
             elif info_type == InfoType.EEW.value:
-                # EEWでpointsがない場合
-                embed.add_field(
-                    name="📍 震度情報",
-                    value="詳細な震度情報は確定情報をお待ちください",
-                    inline=False
-                )
+                embed.add_field(name="📍 震度情報", value="詳細な震度情報は確定情報をお待ちください", inline=False)
 
-            # 津波情報
             tsunami_info = self.get_tsunami_info(data)
             if tsunami_info['has_tsunami'] and info_type == InfoType.QUAKE.value:
-                embed.add_field(
-                    name="🌊 津波情報",
-                    value=f"🌊 **{tsunami_info.get('warning_level', '津波予報')}** が発表されています",
-                    inline=False
-                )
-
-            # EEW特有の注意書き
+                embed.add_field(name="🌊 津波情報",
+                                value=f"🌊 **{tsunami_info.get('warning_level', '津波予報')}** が発表されています",
+                                inline=False)
             if info_type == InfoType.EEW.value:
-                embed.add_field(
-                    name="⚠️ 注意",
-                    value="この情報は速報です。揺れが予想される地域の方は、身の安全を確保してください。",
-                    inline=False
-                )
+                embed.add_field(name="⚠️ 注意",
+                                value="この情報は速報です。揺れが予想される地域の方は、身の安全を確保してください。",
+                                inline=False)
 
             embed.set_footer(text="Powered by P2P地震情報 API v2 | 気象庁")
             embed.set_thumbnail(url="https://www.p2pquake.net/images/QuakeLogo_100x100.png")
 
             await self.send_embed_to_channels(embed, info_type)
-
         except Exception as e:
             raise NotificationError(f"{info_type}通知処理エラー: {e}")
 
@@ -551,14 +509,11 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
                 color=discord.Color.purple(),
                 timestamp=datetime.now(self.jst)
             )
-
             earthquake = data.get('earthquake', {})
             if earthquake and isinstance(earthquake, dict):
                 hypocenter = earthquake.get('hypocenter', {})
-                # マグニチュードと深さの取得（大文字・小文字両対応）
                 magnitude = earthquake.get('magnitude') or earthquake.get('Magnitude', -1)
                 depth = hypocenter.get('depth') or hypocenter.get('Depth', -1)
-
                 embed.add_field(name="🌏 震源地", value=f"```{hypocenter.get('name', '不明')}```", inline=True)
                 embed.add_field(name="📊 マグニチュード", value=f"```{self.format_magnitude(magnitude)}```", inline=True)
                 embed.add_field(name="📏 深さ", value=f"```{self.format_depth(depth)}```", inline=True)
@@ -578,44 +533,76 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
                 else "⚠️ 海の中や海岸付近は危険です\n海から上がって、海岸から離れてください"
             )
             embed.add_field(name="⚠️ 避難指示", value=warning_text, inline=False)
-
             if tsunami_info.get('description'):
                 embed.add_field(name="ℹ️ 詳細情報", value=tsunami_info['description'][:500], inline=False)
 
             embed.set_footer(text="気象庁 | 津波から身を守るため直ちに避難を")
             embed.set_thumbnail(url="https://www.p2pquake.net/images/QuakeLogo_100x100.png")
-
             await self.send_embed_to_channels(embed, InfoType.TSUNAMI.value)
         except Exception as e:
             raise NotificationError(f"津波通知処理エラー: {e}")
 
+    # 修正: ログを詳細化し、権限チェックを追加して通知の失敗原因を特定しやすくした
     async def send_embed_to_channels(self, embed, info_type):
         if not self.config:
             return
         sent_count, failed_count = 0, 0
-        for guild_id, guild_config in self.config.items():
-            if not (isinstance(guild_config, dict) and info_type in guild_config):
+        for guild_id, guild_config in self.config.copy().items():
+            channel_id = guild_config.get(info_type)
+            if not channel_id:
                 continue
+
             try:
                 guild = self.bot.get_guild(int(guild_id))
                 if not guild:
+                    logger.warning(
+                        f"送信スキップ ({info_type}): ギルド {guild_id} が見つかりません。Botが参加していないか、Intents不足の可能性があります。")
                     failed_count += 1
                     continue
-                channel = guild.get_channel(guild_config[info_type])
+
+                channel = guild.get_channel(channel_id)
                 if not channel:
+                    logger.warning(
+                        f"送信スキップ ({info_type}): チャンネル {channel_id} がギルド '{guild.name}' に見つかりません。削除されたか、Botから見えない設定になっている可能性があります。")
                     failed_count += 1
                     continue
+
+                # 権限チェック
+                permissions = channel.permissions_for(guild.me)
+                if not permissions.send_messages:
+                    logger.error(
+                        f"送信失敗 ({info_type}): チャンネル '{channel.name}' ({channel_id}) への 'メッセージを送信' 権限がありません。")
+                    failed_count += 1
+                    continue
+                if not permissions.embed_links:
+                    logger.error(
+                        f"送信失敗 ({info_type}): チャンネル '{channel.name}' ({channel_id}) への '埋め込みリンク' 権限がありません。")
+                    failed_count += 1
+                    continue
+
                 await channel.send(embed=embed)
                 sent_count += 1
-            except Exception as e:
-                logger.error(f"送信失敗 ({info_type}): {guild.name if 'guild' in locals() and guild else guild_id} - {e}")
+            except discord.Forbidden:
+                logger.error(
+                    f"送信失敗 ({info_type}): ギルド {guild_id} のチャンネル {channel_id} へのアクセスが拒否されました（権限不足）。")
                 failed_count += 1
+            except discord.HTTPException as e:
+                logger.error(
+                    f"送信失敗 ({info_type}): Discord APIエラー。ギルド {guild_id}, チャンネル {channel_id} - {e.status}: {e.text}")
+                failed_count += 1
+            except Exception:
+                logger.error(f"予期せぬ送信失敗 ({info_type}): ギルド {guild_id}, チャンネル {channel_id}",
+                             exc_info=True)
+                failed_count += 1
+
         if sent_count > 0 or failed_count > 0:
             logger.info(f"{info_type}通知送信完了: 成功 {sent_count}件, 失敗 {failed_count}件")
 
+    # (以降のコマンド部分は変更なし)
     @app_commands.command(name="earthquake_channel", description="地震・津波情報の通知チャンネルを設定します。")
     @app_commands.describe(channel="通知を送信するチャンネル", info_type="通知したい情報の種類")
-    async def set_channel(self, interaction: discord.Interaction, channel: discord.TextChannel, info_type: Literal["緊急地震速報", "地震情報", "津波予報", "すべて"]):
+    async def set_channel(self, interaction: discord.Interaction, channel: discord.TextChannel,
+                          info_type: Literal["緊急地震速報", "地震情報", "津波予報", "すべて"]):
         try:
             guild_id = str(interaction.guild.id)
             if guild_id not in self.config:
@@ -623,12 +610,14 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
             types_to_set = (
                 [InfoType.EEW.value, InfoType.QUAKE.value, InfoType.TSUNAMI.value]
                 if info_type == "すべて"
-                else [{"緊急地震速報": InfoType.EEW.value, "地震情報": InfoType.QUAKE.value, "津波予報": InfoType.TSUNAMI.value}[info_type]]
+                else [{"緊急地震速報": InfoType.EEW.value, "地震情報": InfoType.QUAKE.value,
+                       "津波予報": InfoType.TSUNAMI.value}[info_type]]
             )
             for t in types_to_set:
                 self.config[guild_id][t] = channel.id
             self.save_config()
-            await interaction.response.send_message(f"✅ **{info_type}** の通知チャンネルを {channel.mention} に設定しました。")
+            await interaction.response.send_message(
+                f"✅ **{info_type}** の通知チャンネルを {channel.mention} に設定しました。")
         except Exception as e:
             self.exception_handler.log_generic_error(e, "チャンネル設定コマンド")
             await interaction.response.send_message(self.exception_handler.get_user_friendly_message(e), ephemeral=True)
@@ -702,11 +691,11 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
         tsunami_level="テストしたい津波レベル"
     )
     async def test_notification(
-        self,
-        interaction: discord.Interaction,
-        info_type: Literal["緊急地震速報", "地震情報", "津波予報"],
-        max_scale: Optional[Literal["震度3", "震度5強", "震度7"]] = "震度5強",
-        tsunami_level: Optional[Literal["津波注意報", "津波警報", "大津波警報"]] = "津波警報"
+            self,
+            interaction: discord.Interaction,
+            info_type: Literal["緊急地震速報", "地震情報", "津波予報"],
+            max_scale: Optional[Literal["震度3", "震度5強", "震度7"]] = "震度5強",
+            tsunami_level: Optional[Literal["津波注意報", "津波警報", "大津波警報"]] = "津波警報"
     ):
         try:
             await interaction.response.defer(ephemeral=False)
