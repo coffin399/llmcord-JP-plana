@@ -1,14 +1,17 @@
 # PLANA/llm/llmcog.py
 from __future__ import annotations
 
+import asyncio
 import base64
 import io
 import json
 import logging
 import os
 import re
-from typing import List, Dict, Any, Tuple, Optional
+import time
 from datetime import datetime, timezone, timedelta
+from types import SimpleNamespace
+from typing import List, Dict, Any, Tuple, Optional, AsyncGenerator
 
 import aiohttp
 import discord
@@ -244,7 +247,6 @@ class LLMCog(commands.Cog, name="LLM"):
                     if text_content or image_contents:
                         user_content_parts = []
                         if text_content:
-                            # 変更点: 履歴のユーザープロンプトにもタイムスタンプを追加
                             timestamp = parent_msg.created_at.astimezone(self.jst).strftime('[%H:%M]')
                             formatted_text = f"{timestamp} {text_content}"
                             user_content_parts.append({"type": "text", "text": formatted_text})
@@ -384,7 +386,6 @@ class LLMCog(commands.Cog, name="LLM"):
 
         user_content_parts = []
         if text_content:
-            # 変更点: ユーザープロンプトにタイムスタンプを追加
             timestamp = message.created_at.astimezone(self.jst).strftime('[%H:%M]')
             formatted_text = f"{timestamp} {text_content}"
             user_content_parts.append({"type": "text", "text": formatted_text})
@@ -393,25 +394,22 @@ class LLMCog(commands.Cog, name="LLM"):
         user_message_for_api = {"role": "user", "content": user_content_parts}
         messages_for_api.append(user_message_for_api)
         try:
-            async with message.channel.typing():
-                llm_response = await self._get_llm_response(messages_for_api, log_context, llm_client,
-                                                            message.channel.id, message.author.id)
-            if llm_response:
+            sent_message, llm_response = await self._handle_llm_streaming_response(
+                message, messages_for_api, llm_client, log_context
+            )
+
+            if sent_message and llm_response:
                 logger.info(
-                    f"Sending LLM response | {log_context} | model='{model_in_use}' | response='{llm_response.replace(chr(10), ' ')[:150]}...'")
-                if thread_id not in self.conversation_threads: self.conversation_threads[thread_id] = []
+                    f"LLM stream finished | {log_context} | model='{model_in_use}' | response='{llm_response.replace(chr(10), ' ')[:150]}...'")
+                if thread_id not in self.conversation_threads:
+                    self.conversation_threads[thread_id] = []
                 self.conversation_threads[thread_id].append(user_message_for_api)
-                sent_message = await self._send_reply_chunks(message, llm_response)
-                if sent_message:
-                    assistant_message = {"role": "assistant", "content": llm_response, "message_id": sent_message.id}
-                    self.conversation_threads[thread_id].append(assistant_message)
-                    self.message_to_thread[sent_message.id] = thread_id
+
+                assistant_message = {"role": "assistant", "content": llm_response, "message_id": sent_message.id}
+                self.conversation_threads[thread_id].append(assistant_message)
+                self.message_to_thread[sent_message.id] = thread_id
                 self._cleanup_old_threads()
-            else:
-                logger.warning(f"Received empty response from LLM | {log_context}")
-                await message.reply(self.llm_config.get('error_msg', {}).get('general_error',
-                                                                             "Received an empty response from the AI."),
-                                    silent=True)
+
         except Exception as e:
             await message.reply(self.exception_handler.handle_exception(e), silent=True)
 
@@ -423,39 +421,183 @@ class LLMCog(commands.Cog, name="LLM"):
                 del self.conversation_threads[thread_id]
                 self.message_to_thread = {k: v for k, v in self.message_to_thread.items() if v != thread_id}
 
-    async def _get_llm_response(self, messages: List[Dict[str, Any]], log_context: str,
-                                client: openai.AsyncOpenAI, channel_id: int, user_id: int) -> str:
+    async def _handle_llm_streaming_response(
+            self,
+            message: discord.Message,
+            initial_messages: List[Dict[str, Any]],
+            client: openai.AsyncOpenAI,
+            log_context: str
+    ) -> Tuple[Optional[discord.Message], str]:
+        """ストリーミング応答を処理し、タイプライター効果でDiscordメッセージを動的に編集する"""
+        sent_message = None
+        full_response_text = ""
+        last_update = 0.0
+        last_displayed_length = 0
+
+        # 複数サーバー運用を考慮したタイプライター効果の設定
+        update_interval = 0.5  # Discord API制限を考慮して0.5秒間隔
+        min_update_chars = 15  # 最低15文字たまったら更新
+        retry_sleep_time = 2.0  # レート制限時の待機時間
+
+        placeholder = "思考中..."
+        try:
+            sent_message = await message.reply(placeholder, silent=True)
+        except discord.HTTPException:
+            sent_message = await message.channel.send(placeholder, silent=True)
+
+        try:
+            stream_generator = self._llm_stream_and_tool_handler(
+                initial_messages, client, log_context, message.channel.id, message.author.id
+            )
+
+            async for content_chunk in stream_generator:
+                full_response_text += content_chunk
+                current_time = time.time()
+                chars_accumulated = len(full_response_text) - last_displayed_length
+
+                # タイプライター効果: 一定時間経過 AND 一定文字数蓄積で更新
+                should_update = (
+                        current_time - last_update > update_interval and
+                        chars_accumulated >= min_update_chars
+                )
+
+                if should_update and full_response_text:
+                    display_text = full_response_text[:DISCORD_MESSAGE_MAX_LENGTH]
+
+                    if display_text != sent_message.content:
+                        try:
+                            await sent_message.edit(content=display_text)
+                            last_update = current_time
+                            last_displayed_length = len(full_response_text)
+                        except discord.NotFound:
+                            logger.warning(
+                                f"Message deleted during stream (ID: {sent_message.id}). Aborting.")
+                            return None, ""
+                        except discord.HTTPException as e:
+                            if e.status == 429:
+                                # レート制限: 指定された待機時間 + バッファ
+                                retry_after = (e.retry_after or 1.0) + 0.5
+                                logger.warning(
+                                    f"Rate limited on message edit (ID: {sent_message.id}). "
+                                    f"Waiting {retry_after:.2f}s"
+                                )
+                                await asyncio.sleep(retry_after)
+                                last_update = time.time()
+                            else:
+                                logger.warning(
+                                    f"Failed to edit message (ID: {sent_message.id}): "
+                                    f"{e.status} - {getattr(e, 'text', str(e))}"
+                                )
+                                await asyncio.sleep(retry_sleep_time)
+
+            # ストリーム終了後: 最終内容を確実に反映
+            if full_response_text:
+                final_text = full_response_text[:DISCORD_MESSAGE_MAX_LENGTH]
+                if final_text != sent_message.content:
+                    try:
+                        await sent_message.edit(content=final_text)
+                    except discord.HTTPException as e:
+                        logger.error(
+                            f"Failed to update final message (ID: {sent_message.id}): {e}"
+                        )
+            else:
+                # 応答が空の場合
+                error_msg = self.llm_config.get('error_msg', {}).get(
+                    'general_error', "AIから応答がありませんでした。"
+                )
+                await sent_message.edit(content=error_msg)
+                return None, ""
+
+            return sent_message, full_response_text
+
+        except Exception as e:
+            logger.error(f"Error during LLM streaming response: {e}", exc_info=True)
+            error_msg = self.exception_handler.handle_exception(e)
+            if sent_message:
+                try:
+                    await sent_message.edit(content=error_msg)
+                except discord.HTTPException:
+                    pass  # 編集失敗時はログのみ
+            else:
+                await message.reply(error_msg, silent=True)
+            return None, ""
+
+    async def _llm_stream_and_tool_handler(
+            self,
+            messages: List[Dict[str, Any]],
+            client: openai.AsyncOpenAI,
+            log_context: str,
+            channel_id: int,
+            user_id: int
+    ) -> AsyncGenerator[str, None]:
+        """LLM APIとストリーミングで通信し、必要に応じてツールを処理する非同期ジェネレータ"""
         current_messages = messages.copy()
         max_iterations = self.llm_config.get('max_tool_iterations', 5)
         extra_params = self.llm_config.get('extra_api_parameters', {})
+
         for iteration in range(max_iterations):
             tools_def = self.get_tools_definition()
             api_kwargs = {
                 "model": client.model_name_for_api_calls,
                 "messages": current_messages,
+                "stream": True,
                 "temperature": extra_params.get('temperature', 0.7),
                 "max_tokens": extra_params.get('max_tokens', 4096)
             }
             if tools_def:
                 api_kwargs["tools"] = tools_def
                 api_kwargs["tool_choice"] = "auto"
+
             try:
-                response = await client.chat.completions.create(**api_kwargs)
-                response_message = response.choices[0].message
-                current_messages.append(response_message.model_dump(exclude_none=True))
-                if response_message.tool_calls:
-                    logger.info(
-                        f"Processing {len(response_message.tool_calls)} tool call(s) in iteration {iteration + 1}")
-                    await self._process_tool_calls(response_message.tool_calls, current_messages, log_context,
-                                                   channel_id, user_id)
-                    continue
-                else:
-                    return response_message.content or ""
+                stream = await client.chat.completions.create(**api_kwargs)
             except Exception as e:
-                logger.error(f"Error during LLM API call in iteration {iteration + 1}: {e}")
+                logger.error(f"Error calling LLM API in stream handler: {e}", exc_info=True)
                 raise
+
+            tool_calls_buffer = []
+            assistant_response_content = ""
+            async for chunk in stream:
+                delta = chunk.choices[0].delta
+                if delta and delta.content:
+                    assistant_response_content += delta.content
+                    yield delta.content
+
+                if delta and delta.tool_calls:
+                    for tool_call_chunk in delta.tool_calls:
+                        if len(tool_calls_buffer) <= tool_call_chunk.index:
+                            tool_calls_buffer.append(
+                                {"id": "", "type": "function", "function": {"name": "", "arguments": ""}})
+
+                        buffer = tool_calls_buffer[tool_call_chunk.index]
+                        if tool_call_chunk.id:
+                            buffer["id"] = tool_call_chunk.id
+                        if tool_call_chunk.function:
+                            if tool_call_chunk.function.name:
+                                buffer["function"]["name"] = tool_call_chunk.function.name
+                            if tool_call_chunk.function.arguments:
+                                buffer["function"]["arguments"] += tool_call_chunk.function.arguments
+
+            assistant_message = {"role": "assistant", "content": assistant_response_content or None}
+            if tool_calls_buffer:
+                assistant_message["tool_calls"] = tool_calls_buffer
+
+            current_messages.append(assistant_message)
+
+            if not tool_calls_buffer:
+                return
+
+            logger.info(f"Processing {len(tool_calls_buffer)} tool call(s) in iteration {iteration + 1}")
+
+            tool_calls_obj = [
+                SimpleNamespace(
+                    id=tc['id'],
+                    function=SimpleNamespace(name=tc['function']['name'], arguments=tc['function']['arguments'])
+                ) for tc in tool_calls_buffer
+            ]
+            await self._process_tool_calls(tool_calls_obj, current_messages, log_context, channel_id, user_id)
+
         logger.warning(f"Tool processing exceeded max iterations ({max_iterations})")
-        return self.llm_config.get('error_msg', {}).get('tool_loop_timeout', "Tool processing exceeded max iterations.")
+        yield self.llm_config.get('error_msg', {}).get('tool_loop_timeout', "Tool processing exceeded max iterations.")
 
     async def _process_tool_calls(self, tool_calls: List[Any], messages: List[Dict[str, Any]],
                                   log_context: str, channel_id: int, user_id: int) -> None:
@@ -508,36 +650,8 @@ class LLMCog(commands.Cog, name="LLM"):
                 "content": error_content if error_content else tool_response_content
             })
 
-    async def _send_reply_chunks(self, message: discord.Message, text_content: str) -> Optional[discord.Message]:
-        if not text_content: return None
-        chunks = self._split_message(text_content, DISCORD_MESSAGE_MAX_LENGTH)
-        first_chunk = chunks.pop(0)
-        first_message = None
-        try:
-            first_message = await message.reply(first_chunk, silent=True)
-        except discord.HTTPException as e:
-            logger.warning(f"Failed to reply, falling back to sending message. Error: {e}")
-            first_message = await message.channel.send(first_chunk, silent=True)
-        for chunk in chunks:
-            await message.channel.send(chunk, silent=True)
-        return first_message
-
-    def _split_message(self, text_content: str, max_length: int) -> List[str]:
-        if not text_content: return []
-        chunks, current_chunk = [], io.StringIO()
-        for line in text_content.splitlines(keepends=True):
-            if current_chunk.tell() + len(line) > max_length:
-                if chunk_val := current_chunk.getvalue(): chunks.append(chunk_val)
-                current_chunk = io.StringIO()
-                while len(line) > max_length:
-                    chunks.append(line[:max_length])
-                    line = line[max_length:]
-            current_chunk.write(line)
-        if final_chunk := current_chunk.getvalue(): chunks.append(final_chunk)
-        return chunks if chunks else [""]
-
-    # --- ここからコマンド定義 ---
-
+    # --- 以下のコマンド定義部分は変更ありません ---
+    # ... (元のコードのコマンド定義部分をここに貼り付け) ...
     # --- AIのbio (チャンネルごと) ---
     @app_commands.command(
         name="set-ai-bio",
@@ -618,7 +732,8 @@ class LLMCog(commands.Cog, name="LLM"):
                     now = datetime.now(self.jst)
                     current_date_str = now.strftime('%Y年%m月%d日')
                     current_time_str = now.strftime('%H:%M')
-                    formatted_prompt = default_prompt.format(current_date=current_date_str, current_time=current_time_str)
+                    formatted_prompt = default_prompt.format(current_date=current_date_str,
+                                                             current_time=current_time_str)
                 except (KeyError, ValueError):
                     formatted_prompt = default_prompt
 
