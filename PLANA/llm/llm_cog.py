@@ -439,7 +439,7 @@ class LLMCog(commands.Cog, name="LLM"):
         min_update_chars = 15  # 最低15文字たまったら更新
         retry_sleep_time = 2.0  # レート制限時の待機時間
 
-        placeholder = "思考中..."
+        placeholder = "Thinking..."
         try:
             sent_message = await message.reply(placeholder, silent=True)
         except discord.HTTPException:
