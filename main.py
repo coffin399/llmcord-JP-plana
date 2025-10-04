@@ -1,12 +1,10 @@
-#main.py
 import discord
 from discord.ext import commands, tasks
 import yaml
 import logging
 import os
 import shutil
-from discord.gateway import DiscordWebSocket  # モバイルステータス用にインポート
-import sys  # モバイルステータス用にインポート
+import sys
 
 # --- ロギング設定の初期化 ---
 logging.getLogger('discord').setLevel(logging.WARNING)
@@ -18,27 +16,43 @@ logging.getLogger('httpx').setLevel(logging.WARNING)
 # --- カスタムDiscordロギングハンドラをインポート ---
 from PLANA.services.discord_handler import DiscordLogHandler
 
-# この変数は使用されなくなりますが、他の場所で参照される可能性を考慮して残しておきます。
 COGS_DIRECTORY_NAME = "cogs"
 
 CONFIG_FILE = 'config.yaml'
 DEFAULT_CONFIG_FILE = 'config.default.yaml'
 
 
-# --- モバイルステータス用のカスタムWebSocketクラス ---
-class MobileWebSocket(DiscordWebSocket):
-    """
-    Botをモバイルステータスにするための、より強力なカスタムWebSocketクラス
-    """
-
-    async def send_as_json(self, data):
-        if data.get('op') == self.IDENTIFY:
-            data['d']['properties'] = {
-                '$os': sys.platform,
+async def mobile_identify(self):
+    """Botをモバイルとして識別させるためのカスタム関数"""
+    payload = {
+        'op': self.IDENTIFY,
+        'd': {
+            'token': self.token,
+            'properties': {
+                '$os': 'Discord Android',
                 '$browser': 'Discord Android',
-                '$device': 'Discord Android',
-            }
-        await super().send_as_json(data)
+                '$device': 'Discord Android'
+            },
+            'compress': True,
+            'large_threshold': 250,
+            'intents': self._connection.intents.value
+        }
+    }
+
+    if self.shard_id is not None and self.shard_count is not None:
+        payload['d']['shard'] = [self.shard_id, self.shard_count]
+
+    state = self._connection
+    if state._activity is not None or state._status is not None:
+        payload['d']['presence'] = {
+            'status': state._status,
+            'game': state._activity,
+            'since': 0,
+            'afk': False
+        }
+
+    await self.call_hooks('before_identify', self.shard_id, initial=self._initial_identify)
+    await self.send_as_json(payload)
 
 
 class Shittim(commands.Bot):
@@ -119,9 +133,7 @@ class Shittim(commands.Bot):
         # ===== ロギング設定ここまで =====================================
         # ================================================================
 
-        # ▼▼▼ 変更点: ここからCogのロード処理を修正 ▼▼▼
         # --- Cogのロード ---
-        # PLANAディレクトリ配下の全てのcogを再帰的にロードする
         plana_dir = 'PLANA'
         if not os.path.isdir(plana_dir):
             logging.error(f"Cogを格納する '{plana_dir}' ディレクトリが見つかりません。Cogはロードされません。")
@@ -132,10 +144,7 @@ class Shittim(commands.Bot):
 
         for root, _, files in os.walk(plana_dir):
             for file in files:
-                # .pyファイルで、先頭がアンダースコアでないものを対象とする
                 if file.endswith('.py') and not file.startswith('_'):
-                    # ファイルパスからモジュールパスを生成
-                    # 例: PLANA/cogs/general.py -> PLANA.cogs.general
                     module_path = os.path.join(root, file[:-3]).replace(os.sep, '.')
 
                     try:
@@ -143,17 +152,13 @@ class Shittim(commands.Bot):
                         logging.info(f"  > Cog '{module_path}' のロードに成功しました。")
                         loaded_cogs_count += 1
                     except commands.NoEntryPointError:
-                        # setup関数がないファイルはCogではないので、静かにスキップする
-                        # (例: ユーティリティ関数を集めたファイルなど)
                         logging.debug(f"ファイル '{module_path}' はCogではないためスキップしました。")
                     except commands.ExtensionAlreadyLoaded:
-                        # 既にロードされている場合は何もしない
                         logging.debug(f"Cog '{module_path}' は既にロードされています。")
                     except Exception as e:
                         logging.error(f"  > Cog '{module_path}' のロード中にエラーが発生しました: {e}", exc_info=True)
 
         logging.info(f"Cogのロードが完了しました。合計 {loaded_cogs_count} 個のCogをロードしました。")
-        # ▲▲▲ 変更点: ここまで ▲▲▲
 
         # --- スラッシュコマンドの同期 ---
         if self.config.get('sync_slash_commands', True):
@@ -174,7 +179,7 @@ class Shittim(commands.Bot):
 
     @tasks.loop(seconds=10)
     async def rotate_status(self):
-        """10秒ごとにボットのステータスをローテーションさせるタスク"""
+        """10秒ごとにボットのステータスをローテーションさせるタスク（モバイル表示を維持）"""
         if not self.status_templates:
             return
         current_template = self.status_templates[self.status_index]
@@ -182,7 +187,7 @@ class Shittim(commands.Bot):
             guild_count=len(self.guilds),
             prefix=self.config.get('prefix', '!!')
         )
-        activity_type_str = self.config.get('status_activity_type', 'streaming').lower()
+        activity_type_str = self.config.get('status_activity_type', 'playing').lower()
         activity_type_map = {
             'playing': discord.ActivityType.playing,
             'streaming': discord.ActivityType.streaming,
@@ -197,7 +202,20 @@ class Shittim(commands.Bot):
         else:
             activity = discord.Activity(type=selected_activity_type, name=status_text)
         try:
-            await self.change_presence(activity=activity, status=discord.Status.online)
+            # モバイルステータスを維持するために、WebSocketを通じて直接プレゼンスを更新
+            if self.ws:
+                await self.ws.send_as_json({
+                    'op': 3,  # STATUS_UPDATE
+                    'd': {
+                        'since': 0,
+                        'activities': [activity.to_dict()],
+                        'status': 'online',
+                        'afk': False
+                    }
+                })
+            else:
+                # フォールバック: 通常の方法
+                await self.change_presence(activity=activity, status=discord.Status.online)
         except Exception as e:
             logging.error(f"ステータスの更新中にエラーが発生しました: {e}", exc_info=True)
         self.status_index = (self.status_index + 1) % len(self.status_templates)
@@ -212,11 +230,13 @@ class Shittim(commands.Bot):
             return
         logging.info(f'{self.user.name} ({self.user.id}) としてDiscordにログインし、準備が完了しました！')
         logging.info(f"現在 {len(self.guilds)} サーバーに参加しています。")
+        logging.info("📱 モバイルステータスで表示されています")
         self.status_templates = self.config.get('status_rotation', [
-            "plz type /help",
+            "/help",
             "operating on {guild_count} servers",
             "operating on {guild_count} servers",
-            "Version20251002",
+            "PLANA Ver.2025-10-04",
+            "PLANA Ver.2025-10-04",
             "/llm_help",
             "/llm_help_en"
         ])
@@ -257,8 +277,6 @@ class Shittim(commands.Bot):
                 logging.warning(f"エラーメッセージを送信できませんでした ({ctx.channel.id}): 権限不足")
 
 
-# (ASCIIアート削除)
-
 if __name__ == "__main__":
     plana_art = r"""
 ██████╗ ██╗      █████╗ ███╗   ██╗ █████╗ 
@@ -294,18 +312,28 @@ if __name__ == "__main__":
         print(f"CRITICAL: {CONFIG_FILE}にbot_tokenが未設定か無効、またはプレースホルダのままです。")
         exit(1)
 
+    # 特権インテントを回避した基本的なインテント設定
     intents = discord.Intents.default()
+    # 必要な非特権インテントのみ有効化
     intents.guilds = True
+    intents.guild_messages = True  # メッセージイベントを受信するために必要
+    intents.dm_messages = True  # DMも受信する場合
     intents.voice_states = True
-    intents.message_content = False
+    # 特権インテント（メッセージ内容、メンバー、プレゼンス）は無効のまま
+    intents.message_content = False  # 特権インテント - 無効（メンション検出には不要）
+    intents.members = False  # 特権インテント - 無効
+    intents.presences = False  # 特権インテント - 無効
+
     allowed_mentions = discord.AllowedMentions(everyone=False, users=True, roles=False, replied_user=True)
+
+    # モバイルステータスを適用
+    discord.gateway.DiscordWebSocket.identify = mobile_identify
 
     bot_instance = Shittim(
         command_prefix=commands.when_mentioned,
         intents=intents,
         help_command=None,
-        allowed_mentions=allowed_mentions,
-        ws_options={'gateway': MobileWebSocket}
+        allowed_mentions=allowed_mentions
     )
 
     try:
