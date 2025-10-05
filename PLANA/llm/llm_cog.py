@@ -1,4 +1,3 @@
-# PLANA/llm/llmcog.py
 from __future__ import annotations
 
 import asyncio
@@ -355,7 +354,8 @@ class LLMCog(commands.Cog, name="LLM"):
 
         model_in_use = llm_client.model_name_for_api_calls
         logger.info(
-            f"Received LLM request | {log_context} | model='{model_in_use}' | image_count={len(image_contents)} | text='{text_content[:150]}...' | is_reply={is_reply_to_bot}")
+            f"📨 Received LLM request | {log_context} | model='{model_in_use}' | image_count={len(image_contents)} | is_reply={is_reply_to_bot}")
+        logger.info(f"🔵 [INPUT] User text content:\n{text_content}")
 
         thread_id = await self._get_conversation_thread_id(message)
 
@@ -381,8 +381,24 @@ class LLMCog(commands.Cog, name="LLM"):
         if formatted_memories := self.memory_manager.get_formatted_memories():
             system_prompt += f"\n\n{formatted_memories}"
 
+        logger.info(f"🔵 [INPUT] System prompt:\n{system_prompt}")
+
         messages_for_api: List[Dict[str, Any]] = [{"role": "system", "content": system_prompt}]
-        messages_for_api.extend(await self._collect_conversation_history(message))
+
+        conversation_history = await self._collect_conversation_history(message)
+        if conversation_history:
+            logger.info(f"🔵 [INPUT] Conversation history ({len(conversation_history)} messages)")
+            for idx, hist_msg in enumerate(conversation_history, 1):
+                role = hist_msg.get("role", "unknown")
+                content = hist_msg.get("content", "")
+                if isinstance(content, list):
+                    text_parts = [p.get("text", "") for p in content if p.get("type") == "text"]
+                    content_preview = " ".join(text_parts)
+                else:
+                    content_preview = content
+                logger.info(f"🔵   [{idx}] {role}: {content_preview}")
+
+        messages_for_api.extend(conversation_history)
 
         user_content_parts = []
         if text_content:
@@ -391,16 +407,23 @@ class LLMCog(commands.Cog, name="LLM"):
             user_content_parts.append({"type": "text", "text": formatted_text})
 
         user_content_parts.extend(image_contents)
+        if image_contents:
+            logger.info(f"🔵 [INPUT] Including {len(image_contents)} image(s) in request")
+
         user_message_for_api = {"role": "user", "content": user_content_parts}
         messages_for_api.append(user_message_for_api)
+
+        logger.info(f"🔵 [INPUT] Total messages for API: {len(messages_for_api)} (system + history + user)")
+
         try:
             sent_message, llm_response = await self._handle_llm_streaming_response(
                 message, messages_for_api, llm_client, log_context
             )
 
             if sent_message and llm_response:
-                logger.info(
-                    f"LLM stream finished | {log_context} | model='{model_in_use}' | response='{llm_response.replace(chr(10), ' ')[:150]}...'")
+                logger.info(f"🟢 [OUTPUT] LLM final response (length: {len(llm_response)} chars):\n{llm_response}")
+                logger.info(f"✅ LLM stream finished | {log_context} | model='{model_in_use}'")
+
                 if thread_id not in self.conversation_threads:
                     self.conversation_threads[thread_id] = []
                 self.conversation_threads[thread_id].append(user_message_for_api)
@@ -433,6 +456,7 @@ class LLMCog(commands.Cog, name="LLM"):
         full_response_text = ""
         last_update = 0.0
         last_displayed_length = 0
+        chunk_count = 0
 
         # 複数サーバー運用を考慮したタイプライター効果の設定
         update_interval = 0.5  # Discord API制限を考慮して0.5秒間隔
@@ -440,6 +464,8 @@ class LLMCog(commands.Cog, name="LLM"):
         retry_sleep_time = 2.0  # レート制限時の待機時間
 
         placeholder = "Thinking..."
+        logger.info(f"🔵 [STREAMING] Starting LLM stream | {log_context}")
+
         try:
             sent_message = await message.reply(placeholder, silent=True)
         except discord.HTTPException:
@@ -451,7 +477,14 @@ class LLMCog(commands.Cog, name="LLM"):
             )
 
             async for content_chunk in stream_generator:
+                chunk_count += 1
                 full_response_text += content_chunk
+
+                # 定期的にチャンク内容をログ出力（100チャンクごと）
+                if chunk_count % 100 == 0:
+                    logger.debug(
+                        f"🟢 [STREAMING] Received chunk #{chunk_count}, total length: {len(full_response_text)} chars")
+
                 current_time = time.time()
                 chars_accumulated = len(full_response_text) - last_displayed_length
 
@@ -469,26 +502,31 @@ class LLMCog(commands.Cog, name="LLM"):
                             await sent_message.edit(content=display_text)
                             last_update = current_time
                             last_displayed_length = len(full_response_text)
+                            logger.debug(
+                                f"🟢 [STREAMING] Updated Discord message (displayed: {len(display_text)} chars)")
                         except discord.NotFound:
                             logger.warning(
-                                f"Message deleted during stream (ID: {sent_message.id}). Aborting.")
+                                f"⚠️ Message deleted during stream (ID: {sent_message.id}). Aborting.")
                             return None, ""
                         except discord.HTTPException as e:
                             if e.status == 429:
                                 # レート制限: 指定された待機時間 + バッファ
                                 retry_after = (e.retry_after or 1.0) + 0.5
                                 logger.warning(
-                                    f"Rate limited on message edit (ID: {sent_message.id}). "
+                                    f"⚠️ Rate limited on message edit (ID: {sent_message.id}). "
                                     f"Waiting {retry_after:.2f}s"
                                 )
                                 await asyncio.sleep(retry_after)
                                 last_update = time.time()
                             else:
                                 logger.warning(
-                                    f"Failed to edit message (ID: {sent_message.id}): "
+                                    f"⚠️ Failed to edit message (ID: {sent_message.id}): "
                                     f"{e.status} - {getattr(e, 'text', str(e))}"
                                 )
                                 await asyncio.sleep(retry_sleep_time)
+
+            logger.info(
+                f"🟢 [STREAMING] Stream completed | Total chunks: {chunk_count} | Final length: {len(full_response_text)} chars")
 
             # ストリーム終了後: 最終内容を確実に反映
             if full_response_text:
@@ -496,22 +534,24 @@ class LLMCog(commands.Cog, name="LLM"):
                 if final_text != sent_message.content:
                     try:
                         await sent_message.edit(content=final_text)
+                        logger.info(f"🟢 [STREAMING] Final message updated successfully")
                     except discord.HTTPException as e:
                         logger.error(
-                            f"Failed to update final message (ID: {sent_message.id}): {e}"
+                            f"❌ Failed to update final message (ID: {sent_message.id}): {e}"
                         )
             else:
                 # 応答が空の場合
                 error_msg = self.llm_config.get('error_msg', {}).get(
                     'general_error', "AIから応答がありませんでした。"
                 )
+                logger.warning(f"⚠️ Empty response from LLM")
                 await sent_message.edit(content=error_msg)
                 return None, ""
 
             return sent_message, full_response_text
 
         except Exception as e:
-            logger.error(f"Error during LLM streaming response: {e}", exc_info=True)
+            logger.error(f"❌ Error during LLM streaming response: {e}", exc_info=True)
             error_msg = self.exception_handler.handle_exception(e)
             if sent_message:
                 try:
@@ -536,6 +576,9 @@ class LLMCog(commands.Cog, name="LLM"):
         extra_params = self.llm_config.get('extra_api_parameters', {})
 
         for iteration in range(max_iterations):
+            logger.info(
+                f"🔵 [API CALL] Starting LLM API call (iteration {iteration + 1}/{max_iterations}) | {log_context}")
+
             tools_def = self.get_tools_definition()
             api_kwargs = {
                 "model": client.model_name_for_api_calls,
@@ -547,11 +590,13 @@ class LLMCog(commands.Cog, name="LLM"):
             if tools_def:
                 api_kwargs["tools"] = tools_def
                 api_kwargs["tool_choice"] = "auto"
+                logger.info(f"🔧 [TOOLS] Available tools: {[t['function']['name'] for t in tools_def]}")
 
             try:
                 stream = await client.chat.completions.create(**api_kwargs)
+                logger.info(f"🔵 [API CALL] Stream connection established")
             except Exception as e:
-                logger.error(f"Error calling LLM API in stream handler: {e}", exc_info=True)
+                logger.error(f"❌ Error calling LLM API in stream handler: {e}", exc_info=True)
                 raise
 
             tool_calls_buffer = []
@@ -584,9 +629,13 @@ class LLMCog(commands.Cog, name="LLM"):
             current_messages.append(assistant_message)
 
             if not tool_calls_buffer:
+                logger.info(f"🟢 [OUTPUT] No tool calls, returning final response")
                 return
 
-            logger.info(f"Processing {len(tool_calls_buffer)} tool call(s) in iteration {iteration + 1}")
+            logger.info(f"🔧 [TOOLS] Processing {len(tool_calls_buffer)} tool call(s) in iteration {iteration + 1}")
+            for tc in tool_calls_buffer:
+                logger.info(
+                    f"🔧 [TOOLS] Tool call: {tc['function']['name']} with args: {tc['function']['arguments'][:200]}")
 
             tool_calls_obj = [
                 SimpleNamespace(
@@ -596,7 +645,7 @@ class LLMCog(commands.Cog, name="LLM"):
             ]
             await self._process_tool_calls(tool_calls_obj, current_messages, log_context, channel_id, user_id)
 
-        logger.warning(f"Tool processing exceeded max iterations ({max_iterations})")
+        logger.warning(f"⚠️ Tool processing exceeded max iterations ({max_iterations})")
         yield self.llm_config.get('error_msg', {}).get('tool_loop_timeout', "Tool processing exceeded max iterations.")
 
     async def _process_tool_calls(self, tool_calls: List[Any], messages: List[Dict[str, Any]],
@@ -608,50 +657,57 @@ class LLMCog(commands.Cog, name="LLM"):
 
             try:
                 function_args = json.loads(tool_call.function.arguments)
+                logger.info(f"🔧 [TOOL EXEC] Executing {function_name} | {log_context}")
+                logger.info(f"🔧 [TOOL EXEC] Arguments: {json.dumps(function_args, ensure_ascii=False, indent=2)}")
 
                 if self.search_agent and function_name == self.search_agent.name:
                     query_text = function_args.get('query', 'N/A')
-                    logger.info(f"Executing SearchAgent | {log_context} | query='{query_text}'")
+                    logger.info(f"🔍 [SEARCH] Query: '{query_text}'")
                     tool_response_content = await self.search_agent.run(arguments=function_args, bot=self.bot,
                                                                         channel_id=channel_id)
                     logger.info(
-                        f"SearchAgent completed | {log_context} | result_length={len(str(tool_response_content))}")
+                        f"🔍 [SEARCH] Result (length: {len(str(tool_response_content))} chars):\n{str(tool_response_content)[:1000]}")
 
                 elif self.bio_manager and function_name == self.bio_manager.name:
+                    logger.info(f"👤 [BIO] Executing bio manager tool")
                     tool_response_content = await self.bio_manager.run_tool(arguments=function_args, user_id=user_id)
+                    logger.info(f"👤 [BIO] Result:\n{tool_response_content}")
 
                 elif self.memory_manager and function_name == self.memory_manager.name:
+                    logger.info(f"🧠 [MEMORY] Executing memory manager tool")
                     tool_response_content = await self.memory_manager.run_tool(arguments=function_args)
+                    logger.info(f"🧠 [MEMORY] Result:\n{tool_response_content}")
 
                 else:
-                    logger.warning(f"Received a call for an unsupported tool: {function_name} | {log_context}")
+                    logger.warning(f"⚠️ Unsupported tool called: {function_name} | {log_context}")
                     error_content = f"Error: Tool '{function_name}' is not available."
 
             except json.JSONDecodeError as e:
-                logger.error(f"Error decoding tool arguments for {function_name}: {e}", exc_info=True)
+                logger.error(f"❌ Error decoding tool arguments for {function_name}: {e}", exc_info=True)
                 error_content = f"Error: Invalid JSON arguments - {str(e)}"
             except SearchAPIRateLimitError as e:
-                logger.warning(f"SearchAgent rate limit hit: {e}")
+                logger.warning(f"⚠️ SearchAgent rate limit hit: {e}")
                 error_content = "[Google Search Error]\nGoogle検索APIの利用制限に達しました。時間を置いてから再試行するようにユーザーに伝えてください。"
             except SearchAPIServerError as e:
-                logger.error(f"SearchAgent server error: {e}")
+                logger.error(f"❌ SearchAgent server error: {e}")
                 error_content = "[Google Search Error]\n検索サービスで一時的なサーバーエラーが発生しました。時間を置いてから再試行するようにユーザーに伝えてください。"
             except SearchAgentError as e:
-                logger.error(f"Error during SearchAgent execution for {function_name}: {e}", exc_info=True)
+                logger.error(f"❌ Error during SearchAgent execution for {function_name}: {e}", exc_info=True)
                 error_content = f"[Google Search Error]\n検索の実行中にエラーが発生しました: {str(e)}"
             except Exception as e:
-                logger.error(f"Unexpected error during tool call for {function_name}: {e}", exc_info=True)
+                logger.error(f"❌ Unexpected error during tool call for {function_name}: {e}", exc_info=True)
                 error_content = f"[Tool Error]\n予期しないエラーが発生しました: {str(e)}"
+
+            final_content = error_content if error_content else tool_response_content
+            logger.info(f"🔧 [TOOL RESULT] Sending tool response back to LLM (length: {len(final_content)} chars)")
 
             messages.append({
                 "tool_call_id": tool_call.id,
                 "role": "tool",
                 "name": function_name,
-                "content": error_content if error_content else tool_response_content
+                "content": final_content
             })
 
-    # --- 以下のコマンド定義部分は変更ありません ---
-    # ... (元のコードのコマンド定義部分をここに貼り付け) ...
     # --- AIのbio (チャンネルごと) ---
     @app_commands.command(
         name="set-ai-bio",
