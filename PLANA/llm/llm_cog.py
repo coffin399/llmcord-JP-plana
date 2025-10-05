@@ -386,18 +386,6 @@ class LLMCog(commands.Cog, name="LLM"):
         messages_for_api: List[Dict[str, Any]] = [{"role": "system", "content": system_prompt}]
 
         conversation_history = await self._collect_conversation_history(message)
-        if conversation_history:
-            logger.info(f"🔵 [INPUT] Conversation history ({len(conversation_history)} messages)")
-            for idx, hist_msg in enumerate(conversation_history, 1):
-                role = hist_msg.get("role", "unknown")
-                content = hist_msg.get("content", "")
-                if isinstance(content, list):
-                    text_parts = [p.get("text", "") for p in content if p.get("type") == "text"]
-                    content_preview = " ".join(text_parts)
-                else:
-                    content_preview = content
-                logger.info(f"🔵   [{idx}] {role}: {content_preview}")
-
         messages_for_api.extend(conversation_history)
 
         user_content_parts = []
