@@ -381,7 +381,7 @@ class LLMCog(commands.Cog, name="LLM"):
         if formatted_memories := self.memory_manager.get_formatted_memories():
             system_prompt += f"\n\n{formatted_memories}"
 
-        logger.info(f"🔵 [INPUT] System prompt:\n{system_prompt}")
+        logger.info(f"🔵 [INPUT] System prompt prepared (length: {len(system_prompt)} chars)")
 
         messages_for_api: List[Dict[str, Any]] = [{"role": "system", "content": system_prompt}]
 
