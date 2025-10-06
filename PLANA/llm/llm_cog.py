@@ -324,10 +324,7 @@ class LLMCog(commands.Cog, name="LLM"):
         )
         if not (is_mentioned or is_reply_to_bot):
             return
-        if (
-                allowed_channels := self.config.get('allowed_channel_ids',
-                                                    [])) and message.channel.id not in allowed_channels:
-            return
+
         try:
             llm_client = await self._get_llm_client_for_channel(message.channel.id)
             if not llm_client:
@@ -439,18 +436,14 @@ class LLMCog(commands.Cog, name="LLM"):
             client: openai.AsyncOpenAI,
             log_context: str
     ) -> Tuple[Optional[discord.Message], str]:
-        """ストリーミング応答を処理し、タイプライター効果でDiscordメッセージを動的に編集する"""
         sent_message = None
         full_response_text = ""
         last_update = 0.0
         last_displayed_length = 0
         chunk_count = 0
-
-        # 複数サーバー運用を考慮したタイプライター効果の設定
-        update_interval = 0.5  # Discord API制限を考慮して0.5秒間隔
-        min_update_chars = 15  # 最低15文字たまったら更新
-        retry_sleep_time = 2.0  # レート制限時の待機時間
-
+        update_interval = 0.5
+        min_update_chars = 15
+        retry_sleep_time = 2.0
         placeholder = "Thinking..."
         logger.info(f"🔵 [STREAMING] Starting LLM stream | {log_context}")
 
@@ -468,7 +461,6 @@ class LLMCog(commands.Cog, name="LLM"):
                 chunk_count += 1
                 full_response_text += content_chunk
 
-                # 定期的にチャンク内容をログ出力（100チャンクごと）
                 if chunk_count % 100 == 0:
                     logger.debug(
                         f"🟢 [STREAMING] Received chunk #{chunk_count}, total length: {len(full_response_text)} chars")
@@ -476,7 +468,6 @@ class LLMCog(commands.Cog, name="LLM"):
                 current_time = time.time()
                 chars_accumulated = len(full_response_text) - last_displayed_length
 
-                # タイプライター効果: 一定時間経過 AND 一定文字数蓄積で更新
                 should_update = (
                         current_time - last_update > update_interval and
                         chars_accumulated >= min_update_chars
@@ -498,7 +489,6 @@ class LLMCog(commands.Cog, name="LLM"):
                             return None, ""
                         except discord.HTTPException as e:
                             if e.status == 429:
-                                # レート制限: 指定された待機時間 + バッファ
                                 retry_after = (e.retry_after or 1.0) + 0.5
                                 logger.warning(
                                     f"⚠️ Rate limited on message edit (ID: {sent_message.id}). "
@@ -516,7 +506,6 @@ class LLMCog(commands.Cog, name="LLM"):
             logger.info(
                 f"🟢 [STREAMING] Stream completed | Total chunks: {chunk_count} | Final length: {len(full_response_text)} chars")
 
-            # ストリーム終了後: 最終内容を確実に反映
             if full_response_text:
                 final_text = full_response_text[:DISCORD_MESSAGE_MAX_LENGTH]
                 if final_text != sent_message.content:
@@ -528,7 +517,6 @@ class LLMCog(commands.Cog, name="LLM"):
                             f"❌ Failed to update final message (ID: {sent_message.id}): {e}"
                         )
             else:
-                # 応答が空の場合
                 error_msg = self.llm_config.get('error_msg', {}).get(
                     'general_error', "AIから応答がありませんでした。"
                 )
@@ -545,7 +533,7 @@ class LLMCog(commands.Cog, name="LLM"):
                 try:
                     await sent_message.edit(content=error_msg)
                 except discord.HTTPException:
-                    pass  # 編集失敗時はログのみ
+                    pass
             else:
                 await message.reply(error_msg, silent=True)
             return None, ""
@@ -558,7 +546,6 @@ class LLMCog(commands.Cog, name="LLM"):
             channel_id: int,
             user_id: int
     ) -> AsyncGenerator[str, None]:
-        """LLM APIとストリーミングで通信し、必要に応じてツールを処理する非同期ジェネレータ"""
         current_messages = messages.copy()
         max_iterations = self.llm_config.get('max_tool_iterations', 5)
         extra_params = self.llm_config.get('extra_api_parameters', {})
@@ -696,7 +683,6 @@ class LLMCog(commands.Cog, name="LLM"):
                 "content": final_content
             })
 
-    # --- AIのbio (チャンネルごと) ---
     @app_commands.command(
         name="set-ai-bio",
         description="このチャンネルのAIの性格や役割(bio)を設定します。/ Set the AI's personality/role (bio) for this channel."
@@ -795,7 +781,6 @@ class LLMCog(commands.Cog, name="LLM"):
             logger.error(f"Failed to save channel AI bio settings after reset: {e}", exc_info=True)
             await interaction.followup.send("❌ AIのbio設定の保存に失敗しました。", ephemeral=False)
 
-    # --- ユーザーのbio (ユーザーごと) ---
     @app_commands.command(
         name="set-user-bio",
         description="AIにあなたの情報を記憶させます。/ Save your information for the AI to remember."
@@ -882,7 +867,6 @@ class LLMCog(commands.Cog, name="LLM"):
             logger.error(f"Failed to save user bio settings after reset: {e}", exc_info=True)
             await interaction.followup.send("❌ あなたの情報の削除に失敗しました。", ephemeral=False)
 
-    # --- グローバル共有メモリ関連コマンド ---
     @app_commands.command(
         name="memory-save",
         description="グローバル共有メモリに情報を保存します。/ Save information to the global shared memory."
@@ -946,9 +930,9 @@ class LLMCog(commands.Cog, name="LLM"):
             return []
         keys = self.memory_manager.list_memories().keys()
         return [
-            app_commands.Choice(name=key, value=key)
-            for key in keys if current.lower() in key.lower()
-        ][:25]
+                   app_commands.Choice(name=key, value=key)
+                   for key in keys if current.lower() in key.lower()
+               ][:25]
 
     @app_commands.command(
         name="memory-delete",
@@ -973,14 +957,13 @@ class LLMCog(commands.Cog, name="LLM"):
             logger.error(f"Failed to delete global memory via command: {e}", exc_info=True)
             await interaction.followup.send("❌ グローバル共有メモリからの削除に失敗しました。", ephemeral=False)
 
-    # --- モデル切り替え関連コマンド ---
     async def model_autocomplete(self, interaction: discord.Interaction, current: str) -> List[
         app_commands.Choice[str]]:
         available_models = self.llm_config.get('available_models', [])
         return [
-            app_commands.Choice(name=model, value=model)
-            for model in available_models if current.lower() in model.lower()
-        ][:25]
+                   app_commands.Choice(name=model, value=model)
+                   for model in available_models if current.lower() in model.lower()
+               ][:25]
 
     @app_commands.command(
         name="switch-models",
@@ -1040,7 +1023,6 @@ class LLMCog(commands.Cog, name="LLM"):
         else:
             await interaction.followup.send(f"予期せぬエラーが発生しました: {error}", ephemeral=False)
 
-    # --- ヘルプと履歴クリア ---
     @app_commands.command(name="llm_help",
                           description="LLM (AI対話) 機能のヘルプと利用ガイドラインを表示します。/ Displays help and usage guidelines for LLM (AI Chat) features.")
     async def llm_help_slash(self, interaction: discord.Interaction):
