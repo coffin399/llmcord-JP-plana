@@ -286,39 +286,46 @@ class LLMCog(commands.Cog, name="LLM"):
 
     async def _prepare_multimodal_content(self, message: discord.Message) -> Tuple[List[Dict[str, Any]], str]:
         image_inputs, processed_urls = [], set()
-        messages_to_scan = [message]
-        logger.info(f"🔵 [IMAGE] Starting image scan for message ID: {message.id}")
 
-        # 引用リプライ元のメッセージも画像取得対象に追加
-        if message.reference and message.reference.message_id:
-            try:
-                # まずキャッシュ (resolved) を確認
-                referenced_msg = message.reference.resolved
-                # キャッシュになければAPIから取得を試みる
-                if not referenced_msg:
-                    logger.info(
-                        f"🔵 [IMAGE] Referenced message not in cache. Fetching ID: {message.reference.message_id}")
-                    referenced_msg = await message.channel.fetch_message(message.reference.message_id)
+        # --- 修正箇所 START ---
 
-                if referenced_msg:
-                    messages_to_scan.append(referenced_msg)
-                    logger.info(f"🔵 [IMAGE] Added referenced message to scan (ID: {referenced_msg.id})")
-            except discord.Forbidden:
-                # 権限不足は致命的なのでエラーとして記録
-                logger.error(
-                    f"❌ [IMAGE] Lacking 'Read Message History' permission in channel '{message.channel.name}' ({message.channel.id}) "
-                    f"to fetch referenced message. Please check bot permissions."
-                )
-            except (discord.NotFound, discord.HTTPException) as e:
-                # メッセージが見つからない、その他のHTTPエラーは警告として記録
-                logger.warning(
-                    f"⚠️ [IMAGE] Could not fetch referenced message (ID: {message.reference.message_id}): {e}")
+        messages_to_scan = []
+        visited_ids = set()
+        current_msg = message
+        max_depth = 5  # 遡るリプライの最大数 (お好みで調整)
 
-        # 収集ロジック
+        logger.info(f"🔵 [IMAGE] Starting recursive image scan for message ID: {message.id} with max depth: {max_depth}")
+
+        # ループで安全にリプライを遡る
+        for i in range(max_depth):
+            # current_msgが存在しない、または既に処理済みの場合はループを抜ける
+            if not current_msg or current_msg.id in visited_ids:
+                break
+
+            logger.info(f"🔵 [IMAGE] Scanning message ID: {current_msg.id} (Depth: {i + 1})")
+            messages_to_scan.append(current_msg)
+            visited_ids.add(current_msg.id)
+
+            # 次のメッセージ（リプライ元）を取得
+            if current_msg.reference and current_msg.reference.message_id:
+                try:
+                    # まずキャッシュを確認し、なければAPIで取得
+                    parent_msg = current_msg.reference.resolved or await message.channel.fetch_message(
+                        current_msg.reference.message_id)
+                    current_msg = parent_msg
+                except (discord.NotFound, discord.HTTPException) as e:
+                    logger.warning(
+                        f"⚠️ [IMAGE] Could not fetch referenced message (ID: {current_msg.reference.message_id}): {e}")
+                    break  # 親メッセージが取得できなければ終了
+            else:
+                break  # リプライでなければ終了
+
+        # --- 修正箇所 END ---
+
+        # 収集ロジック (ここは元のコードと同じ)
         source_urls = []
-        for msg in messages_to_scan:
-            logger.info(f"🔵 [IMAGE] Scanning message ID: {msg.id} by {msg.author.name}")
-
+        # messages_to_scanを逆順にすることで、古いメッセージの画像から処理する
+        for msg in reversed(messages_to_scan):
             # 1. メッセージ本文のURLを検索
             for url in IMAGE_URL_PATTERN.findall(msg.content):
                 if url not in processed_urls:
@@ -334,17 +341,16 @@ class LLMCog(commands.Cog, name="LLM"):
 
             # 3. 埋め込み(Embed)内の画像を検索
             for embed in msg.embeds:
-                # embed.image (大きい画像)
                 if embed.image and embed.image.url and embed.image.url not in processed_urls:
                     source_urls.append(embed.image.url)
                     processed_urls.add(embed.image.url)
-                # embed.thumbnail (小さい画像)
                 if embed.thumbnail and embed.thumbnail.url and embed.thumbnail.url not in processed_urls:
                     source_urls.append(embed.thumbnail.url)
                     processed_urls.add(embed.thumbnail.url)
 
         if source_urls:
-            logger.info(f"🔵 [IMAGE] Found {len(source_urls)} unique image URL(s): {source_urls}")
+            logger.info(
+                f"🔵 [IMAGE] Found {len(source_urls)} unique image URL(s) from {len(messages_to_scan)} messages: {source_urls}")
 
         max_images = self.llm_config.get('max_images', 1)
         for url in source_urls[:max_images]:
