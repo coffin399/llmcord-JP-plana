@@ -65,10 +65,12 @@ class Shittim(commands.Bot):
             if os.path.exists(DEFAULT_CONFIG_FILE):
                 try:
                     shutil.copyfile(DEFAULT_CONFIG_FILE, CONFIG_FILE)
-                    logging.info(f"{CONFIG_FILE} が見つからなかったため、{DEFAULT_CONFIG_FILE} をコピーして生成しました。")
+                    logging.info(
+                        f"{CONFIG_FILE} が見つからなかったため、{DEFAULT_CONFIG_FILE} をコピーして生成しました。")
                     logging.warning(f"生成された {CONFIG_FILE} を確認し、ボットトークンやAPIキーを設定してください。")
                 except Exception as e_copy:
-                    print(f"CRITICAL: {DEFAULT_CONFIG_FILE} から {CONFIG_FILE} のコピー中にエラーが発生しました: {e_copy}")
+                    print(
+                        f"CRITICAL: {DEFAULT_CONFIG_FILE} から {CONFIG_FILE} のコピー中にエラーが発生しました: {e_copy}")
                     raise RuntimeError(f"{CONFIG_FILE} の生成に失敗しました。")
             else:
                 print(f"CRITICAL: {CONFIG_FILE} も {DEFAULT_CONFIG_FILE} も見つかりません。設定ファイルがありません。")
@@ -100,17 +102,25 @@ class Shittim(commands.Bot):
             log_channel_ids_from_config = []
             logging.warning("config.yaml の 'log_channel_ids' はリスト形式である必要があります。")
 
-        # --- logging_channels.json のパスを変更 ---
         logging_json_path = "data/json/logging_channels.json"
         log_channel_ids_from_file = []
-        if os.path.exists(logging_json_path):
-            try:
-                with open(logging_json_path, 'r') as f:
-                    data = json.load(f)
-                    if isinstance(data, list) and all(isinstance(i, int) for i in data):
-                        log_channel_ids_from_file = data
-            except (json.JSONDecodeError, IOError) as e:
-                logging.error(f"{logging_json_path} の読み込みに失敗しました: {e}")
+
+        # --- logging_channels.json の存在確認と新規作成 (修正箇所) ---
+        try:
+            dir_path = os.path.dirname(logging_json_path)
+            os.makedirs(dir_path, exist_ok=True)  # ディレクトリがなければ作成
+            if not os.path.exists(logging_json_path):
+                with open(logging_json_path, 'w') as f:
+                    json.dump([], f)  # 空のリストで新規作成
+                logging.info(f"{logging_json_path} が見つからなかったため、新規作成しました。")
+
+            # ファイルを読み込む
+            with open(logging_json_path, 'r') as f:
+                data = json.load(f)
+                if isinstance(data, list) and all(isinstance(i, int) for i in data):
+                    log_channel_ids_from_file = data
+        except (json.JSONDecodeError, IOError) as e:
+            logging.error(f"{logging_json_path} の処理中にエラーが発生しました: {e}")
 
         all_log_channel_ids = list(set(log_channel_ids_from_config + log_channel_ids_from_file))
 
@@ -157,7 +167,8 @@ class Shittim(commands.Bot):
                 if test_guild_id:
                     guild_obj = discord.Object(id=int(test_guild_id))
                     synced_commands = await self.tree.sync(guild=guild_obj)
-                    logging.info(f"{len(synced_commands)}個のスラッシュコマンドをテストギルド {test_guild_id} に同期しました。")
+                    logging.info(
+                        f"{len(synced_commands)}個のスラッシュコマンドをテストギルド {test_guild_id} に同期しました。")
                 else:
                     synced_commands = await self.tree.sync()
                     logging.info(f"{len(synced_commands)}個のグローバルスラッシュコマンドを同期しました。")
@@ -236,42 +247,42 @@ class Shittim(commands.Bot):
         logging.info(f'{self.user.name} ({self.user.id}) としてDiscordにログインし、準備が完了しました！')
         logging.info(f"現在 {len(self.guilds)} サーバーに参加しています。")
         logging.info("📱 モバイルステータスで表示されています")
-        self.status_templates = self.config.get('status_rotation',
-                                                ["/help",
-                                                 "operating on {guild_count} servers",
-                                                 "operating on {guild_count} servers",
-                                                 "PLANA Ver.2025-10-06",
-                                                 "PLANA Ver.2025-10-06",
-                                                 "/llm_help",
-                                                 "/llm_help_en",
-                                                 "/ytdlp",
-                                                 "/updates",
-                                                 "/updates",
-                                                 "/enable-logging"
-                                                 ])
+        self.status_templates = self.config.get('status_rotation', ["/help", "operating on {guild_count} servers",
+                                                                    "operating on {guild_count} servers",
+                                                                    "PLANA Ver.2025-10-06", "PLANA Ver.2025-10-06",
+                                                                    "/llm_help", "/llm_help_en", "/ytdlp",
+                                                                    "/updates", "/updates", "/enable-logging"])
         self.rotate_status.start()
 
     async def on_guild_join(self, guild: discord.Guild):
-        logging.info(f"新しいサーバー '{guild.name}' (ID: {guild.id}) に参加しました。現在のサーバー数: {len(self.guilds)}")
+        logging.info(
+            f"新しいサーバー '{guild.name}' (ID: {guild.id}) に参加しました。現在のサーバー数: {len(self.guilds)}")
 
     async def on_guild_remove(self, guild: discord.Guild):
         logging.info(f"サーバー '{guild.name}' (ID: {guild.id}) から退出しました。現在のサーバー数: {len(self.guilds)}")
 
     async def on_command_error(self, ctx: commands.Context, error: commands.CommandError):
-        if isinstance(error, commands.CommandNotFound): return
+        if isinstance(error, commands.CommandNotFound):
+            return
         elif isinstance(error, commands.MissingRequiredArgument):
-            await ctx.send(f"引数が不足しています: `{error.param.name}`\n`{ctx.prefix}{ctx.command.qualified_name} {ctx.command.signature}`")
+            await ctx.send(
+                f"引数が不足しています: `{error.param.name}`\n`{ctx.prefix}{ctx.command.qualified_name} {ctx.command.signature}`")
         elif isinstance(error, commands.BadArgument):
-            await ctx.send(f"引数の型が正しくありません。\n`{ctx.prefix}{ctx.command.qualified_name} {ctx.command.signature}`")
+            await ctx.send(
+                f"引数の型が正しくありません。\n`{ctx.prefix}{ctx.command.qualified_name} {ctx.command.signature}`")
         elif isinstance(error, commands.CheckFailure):
             await ctx.send("このコマンドを実行する権限がありません。")
         elif isinstance(error, commands.CommandOnCooldown):
             await ctx.send(f"このコマンドはクールダウン中です。あと {error.retry_after:.2f} 秒お待ちください。")
         elif isinstance(error, commands.ExtensionError):
-            logging.error(f"Cog関連のエラーが発生しました ({ctx.command.cog_name if ctx.command else 'UnknownCog'}): {error}", exc_info=error)
+            logging.error(
+                f"Cog関連のエラーが発生しました ({ctx.command.cog_name if ctx.command else 'UnknownCog'}): {error}",
+                exc_info=error)
             await ctx.send("コマンドの処理中にCogエラーが発生しました。管理者に報告してください。")
         else:
-            logging.error(f"コマンド '{ctx.command.qualified_name if ctx.command else ctx.invoked_with}' の実行中に予期しないエラーが発生しました:", exc_info=error)
+            logging.error(
+                f"コマンド '{ctx.command.qualified_name if ctx.command else ctx.invoked_with}' の実行中に予期しないエラーが発生しました:",
+                exc_info=error)
             try:
                 await ctx.send("コマンドの実行中に予期しないエラーが発生しました。")
             except discord.errors.Forbidden:
@@ -295,7 +306,8 @@ if __name__ == "__main__":
                 shutil.copyfile(DEFAULT_CONFIG_FILE, CONFIG_FILE)
                 print(f"INFO: メイン実行: {CONFIG_FILE} が見つからず、{DEFAULT_CONFIG_FILE} からコピー生成しました。")
             except Exception as e_copy_main:
-                print(f"CRITICAL: メイン実行: {DEFAULT_CONFIG_FILE} から {CONFIG_FILE} のコピー中にエラー: {e_copy_main}")
+                print(
+                    f"CRITICAL: メイン実行: {DEFAULT_CONFIG_FILE} から {CONFIG_FILE} のコピー中にエラー: {e_copy_main}")
                 sys.exit(1)
         with open(CONFIG_FILE, 'r', encoding='utf-8') as f_main_init:
             initial_config = yaml.safe_load(f_main_init)
