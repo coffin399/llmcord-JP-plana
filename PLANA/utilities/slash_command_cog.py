@@ -514,7 +514,7 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
                     commits: List[Dict[str, Any]] = await response.json()
                     embed = discord.Embed(
                         title="📜 アップデート履歴 / Update History",
-                        description=f"最新のコミット25件を表示しています。\nShowing the 30 most recent commits from the [{repo}]({self.plana_repository}) repository.",
+                        description=f"最新のコミット25件を表示しています。\nShowing the 25 most recent commits from the [{repo}]({self.plana_repository}) repository.",
                         color=discord.Color.blue()
                     )
 
