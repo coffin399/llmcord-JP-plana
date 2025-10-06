@@ -1,3 +1,4 @@
+# DiscordLogHandler を含むファイル (例: PLANA/utilities/logging_handler.py)
 import asyncio
 import logging
 from asyncio import Queue
@@ -23,6 +24,24 @@ class DiscordLogHandler(logging.Handler):
         self._closed = False
 
         self._task = self.bot.loop.create_task(self._log_sender_loop())
+
+    # ### ここから追加 ###
+    def add_channel(self, channel_id: int):
+        """ログ送信先チャンネルを動的に追加する。"""
+        if channel_id not in self.channel_ids:
+            self.channel_ids.append(channel_id)
+            # チャンネルオブジェクトのキャッシュをクリアして次回再取得させる
+            self.channels = []
+            print(f"DiscordLogHandler: Added channel {channel_id} to the logging targets.")
+
+    def remove_channel(self, channel_id: int):
+        """ログ送信先チャンネルを動的に削除する。"""
+        if channel_id in self.channel_ids:
+            self.channel_ids.remove(channel_id)
+            # チャンネルオブジェクトのキャッシュをクリア
+            self.channels = []
+            print(f"DiscordLogHandler: Removed channel {channel_id} from the logging targets.")
+    # ### ここまで追加 ###
 
     def emit(self, record: logging.LogRecord):
         """
