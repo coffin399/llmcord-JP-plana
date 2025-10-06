@@ -235,8 +235,8 @@ class Shittim(commands.Bot):
             "/help",
             "operating on {guild_count} servers",
             "operating on {guild_count} servers",
-            "PLANA Ver.2025-10-04",
-            "PLANA Ver.2025-10-04",
+            "PLANA Ver.2025-10-06",
+            "PLANA Ver.2025-10-06",
             "/llm_help",
             "/llm_help_en"
         ])
