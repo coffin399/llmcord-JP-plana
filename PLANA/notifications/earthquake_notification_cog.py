@@ -13,7 +13,6 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
-# --- エラーハンドラのインポート ---
 from PLANA.notifications.error.earthquake_errors import (
     EarthquakeTsunamiExceptionHandler,
     APIError,
@@ -22,11 +21,9 @@ from PLANA.notifications.error.earthquake_errors import (
     NotificationError
 )
 
-# 設定ファイルを保存するディレクトリとファイルのパス
 DATA_DIR = 'data'
 CONFIG_FILE = os.path.join(DATA_DIR, 'earthquake_tsunami_notification_config.json')
 
-# ロギング設定
 logger = logging.getLogger('EarthquakeTsunamiCog')
 
 
@@ -53,14 +50,22 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
             InfoType.EEW.value: set(), InfoType.QUAKE.value: set(), InfoType.TSUNAMI.value: set()
         }
         self.max_processed_ids = 1000
-        self.session = None
+
+        # WebSocket関連
+        self.ws_session = None
+        self.ws_connection = None
+        self.ws_reconnect_delay = 5
+        self.ws_max_reconnect_delay = 300
+        self.ws_running = False
+
+        self.http_session = None
         self.jst = timezone(timedelta(hours=+9), 'JST')
         self.api_base_url = "https://api.p2pquake.net/v2"
-        self.request_headers = {'User-Agent': 'Discord-Bot-EarthquakeTsunami/2.0', 'Accept': 'application/json'}
-        self.info_codes = {
-            InfoType.EEW.value: 551, InfoType.QUAKE.value: 551, InfoType.TSUNAMI.value: 552
-        }
-        self.error_stats = {'api_errors': 0, 'parsing_errors': 0, 'network_errors': 0, 'last_error_time': None}
+        self.ws_url = "wss://api.p2pquake.net/v2/ws"
+        self.request_headers = {'User-Agent': 'Discord-Bot-EarthquakeTsunami/3.0', 'Accept': 'application/json'}
+
+        self.error_stats = {'api_errors': 0, 'parsing_errors': 0, 'network_errors': 0, 'ws_disconnects': 0,
+                            'last_error_time': None}
         self.processing_stats = {'eew_processed': 0, 'quake_processed': 0, 'tsunami_processed': 0, 'unknown_skipped': 0,
                                  'last_stats_output': datetime.now(self.jst)}
         self.stats_interval = 3600
@@ -71,10 +76,17 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
     async def cog_load(self):
         logger.info("🔄 EarthquakeTsunamiCog セットアップ開始...")
         try:
-            await self.recreate_session()
+            await self.recreate_http_session()
             logger.info("🔄 最新情報のIDを初期化中...")
             await self.initialize_processed_ids()
-            self.check_earthquake_info.start()
+
+            # WebSocket接続を開始
+            self.ws_running = True
+            asyncio.create_task(self.websocket_listener())
+
+            # 統計出力タスクを開始
+            self.output_stats_task.start()
+
             logger.info("✅ EarthquakeTsunamiCog セットアップ完了")
         except Exception as e:
             self.exception_handler.log_generic_error(e, "Cogのセットアップ")
@@ -82,31 +94,126 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
 
     async def cog_unload(self):
         logger.info("🔄 EarthquakeTsunamiCog アンロード中...")
-        if hasattr(self, 'check_earthquake_info'):
-            self.check_earthquake_info.cancel()
-        if self.session and not self.session.closed:
-            try:
-                await self.session.close()
-            except Exception as e:
-                logger.warning(f"セッション終了エラー: {e}")
+
+        # WebSocket接続を停止
+        self.ws_running = False
+        if self.ws_connection and not self.ws_connection.closed:
+            await self.ws_connection.close()
+        if self.ws_session and not self.ws_session.closed:
+            await self.ws_session.close()
+
+        # HTTP接続を停止
+        if self.http_session and not self.http_session.closed:
+            await self.http_session.close()
+
+        # タスクを停止
+        if hasattr(self, 'output_stats_task'):
+            self.output_stats_task.cancel()
+
         logger.info("✅ EarthquakeTsunamiCog アンロード完了")
 
-    def setup_fallback_ids(self):
-        fallback_count = 0
-        for info_type in [InfoType.EEW.value, InfoType.TSUNAMI.value]:
-            if not self.last_ids[info_type] and self.last_ids[InfoType.QUAKE.value]:
-                self.last_ids[info_type] = self.last_ids[InfoType.QUAKE.value]
-                logger.info(f"  ⚙️ {info_type}にフォールバックID設定: {self.last_ids[info_type][:8]}...")
-                fallback_count += 1
-        if fallback_count > 0:
-            logger.info(f"  ✅ {fallback_count}個の情報タイプにフォールバックID設定完了")
+    async def websocket_listener(self):
+        """WebSocketで地震情報をリアルタイム受信"""
+        reconnect_delay = self.ws_reconnect_delay
 
-    # 修正: エラー発生時のみ last_error_time を更新するように修正
+        while self.ws_running:
+            try:
+                logger.info(f"🔌 WebSocket接続開始: {self.ws_url}")
+
+                if not self.ws_session or self.ws_session.closed:
+                    self.ws_session = aiohttp.ClientSession(headers=self.request_headers)
+
+                async with self.ws_session.ws_connect(self.ws_url) as ws:
+                    self.ws_connection = ws
+                    logger.info("✅ WebSocket接続成功")
+                    reconnect_delay = self.ws_reconnect_delay
+
+                    async for msg in ws:
+                        if msg.type == aiohttp.WSMsgType.TEXT:
+                            try:
+                                data = json.loads(msg.data)
+                                await self.process_websocket_message(data)
+                            except json.JSONDecodeError as e:
+                                logger.error(f"WebSocketメッセージのJSON解析エラー: {e}")
+                                self.error_stats['parsing_errors'] += 1
+                            except Exception as e:
+                                self.exception_handler.log_generic_error(e, "WebSocketメッセージ処理")
+
+                        elif msg.type == aiohttp.WSMsgType.ERROR:
+                            logger.error(f"WebSocketエラー: {ws.exception()}")
+                            break
+
+            except aiohttp.ClientError as e:
+                logger.error(f"WebSocket接続エラー: {e}")
+                self.error_stats['network_errors'] += 1
+                self.error_stats['ws_disconnects'] += 1
+            except Exception as e:
+                self.exception_handler.log_generic_error(e, "WebSocket接続")
+
+            if self.ws_running:
+                logger.warning(f"⚠️ WebSocket切断。{reconnect_delay}秒後に再接続...")
+                await asyncio.sleep(reconnect_delay)
+                reconnect_delay = min(reconnect_delay * 2, self.ws_max_reconnect_delay)
+
+    async def process_websocket_message(self, data: Dict[str, Any]):
+        """WebSocketから受信したメッセージを処理"""
+        try:
+            # code フィールドで情報タイプを判定
+            code = data.get('code', 0)
+
+            if code not in [551, 552]:
+                return
+
+            info_id = self.extract_id_safe(data)
+            if not info_id:
+                return
+
+            info_type = self.classify_info_type(data)
+
+            if info_type == InfoType.UNKNOWN:
+                self.processing_stats['unknown_skipped'] += 1
+                logger.debug(f"UNKNOWN情報をスキップ: ID {info_id}")
+                return
+
+            if info_id in self.processed_ids[info_type.value]:
+                return
+
+            logger.info(f"🆕 WebSocketで新しい{info_type.value}情報を受信: ID {info_id}")
+
+            if info_type == InfoType.EEW:
+                await self.send_eew_notification(data)
+            elif info_type == InfoType.QUAKE:
+                await self.send_quake_notification(data)
+            elif info_type == InfoType.TSUNAMI:
+                tsunami_info = self.get_tsunami_info(data)
+                if tsunami_info.get('has_tsunami', False):
+                    await self.send_tsunami_notification(data, tsunami_info)
+
+            self.processing_stats[f'{info_type.value}_processed'] += 1
+            self.processed_ids[info_type.value].add(info_id)
+            self.last_ids[info_type.value] = info_id
+            self.manage_processed_ids(info_type.value)
+
+        except NotificationError as e:
+            logger.error(f"通知エラー: {e}", exc_info=True)
+        except Exception as e:
+            self.exception_handler.log_generic_error(e, "WebSocketメッセージ処理")
+
+    async def recreate_http_session(self):
+        if self.http_session and not self.http_session.closed:
+            await self.http_session.close()
+        self.http_session = aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=15),
+            headers=self.request_headers,
+            connector=aiohttp.TCPConnector(limit=10)
+        )
+        logger.info("HTTPセッションを再作成しました")
+
     async def safe_api_request(self, url: str, timeout: int = 15) -> Optional[Dict[str, Any]]:
         try:
-            if not self.session or self.session.closed:
-                await self.recreate_session()
-            async with self.session.get(url, timeout=aiohttp.ClientTimeout(total=timeout)) as response:
+            if not self.http_session or self.http_session.closed:
+                await self.recreate_http_session()
+            async with self.http_session.get(url, timeout=aiohttp.ClientTimeout(total=timeout)) as response:
                 if response.status == 200:
                     try:
                         return await response.json()
@@ -122,23 +229,13 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
             self.error_stats['last_error_time'] = datetime.now(self.jst)
             raise self.exception_handler.handle_api_error(e, url)
 
-    async def recreate_session(self):
-        if self.session and not self.session.closed:
-            await self.session.close()
-        self.session = aiohttp.ClientSession(
-            timeout=aiohttp.ClientTimeout(total=15),
-            headers=self.request_headers,
-            connector=aiohttp.TCPConnector(limit=10)
-        )
-        logger.info("HTTPセッションを再作成しました")
-
     def manage_processed_ids(self, info_type: str):
         if len(self.processed_ids[info_type]) > self.max_processed_ids:
             self.processed_ids[info_type] = set(list(self.processed_ids[info_type])[-self.max_processed_ids:])
             logger.info(f"{info_type}: 処理済みID数を{self.max_processed_ids}に制限")
 
     async def initialize_processed_ids(self):
-        logger.info("🔍 最新情報のID初期化を開始...")
+        logger.info("🔍 最新情報のIDを初期化中...")
         for code in [551, 552]:
             try:
                 url = f"{self.api_base_url}/history?codes={code}&limit=100"
@@ -156,10 +253,8 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
                     info_type = self.classify_info_type(item)
                     if info_type != InfoType.UNKNOWN:
                         self.processed_ids[info_type.value].add(item_id)
-
                         if latest_ids[info_type.value] is None:
                             latest_ids[info_type.value] = item_id
-                            logger.debug(f"  {info_type.value}の最新ID検出: {item_id[:8]}...")
 
                 for it, lid in latest_ids.items():
                     if lid:
@@ -170,69 +265,43 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
             except Exception as e:
                 self.exception_handler.log_generic_error(e, f"Code {code} のID初期化")
 
-        await self.search_historical_eew_tsunami()
-
         logger.info("🔍 ID初期化結果:")
         for it, lid in self.last_ids.items():
             count = len(self.processed_ids.get(it, set()))
             logger.info(f"  {it.upper()}: {lid[:8] if lid else '未取得'} (処理済み: {count}件)")
 
-        self.setup_fallback_ids()
-
-    async def search_historical_eew_tsunami(self):
-        try:
-            for code in [551, 552]:
-                if self.last_ids[InfoType.EEW.value] and self.last_ids[InfoType.TSUNAMI.value]:
-                    break
-                url = f"{self.api_base_url}/history?codes={code}&limit=100"
-                data = await self.safe_api_request(url)
-                if not (data and isinstance(data, list)):
-                    continue
-                for item in data:
-                    item_id = self.extract_id_safe(item)
-                    if not item_id:
-                        continue
-                    info_type = self.classify_info_type(item)
-                    if info_type == InfoType.EEW and not self.last_ids[InfoType.EEW.value]:
-                        self.last_ids[InfoType.EEW.value] = item_id
-                    elif info_type == InfoType.TSUNAMI and not self.last_ids[InfoType.TSUNAMI.value]:
-                        self.last_ids[InfoType.TSUNAMI.value] = item_id
-        except (APIError, DataParsingError) as e:
-            logger.warning(f"⚠️ 過去情報検索中にAPIエラーが発生しました: {e}")
-        except Exception as e:
-            self.exception_handler.log_generic_error(e, "過去情報検索")
-
     def extract_id_safe(self, item: Dict[str, Any]) -> Optional[str]:
         return str(item.get('id')) if item.get('id') is not None else None
 
-    async def output_stats_if_needed(self):
-        now = datetime.now(self.jst)
-        if (now - self.processing_stats['last_stats_output']).total_seconds() >= self.stats_interval:
-            error_total = sum(v for k, v in self.error_stats.items() if k.endswith('_errors'))
-            stats_msg = f"[統計] EEW:{self.processing_stats['eew_processed']} QUAKE:{self.processing_stats['quake_processed']} TSUNAMI:{self.processing_stats['tsunami_processed']} UNKNOWN_SKIP:{self.processing_stats['unknown_skipped']} エラー合計:{error_total}"
-            logger.warning(stats_msg)
-            self.processing_stats['last_stats_output'] = now
+    @tasks.loop(seconds=3600)
+    async def output_stats_task(self):
+        """統計情報を定期的に出力"""
+        error_total = sum(v for k, v in self.error_stats.items() if k.endswith('_errors') or k == 'ws_disconnects')
+        stats_msg = (
+            f"[統計] EEW:{self.processing_stats['eew_processed']} "
+            f"QUAKE:{self.processing_stats['quake_processed']} "
+            f"TSUNAMI:{self.processing_stats['tsunami_processed']} "
+            f"UNKNOWN:{self.processing_stats['unknown_skipped']} "
+            f"エラー:{error_total} WS切断:{self.error_stats['ws_disconnects']}"
+        )
+        logger.info(stats_msg)
 
     def classify_info_type(self, item: Dict[str, Any]) -> InfoType:
         try:
             issue_type = item.get('issue', {}).get('type', '').lower()
             code = item.get('code', 0)
 
-            # 津波情報の判定（最優先）
             if code == 552 or self.get_tsunami_info(item).get('has_tsunami', False):
                 return InfoType.TSUNAMI
 
-            # code=551の地震関連情報
             if code == 551:
                 earthquake_data = item.get('earthquake', {})
-                # EEWの判定
                 if issue_type in ['foreign', 'eew'] or 'eew' in issue_type:
                     return InfoType.EEW
                 if issue_type == 'scaleprompt':
                     domestic_tsunami = earthquake_data.get('domesticTsunami', '')
                     if domestic_tsunami in ['Unknown', '']:
                         return InfoType.EEW
-                # 確定情報の判定
                 if issue_type in ['detailscale', 'destination', 'scaleanddetail', 'scaleprompt']:
                     return InfoType.QUAKE
                 if earthquake_data and issue_type:
@@ -313,15 +382,29 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
 
     def format_magnitude(self, magnitude):
         try:
-            return "不明" if magnitude is None or magnitude == -1 else f"M{float(magnitude):.1f}"
+            if magnitude is None or magnitude == -1 or magnitude == "-1":
+                return "不明"
+            mag_value = float(magnitude)
+            if mag_value == -1:
+                return "不明"
+            return f"M{mag_value:.1f}"
         except (ValueError, TypeError):
             return "不明"
 
     def format_depth(self, depth):
         try:
-            if depth is None or depth == -1:
+            if depth is None or depth == -1 or depth == "-1":
                 return "不明"
-            return "ごく浅い" if depth == 0 else f"{int(depth)}km"
+            if isinstance(depth, str):
+                if not depth.replace('km', '').replace('m', '').strip().isdigit():
+                    return depth
+                depth_value = int(depth.replace('km', '').strip())
+            else:
+                depth_value = int(depth)
+
+            if depth_value == -1:
+                return "不明"
+            return "ごく浅い" if depth_value == 0 else f"{depth_value}km"
         except (ValueError, TypeError):
             return "不明"
 
@@ -353,81 +436,6 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
             pass
         return info
 
-    @tasks.loop(seconds=10)
-    async def check_earthquake_info(self):
-        try:
-            await self.check_earthquake_data()
-            await self.check_tsunami_data()
-            await self.output_stats_if_needed()
-        except Exception as e:
-            self.exception_handler.log_generic_error(e, "監視ループ")
-            if "session" in str(e).lower():
-                await self.recreate_session()
-
-    @check_earthquake_info.before_loop
-    async def before_check_earthquake_info(self):
-        await self.bot.wait_until_ready()
-        logger.info("地震・津波情報監視開始 (P2P地震情報 API v2)")
-
-    async def check_earthquake_data(self):
-        try:
-            url = f"{self.api_base_url}/history?codes=551&limit=20"
-            data = await self.safe_api_request(url)
-            if data and isinstance(data, list):
-                for info in reversed(data):
-                    await self.process_single_info(info)
-        except (APIError, DataParsingError) as e:
-            logger.warning(f"地震情報監視エラー: {e}")
-        except Exception as e:
-            self.exception_handler.log_generic_error(e, "地震情報監視")
-
-    async def check_tsunami_data(self):
-        try:
-            url = f"{self.api_base_url}/history?codes=552&limit=20"
-            data = await self.safe_api_request(url)
-            if data and isinstance(data, list):
-                for info in reversed(data):
-                    await self.process_single_info(info)
-        except (APIError, DataParsingError) as e:
-            logger.warning(f"津波情報監視エラー: {e}")
-        except Exception as e:
-            self.exception_handler.log_generic_error(e, "津波情報監視")
-
-    # 修正: エラーが発生してもループが止まらないように、例外をここで捕捉してログに出力
-    async def process_single_info(self, info: Dict[str, Any]):
-        info_id = self.extract_id_safe(info)
-        if not info_id:
-            return
-        info_type = self.classify_info_type(info)
-        if info_type == InfoType.UNKNOWN:
-            self.processing_stats['unknown_skipped'] += 1
-            return
-        if info_id in self.processed_ids[info_type.value]:
-            return
-
-        logger.info(f"🆕 新しい{info_type.value}情報を検知: {info_id}")
-        try:
-            if info_type == InfoType.EEW:
-                await self.send_eew_notification(info)
-            elif info_type == InfoType.QUAKE:
-                await self.send_quake_notification(info)
-            elif info_type == InfoType.TSUNAMI:
-                tsunami_info = self.get_tsunami_info(info)
-                if tsunami_info.get('has_tsunami', False):
-                    await self.send_tsunami_notification(info, tsunami_info)
-
-            # 成功した場合のみIDを記録
-            self.processing_stats[f'{info_type.value}_processed'] += 1
-            self.processed_ids[info_type.value].add(info_id)
-            self.last_ids[info_type.value] = info_id
-            self.manage_processed_ids(info_type.value)
-        except NotificationError as e:
-            # 通知関連のエラーはログに記録し、処理を続行
-            logger.error(f"通知エラー ({info_type.value}, ID: {info_id}): {e}", exc_info=True)
-        except Exception as e:
-            # 予期せぬエラーもログに記録
-            self.exception_handler.log_generic_error(e, f"{info_type.value}通知処理 (ID: {info_id})")
-
     async def send_eew_notification(self, data):
         await self.send_notification(data, InfoType.EEW.value, "🚨 緊急地震速報")
 
@@ -446,7 +454,9 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
             report_type = issue_data.get('type', '情報')
             max_scale = earthquake.get('maxScale', -1)
             quake_time = self.parse_earthquake_time(earthquake.get('time', ''), issue_data.get('time', ''))
-            magnitude = earthquake.get('magnitude') or earthquake.get('Magnitude', -1)
+
+            magnitude = hypocenter.get('magnitude', -1)
+            depth = hypocenter.get('depth', -1)
 
             if info_type == InfoType.EEW.value:
                 description = f"強い揺れに警戒してください。" if max_scale == -1 else f"**最大震度 {self.scale_to_japanese(max_scale)}** 程度の揺れが予想されます。"
@@ -465,7 +475,6 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
             mag_prefix = "推定 " if info_type == InfoType.EEW.value else ""
             embed.add_field(name="📊 マグニチュード", value=f"```{mag_prefix}{self.format_magnitude(magnitude)}```",
                             inline=True)
-            depth = hypocenter.get('depth') or hypocenter.get('Depth', -1)
             embed.add_field(name="📏 深さ", value=f"```{self.format_depth(depth)}```", inline=True)
 
             points = data.get('points', [])
@@ -492,7 +501,7 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
                                 value="この情報は速報です。揺れが予想される地域の方は、身の安全を確保してください。",
                                 inline=False)
 
-            embed.set_footer(text="Powered by P2P地震情報 API v2 | 気象庁")
+            embed.set_footer(text="Powered by P2P地震情報 WebSocket API | PLANA by coffin299")
             embed.set_thumbnail(url="https://www.p2pquake.net/images/QuakeLogo_100x100.png")
 
             await self.send_embed_to_channels(embed, info_type)
@@ -512,8 +521,8 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
             earthquake = data.get('earthquake', {})
             if earthquake and isinstance(earthquake, dict):
                 hypocenter = earthquake.get('hypocenter', {})
-                magnitude = earthquake.get('magnitude') or earthquake.get('Magnitude', -1)
-                depth = hypocenter.get('depth') or hypocenter.get('Depth', -1)
+                magnitude = hypocenter.get('magnitude', -1)
+                depth = hypocenter.get('depth', -1)
                 embed.add_field(name="🌏 震源地", value=f"```{hypocenter.get('name', '不明')}```", inline=True)
                 embed.add_field(name="📊 マグニチュード", value=f"```{self.format_magnitude(magnitude)}```", inline=True)
                 embed.add_field(name="📏 深さ", value=f"```{self.format_depth(depth)}```", inline=True)
@@ -536,14 +545,13 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
             if tsunami_info.get('description'):
                 embed.add_field(name="ℹ️ 詳細情報", value=tsunami_info['description'][:500], inline=False)
 
-            embed.set_footer(text="気象庁 | 津波から身を守るため直ちに避難を")
+            embed.set_footer(text="気象庁 | 津波から身を守るため直ちに避難を | PLANA by coffin299")
             embed.set_thumbnail(url="https://www.p2pquake.net/images/QuakeLogo_100x100.png")
             await self.send_embed_to_channels(embed, InfoType.TSUNAMI.value)
         except Exception as e:
             raise NotificationError(f"津波通知処理エラー: {e}")
 
     async def send_embed_to_channels(self, embed, info_type):
-        """Embedを設定されたチャンネルに送信する（デバッグ強化版）"""
         if not self.config:
             logger.warning(f"通知送信スキップ ({info_type}): config が空です")
             return
@@ -553,193 +561,57 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
 
         for guild_id, guild_config in self.config.copy().items():
             try:
-                # guild_configの型チェック
                 if not isinstance(guild_config, dict):
-                    logger.warning(
-                        f"送信スキップ ({info_type}): ギルド {guild_id} の設定が辞書型ではありません: {type(guild_config)}")
+                    logger.warning(f"送信スキップ ({info_type}): ギルド {guild_id} の設定が辞書型ではありません")
                     skipped_count += 1
                     continue
 
                 channel_id = guild_config.get(info_type)
                 if not channel_id:
-                    logger.debug(f"送信スキップ ({info_type}): ギルド {guild_id} に {info_type} の設定がありません")
                     skipped_count += 1
                     continue
 
-                # ギルド取得
                 guild = self.bot.get_guild(int(guild_id))
                 if not guild:
-                    logger.warning(
-                        f"送信スキップ ({info_type}): ギルド {guild_id} が見つかりません。"
-                        f"Botが参加していないか、Intents不足の可能性があります。"
-                    )
+                    logger.warning(f"送信スキップ ({info_type}): ギルド {guild_id} が見つかりません")
                     failed_count += 1
                     continue
 
-                # チャンネル取得
                 channel = guild.get_channel(channel_id)
                 if not channel:
-                    logger.warning(
-                        f"送信スキップ ({info_type}): チャンネル {channel_id} がギルド '{guild.name}' (ID: {guild_id}) に見つかりません。"
-                        f"削除されたか、Botから見えない設定になっている可能性があります。"
-                    )
+                    logger.warning(f"送信スキップ ({info_type}): チャンネル {channel_id} が見つかりません")
                     failed_count += 1
                     continue
 
-                # 権限チェック
                 permissions = channel.permissions_for(guild.me)
-                if not permissions.send_messages:
-                    logger.error(
-                        f"送信失敗 ({info_type}): チャンネル '{channel.name}' ({channel_id}) への 'メッセージを送信' 権限がありません。"
-                    )
-                    failed_count += 1
-                    continue
-                if not permissions.embed_links:
-                    logger.error(
-                        f"送信失敗 ({info_type}): チャンネル '{channel.name}' ({channel_id}) への '埋め込みリンク' 権限がありません。"
-                    )
+                if not permissions.send_messages or not permissions.embed_links:
+                    logger.error(f"送信失敗 ({info_type}): チャンネル '{channel.name}' への権限が不足")
                     failed_count += 1
                     continue
 
-                # メッセージ送信
-                logger.info(f"📨 送信試行: ギルド '{guild.name}' のチャンネル '{channel.name}' ({channel_id})")
                 await channel.send(embed=embed)
                 sent_count += 1
-                logger.info(f"✅ 送信成功: ギルド '{guild.name}' のチャンネル '{channel.name}'")
+                logger.info(f"✅ 送信成功: '{guild.name}' の '{channel.name}'")
 
-            except discord.Forbidden as e:
-                logger.error(
-                    f"送信失敗 ({info_type}): ギルド {guild_id} のチャンネル {channel_id} へのアクセスが拒否されました（権限不足）。"
-                    f"詳細: {e}"
-                )
+            except discord.Forbidden:
+                logger.error(f"送信失敗 ({info_type}): 権限不足 - ギルド {guild_id}")
                 failed_count += 1
             except discord.HTTPException as e:
-                logger.error(
-                    f"送信失敗 ({info_type}): Discord APIエラー。ギルド {guild_id}, チャンネル {channel_id} - {e.status}: {e.text}"
-                )
+                logger.error(f"送信失敗 ({info_type}): Discord APIエラー - {e.status}")
                 failed_count += 1
             except Exception as e:
-                logger.error(
-                    f"予期せぬ送信失敗 ({info_type}): ギルド {guild_id}, チャンネル {channel_id}",
-                    exc_info=True
-                )
+                logger.error(f"予期せぬ送信失敗 ({info_type}): ギルド {guild_id}", exc_info=True)
                 failed_count += 1
 
-        # 結果サマリー
         logger.info(
-            f"📊 {info_type}通知送信完了: "
-            f"成功 {sent_count}件, 失敗 {failed_count}件, スキップ {skipped_count}件"
-        )
+            f"📊 {info_type}通知送信完了: 成功 {sent_count}件, 失敗 {failed_count}件, スキップ {skipped_count}件")
 
-        # 全て失敗した場合は警告
         if sent_count == 0 and (failed_count > 0 or skipped_count > 0):
-            logger.warning(f"⚠️ {info_type}の通知が1件も送信されませんでした！設定を確認してください。")
+            logger.warning(f"⚠️ {info_type}の通知が1件も送信されませんでした")
 
-    async def process_single_info(self, info: Dict[str, Any]):
-        """個別の情報を処理して通知を送信する（デバッグ強化版）"""
-        info_id = self.extract_id_safe(info)
-        if not info_id:
-            logger.debug("情報IDが取得できませんでした")
-            return
+    # ========== コマンド群 ==========
 
-        info_type = self.classify_info_type(info)
-        if info_type == InfoType.UNKNOWN:
-            self.processing_stats['unknown_skipped'] += 1
-            logger.debug(f"UNKNOWN情報をスキップ: ID {info_id}")
-            return
-
-        if info_id in self.processed_ids[info_type.value]:
-            logger.debug(f"既に処理済みの情報: {info_type.value} ID {info_id}")
-            return
-
-        logger.info(f"🆕 新しい{info_type.value}情報を検知: ID {info_id}")
-
-        try:
-            # 通知送信前にログ出力
-            logger.info(f"🔔 {info_type.value}の通知処理を開始します")
-
-            if info_type == InfoType.EEW:
-                await self.send_eew_notification(info)
-            elif info_type == InfoType.QUAKE:
-                await self.send_quake_notification(info)
-            elif info_type == InfoType.TSUNAMI:
-                tsunami_info = self.get_tsunami_info(info)
-                if tsunami_info.get('has_tsunami', False):
-                    await self.send_tsunami_notification(info, tsunami_info)
-                else:
-                    logger.info(f"津波情報なしのためスキップ: ID {info_id}")
-                    return
-
-            # 成功した場合のみIDを記録
-            self.processing_stats[f'{info_type.value}_processed'] += 1
-            self.processed_ids[info_type.value].add(info_id)
-            self.last_ids[info_type.value] = info_id
-            self.manage_processed_ids(info_type.value)
-            logger.info(f"✅ {info_type.value}情報の処理完了: ID {info_id}")
-
-        except NotificationError as e:
-            # 通知関連のエラーはログに記録し、処理を続行
-            logger.error(f"❌ 通知エラー ({info_type.value}, ID: {info_id}): {e}", exc_info=True)
-        except Exception as e:
-            # 予期せぬエラーもログに記録
-            self.exception_handler.log_generic_error(e, f"{info_type.value}通知処理 (ID: {info_id})")
-            logger.error(f"❌ 予期せぬエラー ({info_type.value}, ID: {info_id}): {e}", exc_info=True)
-
-    @app_commands.command(name="earthquake_debug", description="通知設定の詳細診断")
-    async def debug_config(self, interaction: discord.Interaction):
-        """通知設定とチャンネル状態の詳細診断"""
-        try:
-            await interaction.response.defer(ephemeral=False)
-
-            guild_id = str(interaction.guild.id)
-            embed = discord.Embed(
-                title="🔍 通知設定診断",
-                color=discord.Color.blue(),
-                timestamp=datetime.now(self.jst)
-            )
-
-            # 設定ファイル全体の確認
-            embed.add_field(
-                name="📁 設定ファイル",
-                value=f"```json\n{json.dumps(self.config, indent=2, ensure_ascii=False)[:500]}```",
-                inline=False
-            )
-
-            # 現在のギルドの設定
-            if guild_id in self.config:
-                guild_config = self.config[guild_id]
-                config_text = ""
-                for info_type, channel_id in guild_config.items():
-                    channel = interaction.guild.get_channel(channel_id)
-                    if channel:
-                        perms = channel.permissions_for(interaction.guild.me)
-                        config_text += f"**{info_type}**:\n"
-                        config_text += f"  チャンネル: {channel.mention} (ID: {channel_id})\n"
-                        config_text += f"  メッセージ送信: {'✅' if perms.send_messages else '❌'}\n"
-                        config_text += f"  埋め込みリンク: {'✅' if perms.embed_links else '❌'}\n"
-                    else:
-                        config_text += f"**{info_type}**: ❌ チャンネル {channel_id} が見つかりません\n"
-
-                embed.add_field(name="⚙️ このサーバーの設定", value=config_text or "設定なし", inline=False)
-            else:
-                embed.add_field(name="⚙️ このサーバーの設定", value="❌ 未設定", inline=False)
-
-            # Botの状態
-            embed.add_field(
-                name="🤖 Bot状態",
-                value=f"ギルド数: {len(self.bot.guilds)}\n"
-                      f"監視中: {'✅' if self.check_earthquake_info.is_running() else '❌'}\n"
-                      f"セッション: {'✅' if self.session and not self.session.closed else '❌'}",
-                inline=False
-            )
-
-            await interaction.followup.send(embed=embed, ephemeral=True)
-
-        except Exception as e:
-            logger.error(f"診断コマンドエラー: {e}", exc_info=True)
-            await interaction.followup.send(f"❌ エラーが発生しました: {e}", ephemeral=True)
-
-    @app_commands.command(name="earthquake_channel", description="地震・津波情報の通知チャンネルを設定します。")
+    @app_commands.command(name="earthquake_channel", description="地震・津波情報の通知チャンネルを設定します")
     @app_commands.describe(channel="通知を送信するチャンネル", info_type="通知したい情報の種類")
     async def set_channel(self, interaction: discord.Interaction, channel: discord.TextChannel,
                           info_type: Literal["緊急地震速報", "地震情報", "津波予報", "すべて"]):
@@ -747,22 +619,25 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
             guild_id = str(interaction.guild.id)
             if guild_id not in self.config:
                 self.config[guild_id] = {}
+
             types_to_set = (
                 [InfoType.EEW.value, InfoType.QUAKE.value, InfoType.TSUNAMI.value]
                 if info_type == "すべて"
                 else [{"緊急地震速報": InfoType.EEW.value, "地震情報": InfoType.QUAKE.value,
                        "津波予報": InfoType.TSUNAMI.value}[info_type]]
             )
+
             for t in types_to_set:
                 self.config[guild_id][t] = channel.id
+
             self.save_config()
             await interaction.response.send_message(
                 f"✅ **{info_type}** の通知チャンネルを {channel.mention} に設定しました。")
         except Exception as e:
             self.exception_handler.log_generic_error(e, "チャンネル設定コマンド")
-            await interaction.response.send_message(self.exception_handler.get_user_friendly_message(e), ephemeral=True)
+            await interaction.response.send_message(self.exception_handler.get_user_friendly_message(e), ephemeral=False)
 
-    @app_commands.command(name="earthquake_status", description="地震・津波情報システムの状態を確認します。")
+    @app_commands.command(name="earthquake_status", description="地震・津波情報システムの状態を確認します")
     async def status_system(self, interaction: discord.Interaction):
         try:
             await interaction.response.defer(ephemeral=False)
@@ -771,22 +646,25 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
                 color=discord.Color.blue(),
                 timestamp=datetime.now(self.jst)
             )
+
+            # WebSocket接続状態
+            ws_status = "✅ 接続中" if self.ws_connection and not self.ws_connection.closed else "❌ 切断中"
+            embed.add_field(name="🔌 WebSocket状態", value=ws_status, inline=True)
+
             embed.add_field(
-                name="🔄 監視状態",
-                value="✅ 動作中" if self.check_earthquake_info.is_running() else "❌ 停止中",
+                name="🌐 HTTPセッション",
+                value="✅ 正常" if self.http_session and not self.http_session.closed else "❌ 無効",
                 inline=True
             )
-            embed.add_field(
-                name="🌐 セッション状態",
-                value="✅ 正常" if self.session and not self.session.closed else "❌ 無効",
-                inline=True
-            )
-            id_status = "".join(
-                f"**{it.upper()}**: `{lid[:8] if lid else '未取得'}` (処理済み: {len(self.processed_ids.get(it, set()))}件)\n"
-                for it, lid in self.last_ids.items()
-            )
+
+            # 最後のID
+            id_status = ""
+            for it, lid in self.last_ids.items():
+                count = len(self.processed_ids.get(it, set()))
+                id_status += f"**{it.upper()}**: `{lid[:8] if lid else '未取得'}` ({count}件)\n"
             embed.add_field(name="🆔 最後のID", value=id_status, inline=False)
 
+            # 通知チャンネル設定
             guild_id = str(interaction.guild.id)
             if guild_id in self.config:
                 channel_status = ""
@@ -807,6 +685,7 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
 
             embed.add_field(name="📢 通知チャンネル", value=channel_status, inline=False)
 
+            # エラー統計
             if self.error_stats['last_error_time']:
                 embed.add_field(
                     name="🕐 最後のエラー",
@@ -814,17 +693,24 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
                     inline=True
                 )
 
-            embed.set_footer(text="システム診断完了 | P2P地震情報 API v2")
+            error_summary = (
+                f"API: {self.error_stats['api_errors']} | "
+                f"解析: {self.error_stats['parsing_errors']} | "
+                f"WS切断: {self.error_stats['ws_disconnects']}"
+            )
+            embed.add_field(name="📊 エラー統計", value=error_summary, inline=False)
+
+            embed.set_footer(text="システム診断完了 | P2P地震情報 WebSocket API | PLANA by coffin299")
             await interaction.followup.send(embed=embed)
         except Exception as e:
             self.exception_handler.log_generic_error(e, "ステータスコマンド")
             msg = self.exception_handler.get_user_friendly_message(e)
             if not interaction.response.is_done():
-                await interaction.response.send_message(msg, ephemeral=True)
+                await interaction.response.send_message(msg, ephemeral=False)
             else:
                 await interaction.followup.send(msg)
 
-    @app_commands.command(name="earthquake_test", description="地震・津波情報のテスト通知を送信します。")
+    @app_commands.command(name="earthquake_test", description="地震・津波情報のテスト通知を送信します")
     @app_commands.describe(
         info_type="テストしたい情報の種類",
         max_scale="テストしたい最大震度",
@@ -900,7 +786,7 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
             value=f"🔴 **{max_scale}** - テスト県A市\n🟠 **震度4** - テスト県B市\n🟡 **震度3** - テスト県C市",
             inline=False
         )
-        embed.set_footer(text="これはテスト通知です | Powered by P2P地震情報 API v2")
+        embed.set_footer(text="これはテスト通知です | Powered by P2P地震情報 WebSocket API | PLANA by coffin299")
         embed.set_thumbnail(url="https://www.p2pquake.net/images/QuakeLogo_100x100.png")
         return embed
 
@@ -928,36 +814,116 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
             else "⚠️ 海の中や海岸付近は危険です。海から上がって、海岸から離れてください。"
         )
         embed.add_field(name="⚠️ 注意事項", value=warning_text, inline=False)
-        embed.set_footer(text="これはテスト通知です | 気象庁")
+        embed.set_footer(text="これはテスト通知です | 気象庁 | PLANA by coffin299")
         embed.set_thumbnail(url="https://www.p2pquake.net/images/QuakeLogo_100x100.png")
         return embed
 
-    @app_commands.command(name="earthquake_help", description="このシステムのヘルプを表示します。")
+    @app_commands.command(name="earthquake_help", description="このシステムのヘルプを表示します")
     async def help_system(self, interaction: discord.Interaction):
         embed = discord.Embed(
             title="📚 地震・津波情報システム ヘルプ",
-            description="このボットは気象庁の地震・津波情報をリアルタイムで通知します。",
+            description="このボットは気象庁の地震・津波情報をリアルタイムで通知します（WebSocket接続）。",
             color=discord.Color.green(),
             timestamp=datetime.now(self.jst)
         )
         embed.add_field(
             name="🛠️ 利用可能なコマンド",
-            value="**🔧 設定コマンド**\n`/earthquake_channel` - 通知チャンネルを設定\n`/earthquake_test` - テスト通知を送信\n\n**📊 情報表示コマンド**\n`/earthquake_status` - システム状態を確認\n\n**❓ その他**\n`/earthquake_help` - このヘルプを表示",
+            value=(
+                "**🔧 設定コマンド**\n"
+                "`/earthquake_channel` - 通知チャンネルを設定\n"
+                "`/earthquake_test` - テスト通知を送信\n\n"
+                "**📊 情報表示コマンド**\n"
+                "`/earthquake_status` - システム状態を確認\n"
+                "`/earthquake_debug` - 詳細診断情報を表示\n\n"
+                "**❓ その他**\n"
+                "`/earthquake_help` - このヘルプを表示"
+            ),
             inline=False
         )
         embed.add_field(
             name="📡 通知される情報",
-            value="**🚨 緊急地震速報** - 地震発生直後の速報\n**📊 地震情報** - 確定した地震の詳細情報\n**🌊 津波予報** - 津波注意報・警報・大津波警報",
+            value=(
+                "**🚨 緊急地震速報（EEW）** - 地震発生直後の速報（WebSocketでリアルタイム受信）\n"
+                "**📊 地震情報** - 確定した地震の詳細情報\n"
+                "**🌊 津波予報** - 津波注意報・警報・大津波警報"
+            ),
             inline=False
         )
         embed.add_field(
             name="⚡ 初回セットアップ",
-            value="1. `/earthquake_channel` でチャンネルを設定\n2. `/earthquake_test` で動作確認\n3. `/earthquake_status` でシステム状態確認",
+            value=(
+                "1. `/earthquake_channel` でチャンネルを設定\n"
+                "2. `/earthquake_test` で動作確認\n"
+                "3. `/earthquake_status` でシステム状態確認"
+            ),
             inline=False
         )
-        embed.set_footer(text="データ提供: P2P地震情報 | 気象庁")
+        embed.add_field(
+            name="🔌 WebSocket接続について",
+            value=(
+                "このBotはP2P地震情報のWebSocket APIに常時接続し、\n"
+                "リアルタイムで地震情報を受信します。\n"
+                "接続が切れた場合は自動的に再接続を試みます。"
+            ),
+            inline=False
+        )
+        embed.set_footer(text="データ提供: P2P地震情報 | 気象庁 | PLANA by coffin299")
         embed.set_thumbnail(url="https://www.p2pquake.net/images/QuakeLogo_100x100.png")
         await interaction.response.send_message(embed=embed, ephemeral=False)
+
+    @app_commands.command(name="earthquake_debug", description="通知設定の詳細診断")
+    async def debug_config(self, interaction: discord.Interaction):
+        try:
+            await interaction.response.defer(ephemeral=False)
+
+            guild_id = str(interaction.guild.id)
+            embed = discord.Embed(
+                title="🔍 通知設定診断",
+                color=discord.Color.blue(),
+                timestamp=datetime.now(self.jst)
+            )
+
+            embed.add_field(
+                name="📁 設定ファイル",
+                value=f"```json\n{json.dumps(self.config, indent=2, ensure_ascii=False)[:500]}```",
+                inline=False
+            )
+
+            if guild_id in self.config:
+                guild_config = self.config[guild_id]
+                config_text = ""
+                for info_type, channel_id in guild_config.items():
+                    channel = interaction.guild.get_channel(channel_id)
+                    if channel:
+                        perms = channel.permissions_for(interaction.guild.me)
+                        config_text += f"**{info_type}**:\n"
+                        config_text += f"  チャンネル: {channel.mention} (ID: {channel_id})\n"
+                        config_text += f"  メッセージ送信: {'✅' if perms.send_messages else '❌'}\n"
+                        config_text += f"  埋め込みリンク: {'✅' if perms.embed_links else '❌'}\n"
+                    else:
+                        config_text += f"**{info_type}**: ❌ チャンネル {channel_id} が見つかりません\n"
+
+                embed.add_field(name="⚙️ このサーバーの設定", value=config_text or "設定なし", inline=False)
+            else:
+                embed.add_field(name="⚙️ このサーバーの設定", value="❌ 未設定", inline=False)
+
+            ws_info = "✅ 接続中" if self.ws_connection and not self.ws_connection.closed else "❌ 切断中"
+            embed.add_field(
+                name="🤖 Bot状態",
+                value=(
+                    f"ギルド数: {len(self.bot.guilds)}\n"
+                    f"WebSocket: {ws_info}\n"
+                    f"HTTPセッション: {'✅' if self.http_session and not self.http_session.closed else '❌'}\n"
+                    f"WS切断回数: {self.error_stats['ws_disconnects']}"
+                ),
+                inline=False
+            )
+
+            await interaction.followup.send(embed=embed, ephemeral=False)
+
+        except Exception as e:
+            logger.error(f"診断コマンドエラー: {e}", exc_info=True)
+            await interaction.followup.send(f"❌ エラーが発生しました: {e}", ephemeral=False)
 
 
 async def setup(bot: commands.Bot):
