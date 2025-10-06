@@ -444,7 +444,8 @@ class LLMCog(commands.Cog, name="LLM"):
         update_interval = 0.5
         min_update_chars = 15
         retry_sleep_time = 2.0
-        placeholder = "Thinking..."
+        placeholder = ":incoming_envelope: Thinking..."
+        emoji_prefix = ":incoming_envelope: "
         logger.info(f"🔵 [STREAMING] Starting LLM stream | {log_context}")
 
         try:
@@ -474,7 +475,8 @@ class LLMCog(commands.Cog, name="LLM"):
                 )
 
                 if should_update and full_response_text:
-                    display_text = full_response_text[:DISCORD_MESSAGE_MAX_LENGTH]
+                    # ストリーミング中は絵文字をプレフィックスとして追加
+                    display_text = emoji_prefix + full_response_text[:DISCORD_MESSAGE_MAX_LENGTH - len(emoji_prefix)]
 
                     if display_text != sent_message.content:
                         try:
@@ -507,11 +509,12 @@ class LLMCog(commands.Cog, name="LLM"):
                 f"🟢 [STREAMING] Stream completed | Total chunks: {chunk_count} | Final length: {len(full_response_text)} chars")
 
             if full_response_text:
+                # ストリーミング完了後は絵文字を削除して最終テキストのみ表示
                 final_text = full_response_text[:DISCORD_MESSAGE_MAX_LENGTH]
                 if final_text != sent_message.content:
                     try:
                         await sent_message.edit(content=final_text)
-                        logger.info(f"🟢 [STREAMING] Final message updated successfully")
+                        logger.info(f"🟢 [STREAMING] Final message updated successfully (emoji removed)")
                     except discord.HTTPException as e:
                         logger.error(
                             f"❌ Failed to update final message (ID: {sent_message.id}): {e}"
