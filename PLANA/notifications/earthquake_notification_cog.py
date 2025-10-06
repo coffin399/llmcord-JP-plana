@@ -132,6 +132,8 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
                         if msg.type == aiohttp.WSMsgType.TEXT:
                             try:
                                 data = json.loads(msg.data)
+                                # デバッグ: 受信したメッセージをログ出力
+                                logger.debug(f"WebSocket受信: code={data.get('code')}, id={data.get('id')}")
                                 await self.process_websocket_message(data)
                             except json.JSONDecodeError as e:
                                 logger.error(f"WebSocketメッセージのJSON解析エラー: {e}")
@@ -158,38 +160,56 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
     async def process_websocket_message(self, data: Dict[str, Any]):
         """WebSocketから受信したメッセージを処理"""
         try:
+            # 基本的な検証
+            if not isinstance(data, dict):
+                logger.debug("受信データが辞書型ではありません")
+                return
+
             # code フィールドで情報タイプを判定
             code = data.get('code', 0)
 
+            # 551: 地震情報, 552: 津波予報のみ処理
             if code not in [551, 552]:
+                logger.debug(f"処理対象外のcode: {code}")
                 return
 
             info_id = self.extract_id_safe(data)
             if not info_id:
+                logger.warning(f"IDを抽出できませんでした: {data}")
                 return
 
             info_type = self.classify_info_type(data)
 
             if info_type == InfoType.UNKNOWN:
                 self.processing_stats['unknown_skipped'] += 1
-                logger.debug(f"UNKNOWN情報をスキップ: ID {info_id}")
+                logger.debug(f"UNKNOWN情報をスキップ: ID {info_id}, code={code}")
                 return
 
+            # 重複チェック
             if info_id in self.processed_ids[info_type.value]:
+                logger.debug(f"既に処理済みのID: {info_id} ({info_type.value})")
                 return
 
-            logger.info(f"🆕 WebSocketで新しい{info_type.value}情報を受信: ID {info_id}")
+            logger.info(f"🆕 WebSocketで新しい{info_type.value}情報を受信: ID {info_id}, code={code}")
 
+            # 情報タイプに応じて通知を送信
             if info_type == InfoType.EEW:
                 await self.send_eew_notification(data)
+                self.processing_stats['eew_processed'] += 1
             elif info_type == InfoType.QUAKE:
                 await self.send_quake_notification(data)
+                self.processing_stats['quake_processed'] += 1
             elif info_type == InfoType.TSUNAMI:
+                # 津波情報の場合、津波データが実際に存在するか確認
                 tsunami_info = self.get_tsunami_info(data)
                 if tsunami_info.get('has_tsunami', False):
                     await self.send_tsunami_notification(data, tsunami_info)
+                    self.processing_stats['tsunami_processed'] += 1
+                else:
+                    logger.debug(f"津波データなし: ID {info_id}")
+                    return
 
-            self.processing_stats[f'{info_type.value}_processed'] += 1
+            # 処理済みIDとして記録
             self.processed_ids[info_type.value].add(info_id)
             self.last_ids[info_type.value] = info_id
             self.manage_processed_ids(info_type.value)
@@ -271,7 +291,15 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
             logger.info(f"  {it.upper()}: {lid[:8] if lid else '未取得'} (処理済み: {count}件)")
 
     def extract_id_safe(self, item: Dict[str, Any]) -> Optional[str]:
-        return str(item.get('id')) if item.get('id') is not None else None
+        """IDを安全に抽出"""
+        try:
+            item_id = item.get('id')
+            if item_id is None:
+                return None
+            return str(item_id)
+        except Exception as e:
+            logger.warning(f"ID抽出エラー: {e}")
+            return None
 
     @tasks.loop(seconds=3600)
     async def output_stats_task(self):
@@ -287,28 +315,46 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
         logger.info(stats_msg)
 
     def classify_info_type(self, item: Dict[str, Any]) -> InfoType:
+        """情報タイプを判定（修正版）"""
         try:
-            issue_type = item.get('issue', {}).get('type', '').lower()
             code = item.get('code', 0)
+            issue_type = item.get('issue', {}).get('type', '').lower()
 
-            if code == 552 or self.get_tsunami_info(item).get('has_tsunami', False):
+            # code 552は津波予報
+            if code == 552:
                 return InfoType.TSUNAMI
 
+            # code 551は地震情報
             if code == 551:
                 earthquake_data = item.get('earthquake', {})
-                if issue_type in ['foreign', 'eew'] or 'eew' in issue_type:
+
+                # 緊急地震速報（EEW）の判定
+                # - issue.typeが'eew'を含む
+                # - または issue.typeが'foreign'（遠地地震）
+                # - または issue.typeが'scaleprompt'で津波情報が'Unknown'または未設定
+                if 'eew' in issue_type or issue_type == 'foreign':
                     return InfoType.EEW
+
                 if issue_type == 'scaleprompt':
                     domestic_tsunami = earthquake_data.get('domesticTsunami', '')
-                    if domestic_tsunami in ['Unknown', '']:
+                    if domestic_tsunami in ['Unknown', '', None]:
                         return InfoType.EEW
+
+                # 確定地震情報の判定
+                # - detailscale: 震度速報
+                # - destination: 震源に関する情報
+                # - scaleanddetail: 震源・震度に関する情報
+                # - scaleprompt: 震度速報（津波情報あり）
                 if issue_type in ['detailscale', 'destination', 'scaleanddetail', 'scaleprompt']:
                     return InfoType.QUAKE
+
+                # earthquakeデータがあれば地震情報として扱う
                 if earthquake_data and issue_type:
                     return InfoType.QUAKE
 
             logger.debug(f"UNKNOWN情報: code={code}, issue.type={issue_type}")
             return InfoType.UNKNOWN
+
         except Exception as e:
             logger.warning(f"情報分類エラー: {e}", exc_info=True)
             return InfoType.UNKNOWN
@@ -409,31 +455,55 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
             return "不明"
 
     def get_tsunami_info(self, data):
+        """津波情報を抽出（修正版）"""
         info = {'has_tsunami': False, 'warning_level': None, 'areas': [], 'description': ""}
         try:
-            tsunami_data = data.get('tsunami')
-            if not tsunami_data or tsunami_data.get('domesticTsunami') in ['None', None]:
+            # code 552の場合
+            if data.get('code') == 552:
+                tsunami_data = data.get('tsunami')
+                if not tsunami_data:
+                    return info
+
+                info['has_tsunami'] = True
+                grades = {'MajorWarning': '大津波警報', 'Warning': '津波警報', 'Watch': '津波注意報'}
+                highest_level = 0
+                level_text = '津波予報'
+
+                areas_data = tsunami_data.get('areas', [])
+                for area in areas_data if isinstance(areas_data, list) else []:
+                    if not isinstance(area, dict):
+                        continue
+                    grade = area.get('grade')
+                    if grade == 'MajorWarning' and highest_level < 3:
+                        highest_level, level_text = 3, grades[grade]
+                    elif grade == 'Warning' and highest_level < 2:
+                        highest_level, level_text = 2, grades[grade]
+                    elif grade == 'Watch' and highest_level < 1:
+                        highest_level, level_text = 1, grades[grade]
+                    if area.get('name'):
+                        info['areas'].append({'name': area['name'], 'grade': grades.get(grade, '情報')})
+
+                info['warning_level'] = level_text
                 return info
-            info['has_tsunami'] = True
-            grades = {'MajorWarning': '大津波警報', 'Warning': '津波警報', 'Watch': '津波注意報'}
-            highest_level = 0
-            level_text = '津波予報'
-            areas_data = tsunami_data.get('areas', [])
-            for area in areas_data if isinstance(areas_data, list) else []:
-                if not isinstance(area, dict):
-                    continue
-                grade = area.get('grade')
-                if grade == 'MajorWarning' and highest_level < 3:
-                    highest_level, level_text = 3, grades[grade]
-                elif grade == 'Warning' and highest_level < 2:
-                    highest_level, level_text = 2, grades[grade]
-                elif grade == 'Watch' and highest_level < 1:
-                    highest_level, level_text = 1, grades[grade]
-                if area.get('name'):
-                    info['areas'].append({'name': area['name'], 'grade': grades.get(grade, '情報')})
-            info['warning_level'] = level_text
-        except Exception:
-            pass
+
+            # code 551の場合（地震情報に含まれる津波情報）
+            earthquake_data = data.get('earthquake', {})
+            domestic_tsunami = earthquake_data.get('domesticTsunami', 'None')
+
+            if domestic_tsunami and domestic_tsunami not in ['None', '', None]:
+                info['has_tsunami'] = True
+                tsunami_map = {
+                    'Checking': '津波の有無調査中',
+                    'NonEffective': '津波の心配なし',
+                    'Watch': '津波注意報',
+                    'Warning': '津波警報',
+                    'Unknown': '不明'
+                }
+                info['warning_level'] = tsunami_map.get(domestic_tsunami, domestic_tsunami)
+
+        except Exception as e:
+            logger.warning(f"津波情報取得エラー: {e}", exc_info=True)
+
         return info
 
     async def send_eew_notification(self, data):
@@ -635,7 +705,8 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
                 f"✅ **{info_type}** の通知チャンネルを {channel.mention} に設定しました。")
         except Exception as e:
             self.exception_handler.log_generic_error(e, "チャンネル設定コマンド")
-            await interaction.response.send_message(self.exception_handler.get_user_friendly_message(e), ephemeral=False)
+            await interaction.response.send_message(self.exception_handler.get_user_friendly_message(e),
+                                                    ephemeral=False)
 
     @app_commands.command(name="earthquake_status", description="地震・津波情報システムの状態を確認します")
     async def status_system(self, interaction: discord.Interaction):
@@ -834,6 +905,7 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
                 "`/earthquake_test` - テスト通知を送信\n\n"
                 "**📊 情報表示コマンド**\n"
                 "`/earthquake_status` - システム状態を確認\n"
+                "`/earthquake_history` - 最近の地震履歴を表示\n"
                 "`/earthquake_debug` - 詳細診断情報を表示\n\n"
                 "**❓ その他**\n"
                 "`/earthquake_help` - このヘルプを表示"
@@ -871,7 +943,107 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
         embed.set_thumbnail(url="https://www.p2pquake.net/images/QuakeLogo_100x100.png")
         await interaction.response.send_message(embed=embed, ephemeral=False)
 
-    @app_commands.command(name="earthquake_debug", description="通知設定の詳細診断")
+    @app_commands.command(name="earthquake-history", description="最近の地震情報を表示します")
+    @app_commands.describe(
+        limit="表示する地震の数（1-20）",
+        min_scale="表示する最小震度"
+    )
+    async def show_history(
+            self,
+            interaction: discord.Interaction,
+            limit: Optional[int] = 10,
+            min_scale: Optional[
+                Literal["震度1", "震度2", "震度3", "震度4", "震度5弱", "震度5強", "震度6弱", "震度6強", "震度7"]] = None
+    ):
+        try:
+            await interaction.response.defer(ephemeral=False)
+
+            # limitの範囲チェック
+            limit = max(1, min(limit, 20))
+
+            # 最小震度コードへの変換
+            scale_map = {
+                "震度1": 10, "震度2": 20, "震度3": 30, "震度4": 40,
+                "震度5弱": 45, "震度5強": 50, "震度6弱": 55, "震度6強": 60, "震度7": 70
+            }
+            min_scale_code = scale_map.get(min_scale, 0) if min_scale else 0
+
+            # APIから履歴取得（地震情報のみ: code=551）
+            url = f"{self.api_base_url}/history?codes=551&limit=100"
+            data = await self.safe_api_request(url)
+
+            if not data or not isinstance(data, list):
+                await interaction.followup.send("❌ 地震情報の取得に失敗しました。")
+                return
+
+            # フィルタリング: 地震情報のみ、最小震度以上
+            filtered_quakes = []
+            for item in data:
+                info_type = self.classify_info_type(item)
+                if info_type == InfoType.QUAKE:
+                    max_scale = item.get('earthquake', {}).get('maxScale', -1)
+                    if max_scale >= min_scale_code:
+                        filtered_quakes.append(item)
+                        if len(filtered_quakes) >= limit:
+                            break
+
+            if not filtered_quakes:
+                filter_text = f"（{min_scale}以上）" if min_scale else ""
+                await interaction.followup.send(f"ℹ️ 該当する地震情報{filter_text}が見つかりませんでした。")
+                return
+
+            # Embedを作成
+            embed = discord.Embed(
+                title=f"📊 最近の地震情報 ({len(filtered_quakes)}件)",
+                description=f"最小震度: {min_scale or '指定なし'}",
+                color=discord.Color.blue(),
+                timestamp=datetime.now(self.jst)
+            )
+
+            for idx, quake in enumerate(filtered_quakes, 1):
+                earthquake = quake.get('earthquake', {})
+                hypocenter = earthquake.get('hypocenter', {})
+                issue = quake.get('issue', {})
+
+                max_scale = earthquake.get('maxScale', -1)
+                quake_time = self.parse_earthquake_time(earthquake.get('time', ''), issue.get('time', ''))
+                magnitude = hypocenter.get('magnitude', -1)
+                depth = hypocenter.get('depth', -1)
+                location = hypocenter.get('name', '不明')
+
+                # 震度による絵文字
+                emoji = "🔴" if max_scale >= 55 else "🟠" if max_scale >= 50 else "🟡" if max_scale >= 40 else "🟢" if max_scale >= 30 else "🔵"
+
+                field_value = (
+                    f"{emoji} **{self.scale_to_japanese(max_scale)}**\n"
+                    f"🌏 {location}\n"
+                    f"📊 {self.format_magnitude(magnitude)} / 📏 {self.format_depth(depth)}\n"
+                    f"🕐 {quake_time.strftime('%m/%d %H:%M:%S')}"
+                )
+
+                embed.add_field(
+                    name=f"{idx}. {quake_time.strftime('%m/%d %H:%M')}",
+                    value=field_value,
+                    inline=True if idx <= 3 else False
+                )
+
+                # 3件ごとに改行を入れる
+                if idx % 3 == 0 and idx < len(filtered_quakes):
+                    embed.add_field(name="\u200b", value="\u200b", inline=False)
+
+            embed.set_footer(text="データ提供: P2P地震情報 API | PLANA by coffin299")
+            embed.set_thumbnail(url="https://www.p2pquake.net/images/QuakeLogo_100x100.png")
+
+            await interaction.followup.send(embed=embed)
+
+        except (APIError, DataParsingError) as e:
+            logger.error(f"履歴取得エラー: {e}")
+            await interaction.followup.send(f"❌ 地震情報の取得中にエラーが発生しました: {e}")
+        except Exception as e:
+            self.exception_handler.log_generic_error(e, "履歴表示コマンド")
+            await interaction.followup.send(self.exception_handler.get_user_friendly_message(e))
+
+    @app_commands.command(name="earthquake-debug", description="通知設定の詳細診断")
     async def debug_config(self, interaction: discord.Interaction):
         try:
             await interaction.response.defer(ephemeral=False)
