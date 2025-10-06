@@ -9,9 +9,6 @@ allowed_channel_ids: [] # Botが反応するチャンネルIDのリスト (空�
 # allowed_role_ids: []  # [廃止] 特権インテント回避のため、この設定は現在使用されません
 admin_user_ids: []    # Botの管理者ユーザーIDのリスト (将来的な管理者用コマンドのため)
 bot_invite_url: https://discord.com/oauth2/authorize?client_id=1031673203774464160&permissions=551906765824&scope=bot #bot invite url
-log_channel_ids: #Discord上でロギングする場合
- - 100000000000000000 # メインログチャンネル
- - 200000000000000000 # サブ
 
 # =============================================================================
 # LLM Cog Settings (AIとの対話機能に関する設定)
