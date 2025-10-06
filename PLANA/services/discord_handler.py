@@ -1,4 +1,4 @@
-# DiscordLogHandler を含むファイル (例: PLANA/utilities/logging_handler.py)
+# PLANA/services/discord_handler.py
 import asyncio
 import logging
 from asyncio import Queue
@@ -25,23 +25,30 @@ class DiscordLogHandler(logging.Handler):
 
         self._task = self.bot.loop.create_task(self._log_sender_loop())
 
-    # ### ここから追加 ###
     def add_channel(self, channel_id: int):
-        """ログ送信先チャンネルを動的に追加する。"""
+        """ログ送信先チャンネルを動的に追加し、即時反映させる。"""
         if channel_id not in self.channel_ids:
             self.channel_ids.append(channel_id)
-            # チャンネルオブジェクトのキャッシュをクリアして次回再取得させる
-            self.channels = []
-            print(f"DiscordLogHandler: Added channel {channel_id} to the logging targets.")
+            # Botが準備完了していれば、チャンネルオブジェクトを即座に取得して追加する
+            if self.bot.is_ready():
+                channel = self.bot.get_channel(channel_id)
+                if isinstance(channel, TextChannel):
+                    self.channels.append(channel)
+                    print(f"DiscordLogHandler: Immediately added and activated channel {channel_id}.")
+                else:
+                    print(f"DiscordLogHandler: Added channel ID {channel_id}, but it's not a valid text channel or not found yet.")
+            else:
+                # Botがまだ準備できていない場合は、次回の_process_queueで解決される
+                self.channels = [] # キャッシュをクリア
+                print(f"DiscordLogHandler: Added channel ID {channel_id}. Will be activated once bot is ready.")
 
     def remove_channel(self, channel_id: int):
-        """ログ送信先チャンネルを動的に削除する。"""
+        """ログ送信先チャンネルを動的に削除し、即時反映させる。"""
         if channel_id in self.channel_ids:
             self.channel_ids.remove(channel_id)
-            # チャンネルオブジェクトのキャッシュをクリア
-            self.channels = []
-            print(f"DiscordLogHandler: Removed channel {channel_id} from the logging targets.")
-    # ### ここまで追加 ###
+            # アクティブなチャンネルオブジェクトのリストからも即座に削除する
+            self.channels = [ch for ch in self.channels if ch.id != channel_id]
+            print(f"DiscordLogHandler: Immediately removed and deactivated channel {channel_id}.")
 
     def emit(self, record: logging.LogRecord):
         """
@@ -60,19 +67,17 @@ class DiscordLogHandler(logging.Handler):
         if self.queue.empty():
             return
 
-        # チャンネルオブジェクトのリストをまだ作成していなければ作成する
-        if not self.channels and self.channel_ids:
+        # チャンネルオブジェクトのリストが空、またはIDリストと数が一致しない場合は再取得
+        if not self.channels or len(self.channels) != len(self.channel_ids):
             found_channels = []
             for cid in self.channel_ids:
                 channel = self.bot.get_channel(cid)
                 if channel and isinstance(channel, TextChannel):
                     found_channels.append(channel)
                 else:
-                    # チャンネルが見つからない、またはテキストチャンネルでない場合は警告
                     print(f"DiscordLogHandler: Warning - Channel with ID {cid} not found or is not a text channel.")
             self.channels = found_channels
 
-        # 送信先の有効なチャンネルが一つもない場合は、キューをクリアして終了
         if not self.channels:
             if self.channel_ids:
                 print(f"DiscordLogHandler: No valid channels found for IDs {self.channel_ids}. Clearing log queue.")
@@ -80,7 +85,6 @@ class DiscordLogHandler(logging.Handler):
                 self.queue.get_nowait()
             return
 
-        # キューから全てのログを取り出す
         records = []
         while not self.queue.empty():
             records.append(self.queue.get_nowait())
@@ -91,7 +95,6 @@ class DiscordLogHandler(logging.Handler):
         chunk_size = 1980
         chunks = [full_log_message[i:i + chunk_size] for i in range(0, len(full_log_message), chunk_size)]
 
-        # 全ての登録済みチャンネルに送信
         for channel in self.channels:
             for chunk in chunks:
                 try:

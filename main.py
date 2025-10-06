@@ -14,7 +14,7 @@ logging.getLogger('google.generativeai').setLevel(logging.WARNING)
 logging.getLogger('google.ai').setLevel(logging.WARNING)
 logging.getLogger('httpx').setLevel(logging.WARNING)
 
-# --- カスタムハンドラとエラークラスをインポート ---
+# --- カスタムハンドラとエラークラスをインポート (修正箇所) ---
 from PLANA.services.discord_handler import DiscordLogHandler
 from PLANA.utilities.error.errors import InvalidDiceNotationError, DiceValueError
 
@@ -87,7 +87,7 @@ class Shittim(commands.Bot):
             raise
 
         # ================================================================
-        # ===== ロギング設定 (修正済み) ====================================
+        # ===== ロギング設定 =============================================
         # ================================================================
         log_format = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - [%(funcName)s] %(message)s')
         root_logger = logging.getLogger()
@@ -105,16 +105,14 @@ class Shittim(commands.Bot):
         logging_json_path = "data/json/logging_channels.json"
         log_channel_ids_from_file = []
 
-        # --- logging_channels.json の存在確認と新規作成 (修正箇所) ---
         try:
             dir_path = os.path.dirname(logging_json_path)
-            os.makedirs(dir_path, exist_ok=True)  # ディレクトリがなければ作成
+            os.makedirs(dir_path, exist_ok=True)
             if not os.path.exists(logging_json_path):
                 with open(logging_json_path, 'w') as f:
-                    json.dump([], f)  # 空のリストで新規作成
+                    json.dump([], f)
                 logging.info(f"{logging_json_path} が見つからなかったため、新規作成しました。")
 
-            # ファイルを読み込む
             with open(logging_json_path, 'r') as f:
                 data = json.load(f)
                 if isinstance(data, list) and all(isinstance(i, int) for i in data):
