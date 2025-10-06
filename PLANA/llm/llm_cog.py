@@ -291,21 +291,32 @@ class LLMCog(commands.Cog, name="LLM"):
         # 引用リプライ元のメッセージも画像取得対象に追加
         if message.reference and message.reference.message_id:
             try:
-                referenced_msg = message.reference.resolved or await message.channel.fetch_message(
-                    message.reference.message_id)
+                # resolvedがNoneの場合でもfetch_messageを試みる
+                referenced_msg = message.reference.resolved
+                if not referenced_msg:
+                    referenced_msg = await message.channel.fetch_message(message.reference.message_id)
+
                 if referenced_msg:
                     messages_to_scan.append(referenced_msg)
                     logger.info(f"🔵 [IMAGE] Added referenced message to scan (ID: {referenced_msg.id})")
             except (discord.NotFound, discord.HTTPException) as e:
                 logger.warning(f"⚠️ Could not fetch referenced message: {e}")
 
+        # 収集ロジックを修正
         source_urls = []
         for msg in messages_to_scan:
-            source_urls.extend(url for url in IMAGE_URL_PATTERN.findall(msg.content) if url not in processed_urls)
-            processed_urls.update(source_urls)
-            source_urls.extend(att.url for att in msg.attachments if att.content_type and att.content_type.startswith(
-                'image/') and att.url not in processed_urls)
-            processed_urls.update(att.url for att in msg.attachments)
+            # メッセージ本文から画像URLを検索
+            for url in IMAGE_URL_PATTERN.findall(msg.content):
+                if url not in processed_urls:
+                    source_urls.append(url)
+                    processed_urls.add(url)
+
+            # 添付ファイルから画像URLを検索
+            for attachment in msg.attachments:
+                if attachment.content_type and attachment.content_type.startswith(
+                        'image/') and attachment.url not in processed_urls:
+                    source_urls.append(attachment.url)
+                    processed_urls.add(attachment.url)
 
         max_images = self.llm_config.get('max_images', 1)
         for url in source_urls[:max_images]:
