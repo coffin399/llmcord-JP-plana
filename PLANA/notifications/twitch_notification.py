@@ -4,7 +4,7 @@ import json
 import logging
 import time
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
 import aiohttp
@@ -42,7 +42,9 @@ class TwitchNotification(commands.Cog):
         self.token_expires_at: int = 0
 
         # 設定の読み込み
-        self.settings: Dict[int, Dict[str, Any]] = self._load_settings()
+        ### 変更箇所: データ構造の変更に対応 (型ヒントをより具体的に) ###
+        # 構造: {guild_id: {twitch_user_id: {setting_data}}}
+        self.settings: Dict[int, Dict[str, Dict[str, Any]]] = self._load_settings()
 
         # 認証情報がなければタスクを開始しない
         if not self.client_id or not self.client_secret:
@@ -50,7 +52,6 @@ class TwitchNotification(commands.Cog):
         else:
             self.check_streams.start()
 
-    # ( ... この間のコードは変更ありません ... )
     # --- Cogのライフサイクルイベント ---
     async def cog_unload(self):
         """Cogがアンロードされるときに呼ばれる"""
@@ -58,13 +59,13 @@ class TwitchNotification(commands.Cog):
         await self.session.close()
 
     # --- 設定管理 ---
-    def _load_settings(self) -> Dict[int, Dict[str, Any]]:
+    def _load_settings(self) -> Dict[int, Dict[str, Dict[str, Any]]]:
         """設定ファイルを読み込む"""
         SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
         try:
             if SETTINGS_FILE.exists():
                 with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
-                    # キーをintに変換
+                    # JSONのキーは文字列なので、guild_id(トップレベルのキー)をintに変換
                     return {int(k): v for k, v in json.load(f).items()}
             return {}
         except (json.JSONDecodeError, IOError) as e:
@@ -81,6 +82,7 @@ class TwitchNotification(commands.Cog):
             logger.error(f"設定ファイル({SETTINGS_FILE})の保存に失敗しました: {e}")
 
     # --- Twitch API 関連 ---
+    # (このセクションのコードは変更ありません)
     async def _get_twitch_access_token(self):
         """Twitch APIのアプリアクセストークンを取得・更新する"""
         if self.access_token and time.time() < self.token_expires_at:
@@ -119,7 +121,6 @@ class TwitchNotification(commands.Cog):
             async with self.session.get(url, headers=headers, params=params) as resp:
                 if resp.status == 200:
                     return await resp.json()
-                # 認証エラーならトークンを無効化して再試行を促す
                 if resp.status == 401:
                     self.access_token = None
                 text = await resp.text()
@@ -150,45 +151,51 @@ class TwitchNotification(commands.Cog):
         if not self.settings:
             return
 
-        # チェック対象のユーザーIDをまとめる
-        user_ids_to_check = [
-            config["twitch_user_id"]
-            for config in self.settings.values()
-            if "twitch_user_id" in config
-        ]
+        ### 変更箇所: 複数チャンネル対応 ###
+        # チェック対象の全ユーザーIDを重複なく収集する
+        user_ids_to_check = set()
+        for guild_settings in self.settings.values():
+            for user_id in guild_settings.keys():
+                user_ids_to_check.add(user_id)
+
         if not user_ids_to_check:
             return
 
         try:
-            # APIを一度に叩く
+            # APIを一度に叩いて、現在配信中のストリーム情報を取得
             response = await self._api_request("streams", params=[("user_id", uid) for uid in user_ids_to_check])
             live_streams = {stream['user_id']: stream for stream in response.get('data', [])}
 
-            for guild_id, config in self.settings.items():
-                user_id = config.get("twitch_user_id")
-                if not user_id:
-                    continue
+            settings_changed = False
+            # 全てのサーバー、全てのチャンネル設定をチェック
+            for guild_id, guild_settings in self.settings.items():
+                for user_id, stream_config in guild_settings.items():
+                    channel = self.bot.get_channel(stream_config["notification_channel_id"])
+                    if not channel:
+                        logger.warning(
+                            f"ギルド {guild_id} の通知チャンネル {stream_config['notification_channel_id']} が見つかりません。設定をスキップします。")
+                        continue
 
-                channel = self.bot.get_channel(config["notification_channel_id"])
-                if not channel:
-                    logger.warning(f"ギルド {guild_id} の通知チャンネルが見つかりません。設定をスキップします。")
-                    continue
+                    last_status = stream_config.get("last_status", "offline")
+                    stream_data = live_streams.get(user_id)
 
-                last_status = config.get("last_status", "offline")
-                stream_data = live_streams.get(user_id)
+                    # 配信が開始された場合
+                    if stream_data and last_status == "offline":
+                        logger.info(
+                            f"{stream_data['user_name']} が配信を開始しました。ギルド {guild_id} のチャンネル {channel.id} に通知します。")
+                        await self._send_notification(channel, stream_data)
+                        stream_config["last_status"] = "online"
+                        settings_changed = True
 
-                # 配信が開始された場合
-                if stream_data and last_status == "offline":
-                    logger.info(f"{stream_data['user_name']} が配信を開始しました。ギルド {guild_id} に通知します。")
-                    await self._send_notification(channel, stream_data)
-                    config["last_status"] = "online"
-                    self._save_settings()
+                    # 配信が終了した場合
+                    elif not stream_data and last_status == "online":
+                        logger.info(f"{stream_config['twitch_display_name']} の配信が終了しました。")
+                        stream_config["last_status"] = "offline"
+                        settings_changed = True
 
-                # 配信が終了した場合
-                elif not stream_data and last_status == "online":
-                    logger.info(f"{config['twitch_login_name']} の配信が終了しました。")
-                    config["last_status"] = "offline"
-                    self._save_settings()
+            # 変更があった場合のみファイルに保存する
+            if settings_changed:
+                self._save_settings()
 
         except TwitchAPIError as e:
             logger.warning(f"配信チェック中にAPIエラーが発生しました: {e}")
@@ -200,6 +207,7 @@ class TwitchNotification(commands.Cog):
         await self.bot.wait_until_ready()
 
     # --- 通知機能 ---
+    # (このセクションのコードは変更ありません)
     async def _send_notification(self, channel: discord.TextChannel, stream_data: Dict):
         """通知メッセージを送信する"""
         embed = discord.Embed(
@@ -215,37 +223,60 @@ class TwitchNotification(commands.Cog):
         embed.add_field(name="視聴者数", value=stream_data.get('viewer_count', 'N/A'), inline=True)
 
         thumbnail_url = stream_data['thumbnail_url'].replace('{width}', '1280').replace('{height}', '720')
-        embed.set_image(url=f"{thumbnail_url}?t={int(time.time())}")  # キャッシュ対策
+        embed.set_image(url=f"{thumbnail_url}?t={int(time.time())}")
 
         embed.set_footer(text="Twitch配信通知")
         embed.timestamp = discord.utils.utcnow()
 
         try:
-            await channel.send(f"{stream_data['user_name']}が配信を開始しました！", embed=embed)
+            guild_settings = self.settings.get(channel.guild.id, {})
+            # 該当する設定を探してカスタムメッセージを取得
+            custom_message = f"{stream_data['user_name']}が配信を開始しました！"  # デフォルト
+            for config in guild_settings.values():
+                if config.get('twitch_login_name') == stream_data['user_login']:
+                    custom_message = config.get("message", custom_message)
+                    break
+
+            await channel.send(custom_message, embed=embed)
         except discord.Forbidden:
             logger.error(f"チャンネル {channel.id} への通知送信に失敗しました: 権限がありません。")
         except discord.HTTPException as e:
             logger.error(f"チャンネル {channel.id} への通知送信に失敗しました: {e}")
 
-    # ( ... ここまで変更なし ... )
+    ### 変更箇所: コマンド引数の入力補完用メソッドを追加 ###
+    async def twitch_channel_autocomplete(
+            self, interaction: discord.Interaction, current: str
+    ) -> List[app_commands.Choice[str]]:
+        """設定済みのTwitchチャンネルを候補として表示する"""
+        guild_id = interaction.guild_id
+        if guild_id not in self.settings:
+            return []
+
+        choices = []
+        for user_id, config in self.settings[guild_id].items():
+            name = config.get("twitch_display_name", user_id)
+            # 入力された文字がチャンネル名に含まれていれば候補に出す
+            if current.lower() in name.lower():
+                choices.append(app_commands.Choice(name=name, value=user_id))
+
+        # Discordの制限は25件まで
+        return choices[:25]
 
     # --- スラッシュコマンド ---
     @app_commands.command(name="twitch_set", description="Twitch配信通知を設定します。")
     @app_commands.describe(
         twitch_url="通知したいTwitchチャンネルのURL (例: https://www.twitch.tv/twitch)",
-        notification_channel="通知を送信するDiscordチャンネル"
+        notification_channel="通知を送信するDiscordチャンネル",
+        message="通知時にメンションなどを送るためのカスタムメッセージ"
     )
     @app_commands.checks.has_permissions(manage_guild=True)
     async def set_notification(self, interaction: discord.Interaction, twitch_url: str,
-                               notification_channel: discord.TextChannel):
+                               notification_channel: discord.TextChannel, message: Optional[str] = None):
         """配信通知を設定するコマンド"""
-        ### 変更点 ###
-        # ephemeral=False にするため、defer()の引数を変更
-        await interaction.response.defer(ephemeral=False)
+        await interaction.response.defer()
         guild_id = interaction.guild_id
 
         try:
-            # URLからログイン名を取得
             parsed_url = urlparse(twitch_url)
             if parsed_url.netloc not in ("www.twitch.tv", "twitch.tv"):
                 raise ConfigError("無効なTwitchチャンネルURLです。")
@@ -253,19 +284,25 @@ class TwitchNotification(commands.Cog):
             if not login_name:
                 raise ConfigError("URLからチャンネル名を特定できませんでした。")
 
-            # Twitch APIでユーザー情報を取得
             user_data = await self.get_user_data(login_name)
             if not user_data:
                 raise TwitchAPIError(f"Twitchユーザー '{login_name}' が見つかりませんでした。")
 
-            # 設定を保存
-            self.settings[guild_id] = {
-                "twitch_user_id": user_data["id"],
+            # サーバー用の設定辞書がなければ作成
+            if guild_id not in self.settings:
+                self.settings[guild_id] = {}
+
+            # ユーザーIDをキーにして設定を保存（または上書き）
+            new_setting = {
                 "twitch_login_name": user_data["login"],
                 "twitch_display_name": user_data["display_name"],
                 "notification_channel_id": notification_channel.id,
                 "last_status": "offline",
             }
+            if message:
+                new_setting["message"] = message
+
+            self.settings[guild_id][user_data["id"]] = new_setting
             self._save_settings()
 
             embed = discord.Embed(
@@ -273,79 +310,106 @@ class TwitchNotification(commands.Cog):
                 description=f"**{user_data['display_name']}** の配信が開始されたら、{notification_channel.mention} に通知します。",
                 color=discord.Color.green()
             )
+            if message:
+                embed.add_field(name="カスタムメッセージ", value=message, inline=False)
+
             await interaction.followup.send(embed=embed)
 
         except Exception as e:
             message = self.handler.get_user_friendly_message(e)
-            ### 変更点 ###
-            # ephemeral=False にするため、引数を削除
             await interaction.followup.send(message)
 
+    ### 変更箇所: twitch_removeコマンドを修正 ###
     @app_commands.command(name="twitch_remove", description="Twitch配信通知の設定を解除します。")
+    @app_commands.describe(twitch_channel="解除したいTwitchチャンネル")
+    @app_commands.autocomplete(twitch_channel=twitch_channel_autocomplete)
     @app_commands.checks.has_permissions(manage_guild=True)
-    async def remove_notification(self, interaction: discord.Interaction):
+    async def remove_notification(self, interaction: discord.Interaction, twitch_channel: str):
         """配信通知を解除するコマンド"""
         guild_id = interaction.guild_id
-        if guild_id in self.settings:
-            del self.settings[guild_id]
+        # twitch_channel引数にはautocompleteからtwitch_user_idが渡される
+
+        if guild_id in self.settings and twitch_channel in self.settings[guild_id]:
+            removed_channel_name = self.settings[guild_id][twitch_channel].get("twitch_display_name", twitch_channel)
+
+            # 設定を削除
+            del self.settings[guild_id][twitch_channel]
+
+            # もしサーバーの設定が空になったら、サーバー自体のキーも削除
+            if not self.settings[guild_id]:
+                del self.settings[guild_id]
+
             self._save_settings()
-            ### 変更点 ###
-            # ephemeral=False にするため、引数を削除
-            await interaction.response.send_message("✅ Twitch配信通知の設定を解除しました。")
+            await interaction.response.send_message(
+                f"✅ **{removed_channel_name}** のTwitch配信通知の設定を解除しました。")
         else:
-            ### 変更点 ###
-            # ephemeral=False にするため、引数を削除
-            await interaction.response.send_message("ℹ️ このサーバーにはTwitch配信通知が設定されていません。")
+            await interaction.response.send_message("ℹ️ 指定されたTwitchチャンネルの通知設定は見つかりませんでした。")
 
     @app_commands.command(name="twitch_test", description="Twitch配信通知のテストメッセージを送信します。")
+    @app_commands.describe(twitch_channel="テストしたいTwitchチャンネル")
+    @app_commands.autocomplete(twitch_channel=twitch_channel_autocomplete)
     @app_commands.checks.has_permissions(manage_guild=True)
-    async def test_notification(self, interaction: discord.Interaction):
+    async def test_notification(self, interaction: discord.Interaction, twitch_channel: str):
         """通知のテストを行うコマンド"""
-        ### 変更点 ###
-        # ephemeral=False にするため、defer()の引数を変更
-        await interaction.response.defer(ephemeral=False)
+        await interaction.response.defer()
         guild_id = interaction.guild_id
+        # twitch_channel引数にはautocompleteからtwitch_user_idが渡される
 
-        if guild_id not in self.settings:
-            ### 変更点 ###
-            # ephemeral=False にするため、引数を削除
-            await interaction.followup.send("❌ 通知設定が見つかりません。`/twitch_set`で先に設定してください。")
+        if guild_id not in self.settings or twitch_channel not in self.settings[guild_id]:
+            await interaction.followup.send("❌ 指定されたTwitchチャンネルの通知設定が見つかりません。")
             return
 
-        config = self.settings[guild_id]
+        config = self.settings[guild_id][twitch_channel]
         channel = self.bot.get_channel(config["notification_channel_id"])
         if not channel:
-            ### 変更点 ###
-            # ephemeral=False にするため、引数を削除
             await interaction.followup.send(f"❌ 通知チャンネルが見つかりません。ID: {config['notification_channel_id']}")
             return
 
-        # テスト用のダミーデータ
         test_stream_data = {
             'user_name': config['twitch_display_name'],
             'user_login': config['twitch_login_name'],
             'title': 'これはテスト配信です！',
             'game_name': 'Just Chatting',
             'viewer_count': 1234,
-            'thumbnail_url': 'https://static-cdn.jtvnw.net/previews-ttv/live_user_{user_login}-{width}x{height}.jpg'.format(
+            'thumbnail_url': 'https://static-cdn.jtvnw.net/previews-ttv/live_user_{user_login}-{width}x{height}'.format(
                 user_login=config['twitch_login_name'], width=1280, height=720
             )
         }
 
         try:
             await self._send_notification(channel, test_stream_data)
-            ### 変更点 ###
-            # ephemeral=False にするため、引数を削除
             await interaction.followup.send(f"✅ {channel.mention} にテスト通知を送信しました。")
         except Exception as e:
             message = self.handler.get_user_friendly_message(e)
-            ### 変更点 ###
-            # ephemeral=False にするため、引数を削除
             await interaction.followup.send(message)
+
+    @app_commands.command(name="twitch_list", description="設定されているTwitch通知の一覧を表示します。")
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def list_notifications(self, interaction: discord.Interaction):
+        """設定されている通知の一覧を表示するコマンド"""
+        guild_id = interaction.guild_id
+        if guild_id not in self.settings or not self.settings[guild_id]:
+            await interaction.response.send_message("ℹ️ このサーバーにはTwitch配信通知が設定されていません。")
+            return
+
+        embed = discord.Embed(
+            title=f"Twitch通知設定一覧 ({interaction.guild.name})",
+            color=discord.Color.purple()
+        )
+
+        description_lines = []
+        for user_id, config in self.settings[guild_id].items():
+            channel = self.bot.get_channel(config.get("notification_channel_id"))
+            channel_mention = channel.mention if channel else f"ID: `{config.get('notification_channel_id')}` (不明)"
+            display_name = config.get('twitch_display_name', 'N/A')
+            login_name = config.get('twitch_login_name', 'N/A')
+            description_lines.append(f"📺 **[{display_name}](https://www.twitch.tv/{login_name})** → {channel_mention}")
+
+        embed.description = "\n".join(description_lines)
+        await interaction.response.send_message(embed=embed)
 
 
 async def setup(bot: commands.Bot):
-    # bot.config が存在し、必要なキーがあるかチェック
     if not hasattr(bot, 'config'):
         logger.critical("Botにconfig属性が見つかりません。config.yamlをロードしてください。")
         return
