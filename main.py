@@ -102,7 +102,7 @@ class Shittim(commands.Bot):
             log_channel_ids_from_config = []
             logging.warning("config.yaml の 'log_channel_ids' はリスト形式である必要があります。")
 
-        logging_json_path = "data/json/logging_channels.json"
+        logging_json_path = "data/logging_channels.json"
         log_channel_ids_from_file = []
 
         try:
