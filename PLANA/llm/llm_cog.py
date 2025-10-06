@@ -287,36 +287,64 @@ class LLMCog(commands.Cog, name="LLM"):
     async def _prepare_multimodal_content(self, message: discord.Message) -> Tuple[List[Dict[str, Any]], str]:
         image_inputs, processed_urls = [], set()
         messages_to_scan = [message]
+        logger.info(f"🔵 [IMAGE] Starting image scan for message ID: {message.id}")
 
         # 引用リプライ元のメッセージも画像取得対象に追加
         if message.reference and message.reference.message_id:
             try:
-                # resolvedがNoneの場合でもfetch_messageを試みる
+                # まずキャッシュ (resolved) を確認
                 referenced_msg = message.reference.resolved
+                # キャッシュになければAPIから取得を試みる
                 if not referenced_msg:
+                    logger.info(
+                        f"🔵 [IMAGE] Referenced message not in cache. Fetching ID: {message.reference.message_id}")
                     referenced_msg = await message.channel.fetch_message(message.reference.message_id)
 
                 if referenced_msg:
                     messages_to_scan.append(referenced_msg)
                     logger.info(f"🔵 [IMAGE] Added referenced message to scan (ID: {referenced_msg.id})")
+            except discord.Forbidden:
+                # 権限不足は致命的なのでエラーとして記録
+                logger.error(
+                    f"❌ [IMAGE] Lacking 'Read Message History' permission in channel '{message.channel.name}' ({message.channel.id}) "
+                    f"to fetch referenced message. Please check bot permissions."
+                )
             except (discord.NotFound, discord.HTTPException) as e:
-                logger.warning(f"⚠️ Could not fetch referenced message: {e}")
+                # メッセージが見つからない、その他のHTTPエラーは警告として記録
+                logger.warning(
+                    f"⚠️ [IMAGE] Could not fetch referenced message (ID: {message.reference.message_id}): {e}")
 
-        # 収集ロジックを修正
+        # 収集ロジック
         source_urls = []
         for msg in messages_to_scan:
-            # メッセージ本文から画像URLを検索
+            logger.info(f"🔵 [IMAGE] Scanning message ID: {msg.id} by {msg.author.name}")
+
+            # 1. メッセージ本文のURLを検索
             for url in IMAGE_URL_PATTERN.findall(msg.content):
                 if url not in processed_urls:
                     source_urls.append(url)
                     processed_urls.add(url)
 
-            # 添付ファイルから画像URLを検索
+            # 2. 添付ファイルを検索
             for attachment in msg.attachments:
                 if attachment.content_type and attachment.content_type.startswith(
                         'image/') and attachment.url not in processed_urls:
                     source_urls.append(attachment.url)
                     processed_urls.add(attachment.url)
+
+            # 3. 埋め込み(Embed)内の画像を検索
+            for embed in msg.embeds:
+                # embed.image (大きい画像)
+                if embed.image and embed.image.url and embed.image.url not in processed_urls:
+                    source_urls.append(embed.image.url)
+                    processed_urls.add(embed.image.url)
+                # embed.thumbnail (小さい画像)
+                if embed.thumbnail and embed.thumbnail.url and embed.thumbnail.url not in processed_urls:
+                    source_urls.append(embed.thumbnail.url)
+                    processed_urls.add(embed.thumbnail.url)
+
+        if source_urls:
+            logger.info(f"🔵 [IMAGE] Found {len(source_urls)} unique image URL(s): {source_urls}")
 
         max_images = self.llm_config.get('max_images', 1)
         for url in source_urls[:max_images]:
@@ -333,6 +361,7 @@ class LLMCog(commands.Cog, name="LLM"):
             except discord.HTTPException:
                 pass
 
+        # ユーザーが入力したメッセージのテキストのみを返す
         clean_text = IMAGE_URL_PATTERN.sub('', message.content).strip()
         return image_inputs, clean_text
 
