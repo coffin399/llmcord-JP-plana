@@ -575,11 +575,11 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
                     commits: List[Dict[str, Any]] = await response.json()
                     embed = discord.Embed(
                         title="📜 アップデート履歴 / Update History",
-                        description=f"最新のコミット15件を表示しています。\nShowing the 15 most recent commits from the [{repo}]({self.plana_repository}) repository.",
+                        description=f"最新のコミット30件を表示しています。\nShowing the 30 most recent commits from the [{repo}]({self.plana_repository}) repository.",
                         color=discord.Color.blue()
                     )
 
-                    for commit_data in commits[:15]:
+                    for commit_data in commits[:30]:
                         sha = commit_data['sha'][:7]
                         message = commit_data['commit']['message'].split('\n')[0]
                         author = commit_data['commit']['author']['name']
