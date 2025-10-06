@@ -22,7 +22,8 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.session = aiohttp.ClientSession()
-        self.logging_channels_file = "logging_channels.json"
+        # 保存先を data/json/ に変更
+        self.logging_channels_file = "data/json/logging_channels.json"
 
         # configから必要な値を取得
         self.arona_repository = self.bot.config.get("arona_repository_url",
@@ -42,6 +43,70 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
 
         self.generic_help_message_text_ja = self.bot.config.get("generic_help_message_ja", "ヘルプ")
         self.generic_help_message_text_en = self.bot.config.get("generic_help_message_en", "Help")
+
+    async def cog_unload(self) -> None:
+        await self.session.close()
+
+    def _load_logging_channels(self) -> List[int]:
+        if os.path.exists(self.logging_channels_file):
+            try:
+                with open(self.logging_channels_file, 'r') as f:
+                    data = json.load(f)
+                    if isinstance(data, list) and all(isinstance(i, int) for i in data):
+                        return data
+            except (json.JSONDecodeError, IOError) as e:
+                logger.error(f"ロギングチャンネル設定ファイルの読み込みに失敗しました: {e}")
+        return []
+
+    def _save_logging_channels(self, channel_ids: List[int]) -> None:
+        try:
+            # ディレクトリのパスを取得
+            dir_path = os.path.dirname(self.logging_channels_file)
+            # ディレクトリが存在しない場合は作成 (修正点)
+            os.makedirs(dir_path, exist_ok=True)
+            with open(self.logging_channels_file, 'w') as f:
+                json.dump(channel_ids, f, indent=4)
+        except IOError as e:
+            logger.error(f"ロギングチャンネル設定ファイルの保存に失敗しました: {e}")
+
+    def _get_discord_log_handler(self) -> Optional[Any]:
+        root_logger = logging.getLogger()
+        for handler in root_logger.handlers:
+            if handler.__class__.__name__ == 'DiscordLogHandler':
+                return handler
+        return None
+
+    async def cog_unload(self) -> None:
+        await self.session.close()
+
+    def _load_logging_channels(self) -> List[int]:
+        if os.path.exists(self.logging_channels_file):
+            try:
+                with open(self.logging_channels_file, 'r') as f:
+                    data = json.load(f)
+                    if isinstance(data, list) and all(isinstance(i, int) for i in data):
+                        return data
+            except (json.JSONDecodeError, IOError) as e:
+                logger.error(f"ロギングチャンネル設定ファイルの読み込みに失敗しました: {e}")
+        return []
+
+    def _save_logging_channels(self, channel_ids: List[int]) -> None:
+        try:
+            # ディレクトリのパスを取得
+            dir_path = os.path.dirname(self.logging_channels_file)
+            # ディレクトリが存在しない場合は作成 (修正点)
+            os.makedirs(dir_path, exist_ok=True)
+            with open(self.logging_channels_file, 'w') as f:
+                json.dump(channel_ids, f, indent=4)
+        except IOError as e:
+            logger.error(f"ロギングチャンネル設定ファイルの保存に失敗しました: {e}")
+
+    def _get_discord_log_handler(self) -> Optional[Any]:
+        root_logger = logging.getLogger()
+        for handler in root_logger.handlers:
+            if handler.__class__.__name__ == 'DiscordLogHandler':
+                return handler
+        return None
 
     async def cog_unload(self) -> None:
         await self.session.close()
