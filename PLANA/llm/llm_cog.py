@@ -287,8 +287,18 @@ class LLMCog(commands.Cog, name="LLM"):
     async def _prepare_multimodal_content(self, message: discord.Message) -> Tuple[List[Dict[str, Any]], str]:
         image_inputs, processed_urls = [], set()
         messages_to_scan = [message]
-        if message.reference and isinstance(message.reference.resolved, discord.Message):
-            messages_to_scan.append(message.reference.resolved)
+
+        # 引用リプライ元のメッセージも画像取得対象に追加
+        if message.reference and message.reference.message_id:
+            try:
+                referenced_msg = message.reference.resolved or await message.channel.fetch_message(
+                    message.reference.message_id)
+                if referenced_msg:
+                    messages_to_scan.append(referenced_msg)
+                    logger.info(f"🔵 [IMAGE] Added referenced message to scan (ID: {referenced_msg.id})")
+            except (discord.NotFound, discord.HTTPException) as e:
+                logger.warning(f"⚠️ Could not fetch referenced message: {e}")
+
         source_urls = []
         for msg in messages_to_scan:
             source_urls.extend(url for url in IMAGE_URL_PATTERN.findall(msg.content) if url not in processed_urls)
@@ -296,10 +306,12 @@ class LLMCog(commands.Cog, name="LLM"):
             source_urls.extend(att.url for att in msg.attachments if att.content_type and att.content_type.startswith(
                 'image/') and att.url not in processed_urls)
             processed_urls.update(att.url for att in msg.attachments)
+
         max_images = self.llm_config.get('max_images', 1)
         for url in source_urls[:max_images]:
             if image_data := await self._process_image_url(url):
                 image_inputs.append(image_data)
+
         if len(source_urls) > max_images:
             logger.info(f"Reached max image limit ({max_images}). Ignoring {len(source_urls) - max_images} images.")
             try:
@@ -309,6 +321,7 @@ class LLMCog(commands.Cog, name="LLM"):
                                            silent=True)
             except discord.HTTPException:
                 pass
+
         clean_text = IMAGE_URL_PATTERN.sub('', message.content).strip()
         return image_inputs, clean_text
 
@@ -477,7 +490,6 @@ class LLMCog(commands.Cog, name="LLM"):
 
                 if should_update and full_response_text:
                     # ストリーミング中は絵文字を前後に追加
-                    emoji_suffix = " :incoming_envelope:"
                     max_content_length = DISCORD_MESSAGE_MAX_LENGTH - len(emoji_prefix) - len(emoji_suffix)
                     display_text = emoji_prefix + full_response_text[:max_content_length] + emoji_suffix
 
