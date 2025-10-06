@@ -238,7 +238,10 @@ class Shittim(commands.Bot):
             "PLANA Ver.2025-10-06",
             "PLANA Ver.2025-10-06",
             "/llm_help",
-            "/llm_help_en"
+            "/llm_help_en",
+            "/ytdlp",
+            "/updates",
+            "/updates"
         ])
         self.rotate_status.start()
 
