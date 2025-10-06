@@ -241,7 +241,8 @@ class Shittim(commands.Bot):
             "/llm_help_en",
             "/ytdlp",
             "/updates",
-            "/updates"
+            "/updates",
+            "/enable-logging"
         ])
         self.rotate_status.start()
 
