@@ -642,11 +642,14 @@ class LLMCog(commands.Cog, name="LLM"):
 
                 if delta and delta.tool_calls:
                     for tool_call_chunk in delta.tool_calls:
-                        if len(tool_calls_buffer) <= tool_call_chunk.index:
+                        # indexがNoneの場合を考慮してデフォルト値を設定
+                        chunk_index = tool_call_chunk.index if tool_call_chunk.index is not None else 0
+
+                        if len(tool_calls_buffer) <= chunk_index:
                             tool_calls_buffer.append(
                                 {"id": "", "type": "function", "function": {"name": "", "arguments": ""}})
 
-                        buffer = tool_calls_buffer[tool_call_chunk.index]
+                        buffer = tool_calls_buffer[chunk_index]
                         if tool_call_chunk.id:
                             buffer["id"] = tool_call_chunk.id
                         if tool_call_chunk.function:
