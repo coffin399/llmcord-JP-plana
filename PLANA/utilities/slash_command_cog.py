@@ -7,11 +7,12 @@ import json
 import os
 from typing import Optional, List, Dict, Any
 
-import aiohttp  # 非同期HTTPリクエストのために追加
+import aiohttp
 import discord
 from discord import app_commands
 from discord.ext import commands
 
+# ユーザー指定のエラークラスをインポート
 from PLANA.utilities.error.errors import InvalidDiceNotationError, DiceValueError
 
 logger = logging.getLogger(__name__)
@@ -20,10 +21,7 @@ logger = logging.getLogger(__name__)
 class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-        # aiohttpのセッションを初期化
         self.session = aiohttp.ClientSession()
-
-        # ロギングチャンネル設定ファイルのパス (ボットのルートディレクトリに作成されます)
         self.logging_channels_file = "logging_channels.json"
 
         # configから必要な値を取得
@@ -31,11 +29,8 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
                                                     "https://github.com/coffin399/music-bot-arona")
         self.plana_repository = self.bot.config.get("plana_repository_url",
                                                     "https://github.com/coffin399/llmcord-JP-plana")
-
-        # サポート連絡先の設定
         self.support_x_url = self.bot.config.get("support_x_url", "https://x.com/coffin299")
         self.support_discord_id = self.bot.config.get("support_discord_id", "coffin299")
-
         self.bot_invite_url = self.bot.config.get("bot_invite_url")
 
         if not self.bot_invite_url:
@@ -48,13 +43,10 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
         self.generic_help_message_text_ja = self.bot.config.get("generic_help_message_ja", "ヘルプ")
         self.generic_help_message_text_en = self.bot.config.get("generic_help_message_en", "Help")
 
-    # Cogがアンロードされるときにセッションを閉じる
     async def cog_unload(self) -> None:
         await self.session.close()
 
-    # ### ここからロギング関連のヘルパーメソッド ###
     def _load_logging_channels(self) -> List[int]:
-        """設定ファイルからロギングチャンネルIDのリストを読み込む。"""
         if os.path.exists(self.logging_channels_file):
             try:
                 with open(self.logging_channels_file, 'r') as f:
@@ -66,7 +58,6 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
         return []
 
     def _save_logging_channels(self, channel_ids: List[int]) -> None:
-        """ロギングチャンネルIDのリストを設定ファイルに保存する。"""
         try:
             with open(self.logging_channels_file, 'w') as f:
                 json.dump(channel_ids, f, indent=4)
@@ -74,14 +65,11 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
             logger.error(f"ロギングチャンネル設定ファイルの保存に失敗しました: {e}")
 
     def _get_discord_log_handler(self) -> Optional[Any]:
-        """ルートロガーからDiscordLogHandlerのインスタンスを取得する。"""
         root_logger = logging.getLogger()
         for handler in root_logger.handlers:
-            # クラス名で判定
             if handler.__class__.__name__ == 'DiscordLogHandler':
                 return handler
         return None
-    # ### ここまでロギング関連のヘルパーメソッド ###
 
     async def get_prefix_from_config(self) -> str:
         prefix = "!!"
@@ -92,11 +80,6 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
         return prefix
 
     def _get_single_recruit(self, guaranteed_star2: bool = False) -> int:
-        """
-        単発の生徒募集（ガチャ）を行い、レアリティを返す。
-        :param guaranteed_star2: Trueの場合、☆2以上が確定する。
-        :return: レアリティ (1, 2, or 3)
-        """
         if guaranteed_star2:
             population = [3, 2]
             weights = [3.0, 18.5]
@@ -223,6 +206,7 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
     async def check(self, interaction: discord.Interaction, expression: str, condition: Optional[str] = None,
                     target: Optional[int] = None):
         if (condition is None and target is not None) or (condition is not None and target is None):
+            # ephemeral=False に変更
             await interaction.response.send_message(
                 "エラー: 判定を行うには、`条件`と`目標値`の両方を指定してください。\nError: To perform a check, you must specify both a `condition` and a `target` number.",
                 ephemeral=False)
@@ -568,68 +552,53 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
                 ephemeral=False)
             logger.error(f"/updates の実行中に接続エラーが発生しました: {e}")
 
-    # ### ここからロギングコマンド ###
     @app_commands.command(name="enable-logging",
-                          description="このチャンネルにBot全体のログを送信するように設定します。(管理者限定)")
-    @app_commands.checks.has_permissions(manage_guild=True)
-    async def enable_logging(self, interaction: discord.Interaction):
-        """このチャンネルをログ送信先として登録する。"""
-        if not isinstance(interaction.channel, discord.TextChannel):
-            await interaction.response.send_message("エラー: このコマンドはテキストチャンネルでのみ使用できます。", ephemeral=True)
-            return
-
-        channel_id = interaction.channel.id
+                          description="指定したチャンネルにBot全体のログを送信するように設定します。")
+    @app_commands.describe(channel="ログを送信するテキストチャンネル")
+    async def enable_logging(self, interaction: discord.Interaction, channel: discord.TextChannel):
+        channel_id = channel.id
         current_channels = self._load_logging_channels()
 
         if channel_id in current_channels:
-            await interaction.response.send_message(f"✅ チャンネル <#{channel_id}> は既にログ送信先に登録されています。", ephemeral=True)
+            await interaction.response.send_message(f"✅ チャンネル {channel.mention} は既にログ送信先に登録されています。", ephemeral=False)
             return
 
         current_channels.append(channel_id)
         self._save_logging_channels(current_channels)
 
-        # 実行中のハンドラーにも反映
         handler = self._get_discord_log_handler()
         if handler:
             handler.add_channel(channel_id)
             logger.info(f"ロギングチャンネルを追加しました: {channel_id} (Guild: {interaction.guild.id}, User: {interaction.user.id})")
-            await interaction.response.send_message(f"✅ このチャンネル (<#{channel_id}>) をログの送信先として設定しました。")
+            await interaction.response.send_message(f"✅ チャンネル {channel.mention} をログの送信先として設定しました。", ephemeral=False)
         else:
             logger.warning(f"ロギングチャンネル {channel_id} を設定ファイルに追加しましたが、DiscordLogHandlerが見つかりませんでした。")
-            await interaction.response.send_message(f"✅ このチャンネル (<#{channel_id}>) をログの送信先として設定しました。\n"
-                                                     f"ボットの再起動後にログ送信が開始されます。")
-
+            await interaction.response.send_message(f"✅ チャンネル {channel.mention} をログの送信先として設定しました。\n"
+                                                     f"ボットの再起動後にログ送信が開始されます。", ephemeral=False)
 
     @app_commands.command(name="disable-logging",
-                          description="このチャンネルへのBot全体のログ送信を停止します。(管理者限定)")
-    @app_commands.checks.has_permissions(manage_guild=True)
-    async def disable_logging(self, interaction: discord.Interaction):
-        """このチャンネルをログ送信先から解除する。"""
-        if not isinstance(interaction.channel, discord.TextChannel):
-            await interaction.response.send_message("エラー: このコマンドはテキストチャンネルでのみ使用できます。", ephemeral=True)
-            return
-
-        channel_id = interaction.channel.id
+                          description="指定したチャンネルへのBot全体のログ送信を停止します。")
+    @app_commands.describe(channel="ログ送信を停止するテキストチャンネル")
+    async def disable_logging(self, interaction: discord.Interaction, channel: discord.TextChannel):
+        channel_id = channel.id
         current_channels = self._load_logging_channels()
 
         if channel_id not in current_channels:
-            await interaction.response.send_message(f"ℹ️ チャンネル <#{channel_id}> はログ送信先に登録されていません。", ephemeral=True)
+            await interaction.response.send_message(f"ℹ️ チャンネル {channel.mention} はログ送信先に登録されていません。", ephemeral=False)
             return
 
         current_channels.remove(channel_id)
         self._save_logging_channels(current_channels)
 
-        # 実行中のハンドラーにも反映
         handler = self._get_discord_log_handler()
         if handler:
             handler.remove_channel(channel_id)
             logger.info(f"ロギングチャンネルを削除しました: {channel_id} (Guild: {interaction.guild.id}, User: {interaction.user.id})")
-            await interaction.response.send_message(f"✅ このチャンネル (<#{channel_id}>) へのログ送信を停止しました。")
+            await interaction.response.send_message(f"✅ チャンネル {channel.mention} へのログ送信を停止しました。", ephemeral=False)
         else:
             logger.warning(f"ロギングチャンネル {channel_id} を設定ファイルから削除しましたが、DiscordLogHandlerが見つかりませんでした。")
-            await interaction.response.send_message(f"✅ このチャンネル (<#{channel_id}>) へのログ送信設定を解除しました。\n"
-                                                     f"ボットの再起動後に完全に停止します。")
-    # ### ここまでロギングコマンド ###
+            await interaction.response.send_message(f"✅ チャンネル {channel.mention} へのログ送信設定を解除しました。\n"
+                                                     f"ボットの再起動後に完全に停止します。", ephemeral=False)
 
     @app_commands.command(name="help",
                           description="Botのヘルプ情報を表示します。/ Displays help information for the bot.")
@@ -732,54 +701,6 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
         else:
             await interaction.followup.send(embed=embed, ephemeral=False)
         logger.info(f"/help が実行されました。 (User: {interaction.user.id})")
-
-    # Cog全体のエラーを処理するイベントハンドラを追加
-    @commands.Cog.listener()
-    async def on_app_command_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
-        """
-        スラッシュコマンドで発生したエラーを処理する。
-        """
-        original_error = getattr(error, 'original', error)
-
-        # ### ここから変更: 権限エラーのハンドリングを追加 ###
-        if isinstance(error, app_commands.MissingPermissions):
-            error_message = "エラー: このコマンドを実行するには、サーバーの管理権限が必要です。\nError: You need 'Manage Server' permissions to run this command."
-            if not interaction.response.is_done():
-                await interaction.response.send_message(error_message, ephemeral=True)
-            else:
-                await interaction.followup.send(error_message, ephemeral=True)
-            logger.warning(f"コマンド '{interaction.command.name}' で権限エラーが発生しました (User: {interaction.user.id})")
-            return
-        # ### ここまで変更 ###
-
-        # 自分で定義したカスタムエラーかどうかをチェック
-        if isinstance(original_error, (InvalidDiceNotationError, DiceValueError)):
-            error_message = f"エラー: {original_error.message}"
-            if not interaction.response.is_done():
-                await interaction.response.send_message(error_message, ephemeral=False)
-            else:
-                await interaction.followup.send(error_message, ephemeral=False)
-            logger.warning(
-                f"コマンド '{interaction.command.name}' でエラーが発生: {original_error} (User: {interaction.user.id})")
-
-        # その他の予期しないエラー
-        else:
-            logger.error(f"コマンド '{interaction.command.name}' で予期しないエラーが発生しました。", exc_info=error)
-            try:
-                if not interaction.response.is_done():
-                    await interaction.response.send_message(
-                        "コマンドの実行中に予期しないエラーが発生しました。開発者に連絡してください。\n"
-                        "An unexpected error occurred while executing the command. Please contact the developer.",
-                        ephemeral=False
-                    )
-                else:
-                    await interaction.followup.send(
-                        "コマンドの実行中に予期しないエラーが発生しました。開発者に連絡してください。\n"
-                        "An unexpected error occurred while executing the command. Please contact the developer.",
-                        ephemeral=False
-                    )
-            except discord.HTTPException as e:
-                logger.error(f"エラーメッセージの送信に失敗しました: {e}")
 
 
 async def setup(bot: commands.Bot):

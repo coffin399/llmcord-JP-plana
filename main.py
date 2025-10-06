@@ -5,19 +5,21 @@ import logging
 import os
 import shutil
 import sys
+import json  # logging_channels.json のために追加
 
 # --- ロギング設定の初期化 ---
+# 外部ライブラリのログレベルを調整
 logging.getLogger('discord').setLevel(logging.WARNING)
 logging.getLogger('openai').setLevel(logging.WARNING)
 logging.getLogger('google.generativeai').setLevel(logging.WARNING)
 logging.getLogger('google.ai').setLevel(logging.WARNING)
 logging.getLogger('httpx').setLevel(logging.WARNING)
 
-# --- カスタムDiscordロギングハンドラをインポート ---
+# --- カスタムハンドラとエラークラスをインポート ---
 from PLANA.services.discord_handler import DiscordLogHandler
+from PLANA.utilities.error.errors import InvalidDiceNotationError, DiceValueError
 
 COGS_DIRECTORY_NAME = "cogs"
-
 CONFIG_FILE = 'config.yaml'
 DEFAULT_CONFIG_FILE = 'config.default.yaml'
 
@@ -93,7 +95,7 @@ class Shittim(commands.Bot):
             raise
 
         # ================================================================
-        # ===== ロギング設定 =============================================
+        # ===== ロギング設定 ===============================================
         # ================================================================
         log_format = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - [%(funcName)s] %(message)s')
         root_logger = logging.getLogger()
@@ -106,29 +108,38 @@ class Shittim(commands.Bot):
         root_logger.addHandler(console_handler)
 
         # 2. Discordへのカスタムハンドラ (複数チャンネル対応)
-        log_channel_ids = self.config.get('log_channel_ids')
-        if not log_channel_ids:
-            single_channel_id = self.config.get('log_channel_id')
-            if single_channel_id:
-                log_channel_ids = [single_channel_id]
-                logging.warning(
-                    "設定 'log_channel_id' は非推奨です。今後は 'log_channel_ids' (リスト形式) を使用してください。")
+        # --- config.yaml からのチャンネルIDを読み込み ---
+        log_channel_ids_from_config = self.config.get('log_channel_ids', [])
+        if not isinstance(log_channel_ids_from_config, list):
+            log_channel_ids_from_config = []
+            logging.warning("config.yaml の 'log_channel_ids' はリスト形式である必要があります。")
 
-        if log_channel_ids and isinstance(log_channel_ids, list):
+        # --- logging_channels.json からのチャンネルIDを読み込み ---
+        log_channel_ids_from_file = []
+        if os.path.exists("logging_channels.json"):
             try:
-                valid_ids = [int(cid) for cid in log_channel_ids if cid]
-                if valid_ids:
-                    discord_handler = DiscordLogHandler(bot=self, channel_ids=valid_ids)
-                    discord_handler.setLevel(logging.INFO)
-                    discord_handler.setFormatter(log_format)
-                    root_logger.addHandler(discord_handler)
-                    logging.info(f"DiscordへのロギングをチャンネルID {valid_ids} で有効化しました。")
-                else:
-                    logging.warning("log_channel_ids に有効なチャンネルIDが指定されていません。")
-            except (ValueError, TypeError) as e:
-                logging.error(f"config.yamlの log_channel_ids の値が不正です: {e}")
+                with open("logging_channels.json", 'r') as f:
+                    data = json.load(f)
+                    if isinstance(data, list) and all(isinstance(i, int) for i in data):
+                        log_channel_ids_from_file = data
+            except (json.JSONDecodeError, IOError) as e:
+                logging.error(f"logging_channels.json の読み込みに失敗しました: {e}")
+
+        # --- 両方のリストを結合し、重複を削除 ---
+        all_log_channel_ids = list(set(log_channel_ids_from_config + log_channel_ids_from_file))
+
+        if all_log_channel_ids:
+            try:
+                # DiscordLogHandlerの初期化
+                discord_handler = DiscordLogHandler(bot=self, channel_ids=all_log_channel_ids)
+                discord_handler.setLevel(logging.INFO)
+                discord_handler.setFormatter(log_format)
+                root_logger.addHandler(discord_handler)
+                logging.info(f"DiscordへのロギングをチャンネルID {all_log_channel_ids} で有効化しました。")
+            except Exception as e:
+                logging.error(f"DiscordLogHandler の初期化中にエラーが発生しました: {e}")
         else:
-            logging.warning("config.yamlに log_channel_ids が設定されていないため、Discordへのロギングは無効です。")
+            logging.warning("ログ送信先のDiscordチャンネルが設定されていません。")
         # ================================================================
         # ===== ロギング設定ここまで =====================================
         # ================================================================
@@ -177,9 +188,57 @@ class Shittim(commands.Bot):
         else:
             logging.info("スラッシュコマンドの同期は設定で無効化されています。")
 
+        # --- エラーハンドラを登録 (追加) ---
+        self.tree.on_error = self.on_app_command_error
+
+    # --- グローバルエラーハンドラ (追加) ---
+    async def on_app_command_error(self, interaction: discord.Interaction, error: discord.app_commands.AppCommandError):
+        """スラッシュコマンドで発生したエラーをグローバルに処理する。"""
+        original_error = getattr(error, 'original', error)
+
+        # ログ出力は常に行う
+        logging.error(f"コマンド '{interaction.command.name}' でエラーが発生しました。", exc_info=error)
+
+        # カスタムエラーの処理
+        if isinstance(original_error, (InvalidDiceNotationError, DiceValueError)):
+            error_message = f"エラー: {original_error.message}"
+            try:
+                if not interaction.response.is_done():
+                    await interaction.response.send_message(error_message, ephemeral=False)
+                else:
+                    await interaction.followup.send(error_message, ephemeral=False)
+            except discord.HTTPException as e:
+                logging.error(f"エラーメッセージの送信に失敗しました: {e}")
+            return
+
+        # 権限エラーの処理
+        if isinstance(error, discord.app_commands.MissingPermissions):
+            error_message = "エラー: このコマンドを実行する権限がありません。\nError: You do not have the required permissions to run this command."
+            try:
+                if not interaction.response.is_done():
+                    await interaction.response.send_message(error_message, ephemeral=False)
+                else:
+                    await interaction.followup.send(error_message, ephemeral=False)
+            except discord.HTTPException as e:
+                logging.error(f"権限エラーメッセージの送信に失敗しました: {e}")
+            return
+
+        # その他の予期しないエラー
+        try:
+            error_message = (
+                "コマンドの実行中に予期しないエラーが発生しました。開発者に連絡してください。\n"
+                "An unexpected error occurred while executing the command. Please contact the developer."
+            )
+            if not interaction.response.is_done():
+                await interaction.response.send_message(error_message, ephemeral=False)
+            else:
+                await interaction.followup.send(error_message, ephemeral=False)
+        except discord.HTTPException as e:
+            logging.error(f"最終的なエラーメッセージの送信に失敗しました: {e}")
+
     @tasks.loop(seconds=10)
     async def rotate_status(self):
-        """10秒ごとにボットのステータスをローテーションさせるタスク（モバイル表示を維持）"""
+        """10秒ごとにボットのステータスをローテーションさせるタスク"""
         if not self.status_templates:
             return
         current_template = self.status_templates[self.status_index]
@@ -202,7 +261,6 @@ class Shittim(commands.Bot):
         else:
             activity = discord.Activity(type=selected_activity_type, name=status_text)
         try:
-            # モバイルステータスを維持するために、WebSocketを通じて直接プレゼンスを更新
             if self.ws:
                 await self.ws.send_as_json({
                     'op': 3,  # STATUS_UPDATE
@@ -214,7 +272,6 @@ class Shittim(commands.Bot):
                     }
                 })
             else:
-                # フォールバック: 通常の方法
                 await self.change_presence(activity=activity, status=discord.Status.online)
         except Exception as e:
             logging.error(f"ステータスの更新中にエラーが発生しました: {e}", exc_info=True)
@@ -301,32 +358,31 @@ if __name__ == "__main__":
             except Exception as e_copy_main:
                 print(
                     f"CRITICAL: メイン実行: {DEFAULT_CONFIG_FILE} から {CONFIG_FILE} のコピー中にエラー: {e_copy_main}")
-                exit(1)
+                sys.exit(1)
         with open(CONFIG_FILE, 'r', encoding='utf-8') as f_main_init:
             initial_config = yaml.safe_load(f_main_init)
             if not initial_config or not isinstance(initial_config, dict):
                 print(f"CRITICAL: メイン実行: {CONFIG_FILE} が空または無効な形式です。")
-                exit(1)
+                sys.exit(1)
     except Exception as e_main:
         print(f"CRITICAL: メイン実行: {CONFIG_FILE} の読み込みまたは解析中にエラー: {e_main}。")
-        exit(1)
+        sys.exit(1)
 
     bot_token_val = initial_config.get('bot_token')
     if not bot_token_val or bot_token_val == "YOUR_BOT_TOKEN_HERE":
         print(f"CRITICAL: {CONFIG_FILE}にbot_tokenが未設定か無効、またはプレースホルダのままです。")
-        exit(1)
+        sys.exit(1)
 
     # 特権インテントを回避した基本的なインテント設定
     intents = discord.Intents.default()
-    # 必要な非特権インテントのみ有効化
     intents.guilds = True
-    intents.guild_messages = True  # メッセージイベントを受信するために必要
-    intents.dm_messages = True  # DMも受信する場合
+    intents.guild_messages = True
+    intents.dm_messages = True
     intents.voice_states = True
-    # 特権インテント（メッセージ内容、メンバー、プレゼンス）は無効のまま
-    intents.message_content = False  # 特権インテント - 無効（メンション検出には不要）
-    intents.members = False  # 特権インテント - 無効
-    intents.presences = False  # 特権インテント - 無効
+    # 特権インテントは無効のまま
+    intents.message_content = False
+    intents.members = False
+    intents.presences = False
 
     allowed_mentions = discord.AllowedMentions(everyone=False, users=True, roles=False, replied_user=True)
 
@@ -345,3 +401,4 @@ if __name__ == "__main__":
     except Exception as e:
         logging.critical(f"ボットの実行中に致命的なエラーが発生しました: {e}", exc_info=True)
         print(f"CRITICAL: ボットの実行中に致命的なエラーが発生しました: {e}")
+        sys.exit(1)
