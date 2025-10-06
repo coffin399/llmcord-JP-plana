@@ -1213,7 +1213,7 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, self._generate_map_sync, quakes, min_scale, hours)
 
-    def _generate_map_sync(self, quakes: list, min_scale: Optional[str], hours: int) -> io.BytesIO:
+    def _generate_map_sync(self, quakes: list, min_scale: Optional[str], hours: Optional[int]) -> io.BytesIO:
         """地震マップ画像を同期的に生成"""
         # 日本の範囲
         fig, ax = plt.subplots(figsize=(10, 12), dpi=100)
@@ -1231,7 +1231,10 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
         ax.set_ylabel('緯度 (°N)', fontsize=10)
 
         # タイトル
-        title = f'地震発生地点マップ（過去{hours}時間、{len(quakes)}件）'
+        if hours is not None:
+            title = f'地震発生地点マップ（過去{hours}時間、{len(quakes)}件）'
+        else:
+            title = f'地震発生地点マップ（{len(quakes)}件）'
         if min_scale:
             title += f'\n最小震度: {min_scale}'
         ax.set_title(title, fontsize=14, fontweight='bold', pad=20)
@@ -1356,6 +1359,32 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
                 await interaction.followup.send(f"ℹ️ 該当する地震情報{filter_text}が見つかりませんでした。")
                 return
 
+            # 地図用データを準備（座標がある地震のみ）
+            map_quakes = []
+            for quake in filtered_quakes:
+                earthquake = quake.get('earthquake', {})
+                hypocenter = earthquake.get('hypocenter', {})
+                issue = quake.get('issue', {})
+
+                lat = hypocenter.get('latitude')
+                lon = hypocenter.get('longitude')
+
+                if lat is not None and lon is not None:
+                    max_scale = earthquake.get('maxScale', -1)
+                    quake_time = self.parse_earthquake_time(earthquake.get('time', ''), issue.get('time', ''))
+                    magnitude = hypocenter.get('magnitude', -1)
+                    depth = hypocenter.get('depth', -1)
+
+                    map_quakes.append({
+                        'lat': lat,
+                        'lon': lon,
+                        'magnitude': magnitude,
+                        'depth': depth,
+                        'max_scale': max_scale,
+                        'name': hypocenter.get('name', '不明'),
+                        'time': quake_time
+                    })
+
             # Embedを作成
             embed = discord.Embed(
                 title=f"📊 最近の地震情報 ({len(filtered_quakes)}件)",
@@ -1398,7 +1427,19 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
             embed.set_footer(text="データ提供: P2P地震情報 API | PLANA by coffin299")
             embed.set_thumbnail(url="https://www.p2pquake.net/images/QuakeLogo_100x100.png")
 
-            await interaction.followup.send(embed=embed)
+            # 地図画像を生成（座標情報がある地震が存在する場合）
+            if map_quakes and MATPLOTLIB_AVAILABLE:
+                try:
+                    map_buffer = await self.generate_earthquake_map(map_quakes, min_scale, None)
+                    map_file = discord.File(fp=map_buffer, filename="earthquake_history_map.png")
+                    embed.set_image(url="attachment://earthquake_history_map.png")
+                    await interaction.followup.send(embed=embed, file=map_file)
+                except Exception as e:
+                    logger.warning(f"履歴地図生成に失敗: {e}")
+                    # 地図生成失敗時はテキストのみ送信
+                    await interaction.followup.send(embed=embed)
+            else:
+                await interaction.followup.send(embed=embed)
 
         except (APIError, DataParsingError) as e:
             logger.error(f"履歴取得エラー: {e}")
