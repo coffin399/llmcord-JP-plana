@@ -62,68 +62,8 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
         try:
             # ディレクトリのパスを取得
             dir_path = os.path.dirname(self.logging_channels_file)
-            # ディレクトリが存在しない場合は作成 (修正点)
+            # ディレクトリが存在しない場合は作成
             os.makedirs(dir_path, exist_ok=True)
-            with open(self.logging_channels_file, 'w') as f:
-                json.dump(channel_ids, f, indent=4)
-        except IOError as e:
-            logger.error(f"ロギングチャンネル設定ファイルの保存に失敗しました: {e}")
-
-    def _get_discord_log_handler(self) -> Optional[Any]:
-        root_logger = logging.getLogger()
-        for handler in root_logger.handlers:
-            if handler.__class__.__name__ == 'DiscordLogHandler':
-                return handler
-        return None
-
-    async def cog_unload(self) -> None:
-        await self.session.close()
-
-    def _load_logging_channels(self) -> List[int]:
-        if os.path.exists(self.logging_channels_file):
-            try:
-                with open(self.logging_channels_file, 'r') as f:
-                    data = json.load(f)
-                    if isinstance(data, list) and all(isinstance(i, int) for i in data):
-                        return data
-            except (json.JSONDecodeError, IOError) as e:
-                logger.error(f"ロギングチャンネル設定ファイルの読み込みに失敗しました: {e}")
-        return []
-
-    def _save_logging_channels(self, channel_ids: List[int]) -> None:
-        try:
-            # ディレクトリのパスを取得
-            dir_path = os.path.dirname(self.logging_channels_file)
-            # ディレクトリが存在しない場合は作成 (修正点)
-            os.makedirs(dir_path, exist_ok=True)
-            with open(self.logging_channels_file, 'w') as f:
-                json.dump(channel_ids, f, indent=4)
-        except IOError as e:
-            logger.error(f"ロギングチャンネル設定ファイルの保存に失敗しました: {e}")
-
-    def _get_discord_log_handler(self) -> Optional[Any]:
-        root_logger = logging.getLogger()
-        for handler in root_logger.handlers:
-            if handler.__class__.__name__ == 'DiscordLogHandler':
-                return handler
-        return None
-
-    async def cog_unload(self) -> None:
-        await self.session.close()
-
-    def _load_logging_channels(self) -> List[int]:
-        if os.path.exists(self.logging_channels_file):
-            try:
-                with open(self.logging_channels_file, 'r') as f:
-                    data = json.load(f)
-                    if isinstance(data, list) and all(isinstance(i, int) for i in data):
-                        return data
-            except (json.JSONDecodeError, IOError) as e:
-                logger.error(f"ロギングチャンネル設定ファイルの読み込みに失敗しました: {e}")
-        return []
-
-    def _save_logging_channels(self, channel_ids: List[int]) -> None:
-        try:
             with open(self.logging_channels_file, 'w') as f:
                 json.dump(channel_ids, f, indent=4)
         except IOError as e:
@@ -271,7 +211,6 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
     async def check(self, interaction: discord.Interaction, expression: str, condition: Optional[str] = None,
                     target: Optional[int] = None):
         if (condition is None and target is not None) or (condition is not None and target is None):
-            # ephemeral=False に変更
             await interaction.response.send_message(
                 "エラー: 判定を行うには、`条件`と`目標値`の両方を指定してください。\nError: To perform a check, you must specify both a `condition` and a `target` number.",
                 ephemeral=False)
