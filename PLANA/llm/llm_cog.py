@@ -444,8 +444,9 @@ class LLMCog(commands.Cog, name="LLM"):
         update_interval = 0.5
         min_update_chars = 15
         retry_sleep_time = 2.0
-        placeholder = ":incoming_envelope: Thinking..."
+        placeholder = ":incoming_envelope: Thinking... :incoming_envelope:"
         emoji_prefix = ":incoming_envelope: "
+        emoji_suffix = " :incoming_envelope:"
         logger.info(f"🔵 [STREAMING] Starting LLM stream | {log_context}")
 
         try:
@@ -475,8 +476,10 @@ class LLMCog(commands.Cog, name="LLM"):
                 )
 
                 if should_update and full_response_text:
-                    # ストリーミング中は絵文字をプレフィックスとして追加
-                    display_text = emoji_prefix + full_response_text[:DISCORD_MESSAGE_MAX_LENGTH - len(emoji_prefix)]
+                    # ストリーミング中は絵文字を前後に追加
+                    emoji_suffix = " :incoming_envelope:"
+                    max_content_length = DISCORD_MESSAGE_MAX_LENGTH - len(emoji_prefix) - len(emoji_suffix)
+                    display_text = emoji_prefix + full_response_text[:max_content_length] + emoji_suffix
 
                     if display_text != sent_message.content:
                         try:
