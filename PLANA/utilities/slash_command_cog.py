@@ -23,7 +23,7 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
         self.bot = bot
         self.session = aiohttp.ClientSession()
         # 保存先を data/json/ に変更
-        self.logging_channels_file = "data/json/logging_channels.json"
+        self.logging_channels_file = "data/logging_channels.json"
 
         # configから必要な値を取得
         self.arona_repository = self.bot.config.get("arona_repository_url",
@@ -514,11 +514,11 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
                     commits: List[Dict[str, Any]] = await response.json()
                     embed = discord.Embed(
                         title="📜 アップデート履歴 / Update History",
-                        description=f"最新のコミット30件を表示しています。\nShowing the 30 most recent commits from the [{repo}]({self.plana_repository}) repository.",
+                        description=f"最新のコミット25件を表示しています。\nShowing the 30 most recent commits from the [{repo}]({self.plana_repository}) repository.",
                         color=discord.Color.blue()
                     )
 
-                    for commit_data in commits[:30]:
+                    for commit_data in commits[:25]:
                         sha = commit_data['sha'][:7]
                         message = commit_data['commit']['message'].split('\n')[0]
                         author = commit_data['commit']['author']['name']
