@@ -7,14 +7,15 @@ import shutil
 import sys
 import json
 
-from PLANA.services.discord_handler import DiscordLogHandler
-from PLANA.utilities.error.errors import InvalidDiceNotationError, DiceValueError
 # --- ロギング設定の初期化 ---
 logging.getLogger('discord').setLevel(logging.WARNING)
 logging.getLogger('openai').setLevel(logging.WARNING)
 logging.getLogger('google.generativeai').setLevel(logging.WARNING)
 logging.getLogger('google.ai').setLevel(logging.WARNING)
 logging.getLogger('httpx').setLevel(logging.WARNING)
+
+from PLANA.services.discord_handler import DiscordLogHandler
+from PLANA.utilities.error.errors import InvalidDiceNotationError, DiceValueError
 
 CONFIG_FILE = 'config.yaml'
 DEFAULT_CONFIG_FILE = 'config.default.yaml'
