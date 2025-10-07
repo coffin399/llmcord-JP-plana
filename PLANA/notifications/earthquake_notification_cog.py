@@ -315,14 +315,17 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
 
     async def initialize_processed_ids(self):
         logger.info("🔍 最新情報のIDを初期化中...")
-        for code in [551, 552]:
-            try:
-                url = f"{self.api_base_url}/history?codes={code}&limit=100"
-                data = await self.safe_api_request(url)
-                if not (data and isinstance(data, list)):
-                    continue
 
-                latest_ids = {it.value: None for it in InfoType if it != InfoType.UNKNOWN}
+        # code 551 (地震情報・緊急地震速報)
+        try:
+            url = f"{self.api_base_url}/history?codes=551&limit=100"
+            logger.info(f"📡 地震情報取得: {url}")
+            data = await self.safe_api_request(url)
+
+            if data and isinstance(data, list):
+                logger.info(f"✅ 地震情報を{len(data)}件取得")
+                latest_eew_id = None
+                latest_quake_id = None
 
                 for item in data:
                     item_id = self.extract_id_safe(item)
@@ -330,19 +333,73 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
                         continue
 
                     info_type = self.classify_info_type(item)
-                    if info_type != InfoType.UNKNOWN:
-                        self.processed_ids[info_type.value].add(item_id)
-                        if latest_ids[info_type.value] is None:
-                            latest_ids[info_type.value] = item_id
 
-                for it, lid in latest_ids.items():
-                    if lid:
-                        self.last_ids[it] = lid
+                    if info_type == InfoType.EEW:
+                        self.processed_ids[InfoType.EEW.value].add(item_id)
+                        if latest_eew_id is None:
+                            latest_eew_id = item_id
+                            logger.info(f"  EEW最新ID: {item_id[:12]}...")
+                    elif info_type == InfoType.QUAKE:
+                        self.processed_ids[InfoType.QUAKE.value].add(item_id)
+                        if latest_quake_id is None:
+                            latest_quake_id = item_id
+                            logger.info(f"  QUAKE最新ID: {item_id[:12]}...")
 
-            except (APIError, DataParsingError) as e:
-                logger.error(f"❌ Code {code} のID初期化に失敗: {e}")
-            except Exception as e:
-                self.exception_handler.log_generic_error(e, f"Code {code} のID初期化")
+                if latest_eew_id:
+                    self.last_ids[InfoType.EEW.value] = latest_eew_id
+                if latest_quake_id:
+                    self.last_ids[InfoType.QUAKE.value] = latest_quake_id
+            else:
+                logger.warning("⚠️ 地震情報の取得結果が空です")
+
+        except (APIError, DataParsingError) as e:
+            logger.error(f"❌ 地震情報(code 551)のID初期化に失敗: {e}")
+        except Exception as e:
+            self.exception_handler.log_generic_error(e, "地震情報(code 551)のID初期化")
+
+        # code 552 (津波情報)
+        try:
+            url = f"{self.api_base_url}/history?codes=552&limit=100"
+            logger.info(f"📡 津波情報取得: {url}")
+            data = await self.safe_api_request(url)
+
+            if data and isinstance(data, list):
+                logger.info(f"✅ 津波情報を{len(data)}件取得")
+
+                # 最初の数件のデータ構造を確認
+                if len(data) > 0:
+                    sample = data[0]
+                    logger.debug(f"  津波情報サンプル keys: {list(sample.keys())}")
+                    logger.debug(
+                        f"  津波情報サンプル _id: {sample.get('_id')}, id: {sample.get('id')}, code: {sample.get('code')}")
+
+                latest_tsunami_id = None
+
+                for idx, item in enumerate(data):
+                    item_id = self.extract_id_safe(item)
+                    if not item_id:
+                        if idx < 3:  # 最初の3件のみ詳細ログ
+                            logger.warning(f"  津波情報[{idx}]のID抽出失敗: keys={list(item.keys())}")
+                        continue
+
+                    # code 552は常にTSUNAMI
+                    if item.get('code') == 552:
+                        self.processed_ids[InfoType.TSUNAMI.value].add(item_id)
+                        if latest_tsunami_id is None:
+                            latest_tsunami_id = item_id
+                            logger.info(f"  TSUNAMI最新ID: {item_id[:12]}...")
+
+                if latest_tsunami_id:
+                    self.last_ids[InfoType.TSUNAMI.value] = latest_tsunami_id
+                else:
+                    logger.warning("⚠️ 津波情報のIDが1件も取得できませんでした（過去に津波予報がない可能性があります）")
+            else:
+                logger.warning("⚠️ 津波情報の取得結果が空です（過去に津波予報がない可能性があります）")
+
+        except (APIError, DataParsingError) as e:
+            logger.error(f"❌ 津波情報(code 552)のID初期化に失敗: {e}")
+        except Exception as e:
+            self.exception_handler.log_generic_error(e, "津波情報(code 552)のID初期化")
 
         logger.info("🔍 ID初期化結果:")
         for it, lid in self.last_ids.items():
