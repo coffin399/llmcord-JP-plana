@@ -218,7 +218,7 @@ class DiscordLogHandler(logging.Handler):
         # ログブロック単位でチャンクを作成する
         chunks = []
         current_chunk = ""
-        CHUNK_LIMIT = 1000
+        CHUNK_LIMIT = 1900
 
         for record in records:
             # 各ログを個別のコードブロックで囲む
