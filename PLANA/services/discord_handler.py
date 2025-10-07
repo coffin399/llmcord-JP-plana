@@ -90,21 +90,21 @@ class DiscordLogHandler(logging.Handler):
 
         # LLMCog形式: guild='サーバー名(ID)' -> guild='サー****(****)'
         message = re.sub(
-            r"guild='(.*?)'\(\d+\)'",
+            r"guild='([^']+)\((\d+)\)'",
             lambda m: f"guild='{m.group(1)[:2]}****(****)'",
             message
         )
 
         # LLMCog形式: author='ユーザー名(ID)' -> author='ユー****(****)'
         message = re.sub(
-            r"author='(.*?)'\(\d+\)'",
+            r"author='([^']+)\((\d+)\)'",
             lambda m: f"author='{m.group(1)[:2]}****(****)'",
             message
         )
 
         # LLMCog形式: channel='チャンネル名(ID)' -> channel='チ****(****)'
         message = re.sub(
-            r"channel='(.*?)'\(\d+\)'",
+            r"channel='([^']+)\((\d+)\)'",
             lambda m: f"channel='{m.group(1)[:2]}****(****)'",
             message
         )
