@@ -301,10 +301,7 @@ class LLMCog(commands.Cog, name="LLM"):
             if not current_msg or current_msg.id in visited_ids:
                 break
 
-            # ▼▼▼ LOGGING MODIFICATION ▼▼▼
-            # Detailed scan logs are moved to DEBUG level to reduce noise.
             logger.debug(f"🔵 [IMAGE] Scanning message ID: {current_msg.id} (Depth: {i + 1})")
-            # ▲▲▲ LOGGING MODIFICATION ▲▲▲
             messages_to_scan.append(current_msg)
             visited_ids.add(current_msg.id)
 
@@ -325,13 +322,11 @@ class LLMCog(commands.Cog, name="LLM"):
 
         # Process collected messages in chronological order
         for msg in reversed(messages_to_scan):
-            # ▼▼▼ BUG FIX (Retained from previous answer) ▼▼▼
             # Only collect text content from messages sent by users, not the bot itself.
             if msg.author != self.bot.user:
                 text_content_part = IMAGE_URL_PATTERN.sub('', msg.content).strip()
                 if text_content_part:
                     text_parts.append(text_content_part)
-            # ▲▲▲ BUG FIX ▲▲▲
 
             # Image URLs are collected from all messages for context.
             for url in IMAGE_URL_PATTERN.findall(msg.content):
@@ -374,14 +369,16 @@ class LLMCog(commands.Cog, name="LLM"):
 
         clean_text = "\n".join(text_parts)
 
-        # ▼▼▼ LOGGING MODIFICATION ▼▼▼
-        # Add a summary log at the end of the process.
+        # INFOレベルで概要ログを出力
         logger.info(
             f"🔵 [IMAGE] Scan complete for message {message.id}. "
             f"Scanned {len(messages_to_scan)} messages, found {len(source_urls)} image URLs. "
             f"Collected {len(clean_text)} chars of user text."
         )
-        # ▲▲▲ LOGGING MODIFICATION ▲▲▲
+
+        # DEBUGレベルで収集したテキストの具体的な内容を出力
+        if clean_text:
+            logger.debug(f"🔵 [IMAGE] Collected text content:\n---\n{clean_text}\n---")
 
         return image_inputs, clean_text
 
