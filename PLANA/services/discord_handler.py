@@ -62,6 +62,7 @@ class DiscordLogHandler(logging.Handler):
         except asyncio.QueueFull:
             print("DiscordLogHandler: Log queue is full, dropping message.")
 
+
     def _sanitize_log_message(self, message: str) -> str:
         """
         ログメッセージからセンシティブな情報を部分的に伏字化する。
