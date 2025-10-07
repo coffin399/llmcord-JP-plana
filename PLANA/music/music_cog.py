@@ -766,46 +766,123 @@ class MusicCog(commands.Cog, name="music_cog"):
                 embed.set_footer(text=f"ページ {page_num}/{total_pages}")
             return embed
 
-        current_page = 1
-        await interaction.response.send_message(embed=await get_page_embed(current_page))
-        if total_pages <= 1:
-            return
+        def get_queue_view(current_page: int, total_pages: int, user_id: int):
+            """キュー操作用のボタンビューを作成"""
+            view = discord.ui.View(timeout=60.0)
 
-        message = await interaction.original_response()
-        controls = ["⏪", "◀️", "▶️", "⏩", "⏹️"]
-        for control in controls:
-            await message.add_reaction(control)
+            # First Page ボタン
+            first_button = discord.ui.Button(
+                style=discord.ButtonStyle.primary,
+                emoji="⏪",
+                label="First",
+                disabled=(current_page == 1)
+            )
 
-        def check(reaction, user):
-            return user == interaction.user and str(reaction.emoji) in controls and reaction.message.id == message.id
-
-        while True:
-            try:
-                reaction, user = await self.bot.wait_for("reaction_add", timeout=60.0, check=check)
-                emoji = str(reaction.emoji)
-                new_page = (1 if emoji == "⏪" else
-                            max(1, current_page - 1) if emoji == "◀️" else
-                            min(total_pages, current_page + 1) if emoji == "▶️" else
-                            total_pages if emoji == "⏩" else None)
-
-                if emoji == "⏹️":
-                    await message.clear_reactions()
+            async def first_callback(button_interaction: discord.Interaction):
+                if button_interaction.user.id != user_id:
+                    await button_interaction.response.send_message("このボタンは使用できません。", ephemeral=True)
                     return
+                nonlocal current_page
+                current_page = 1
+                await button_interaction.response.edit_message(
+                    embed=await get_page_embed(current_page),
+                    view=get_queue_view(current_page, total_pages, user_id)
+                )
 
-                if new_page is not None and new_page != current_page:
-                    current_page = new_page
-                    await message.edit(embed=await get_page_embed(current_page))
+            first_button.callback = first_callback
+            view.add_item(first_button)
 
-                try:
-                    await message.remove_reaction(reaction, user)
-                except discord.Forbidden:
-                    pass
-            except asyncio.TimeoutError:
-                try:
-                    await message.clear_reactions()
-                except:
-                    pass
-                break
+            # Previous ボタン
+            prev_button = discord.ui.Button(
+                style=discord.ButtonStyle.primary,
+                emoji="◀️",
+                label="Previous",
+                disabled=(current_page == 1)
+            )
+
+            async def prev_callback(button_interaction: discord.Interaction):
+                if button_interaction.user.id != user_id:
+                    await button_interaction.response.send_message("このボタンは使用できません。", ephemeral=True)
+                    return
+                nonlocal current_page
+                current_page = max(1, current_page - 1)
+                await button_interaction.response.edit_message(
+                    embed=await get_page_embed(current_page),
+                    view=get_queue_view(current_page, total_pages, user_id)
+                )
+
+            prev_button.callback = prev_callback
+            view.add_item(prev_button)
+
+            # Stop ボタン
+            stop_button = discord.ui.Button(
+                style=discord.ButtonStyle.danger,
+                emoji="⏹️",
+                label="Close"
+            )
+
+            async def stop_callback(button_interaction: discord.Interaction):
+                if button_interaction.user.id != user_id:
+                    await button_interaction.response.send_message("このボタンは使用できません。", ephemeral=True)
+                    return
+                view.stop()
+                await button_interaction.response.edit_message(view=None)
+
+            stop_button.callback = stop_callback
+            view.add_item(stop_button)
+
+            # Next ボタン
+            next_button = discord.ui.Button(
+                style=discord.ButtonStyle.primary,
+                emoji="▶️",
+                label="Next",
+                disabled=(current_page == total_pages)
+            )
+
+            async def next_callback(button_interaction: discord.Interaction):
+                if button_interaction.user.id != user_id:
+                    await button_interaction.response.send_message("このボタンは使用できません。", ephemeral=True)
+                    return
+                nonlocal current_page
+                current_page = min(total_pages, current_page + 1)
+                await button_interaction.response.edit_message(
+                    embed=await get_page_embed(current_page),
+                    view=get_queue_view(current_page, total_pages, user_id)
+                )
+
+            next_button.callback = next_callback
+            view.add_item(next_button)
+
+            # Last Page ボタン
+            last_button = discord.ui.Button(
+                style=discord.ButtonStyle.primary,
+                emoji="⏩",
+                label="Last",
+                disabled=(current_page == total_pages)
+            )
+
+            async def last_callback(button_interaction: discord.Interaction):
+                if button_interaction.user.id != user_id:
+                    await button_interaction.response.send_message("このボタンは使用できません。", ephemeral=True)
+                    return
+                nonlocal current_page
+                current_page = total_pages
+                await button_interaction.response.edit_message(
+                    embed=await get_page_embed(current_page),
+                    view=get_queue_view(current_page, total_pages, user_id)
+                )
+
+            last_button.callback = last_callback
+            view.add_item(last_button)
+
+            return view
+
+        current_page = 1
+        if total_pages <= 1:
+            await interaction.response.send_message(embed=await get_page_embed(current_page))
+        else:
+            view = get_queue_view(current_page, total_pages, interaction.user.id)
+            await interaction.response.send_message(embed=await get_page_embed(current_page), view=view)
 
     @app_commands.command(name="nowplaying", description="現在再生中の曲の情報を表示します。")
     async def nowplaying_slash(self, interaction: discord.Interaction):
