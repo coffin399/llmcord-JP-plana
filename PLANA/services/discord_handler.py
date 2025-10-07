@@ -9,7 +9,6 @@ from typing import List
 from discord import Client, TextChannel
 
 
-# ▼▼▼ 変更点 1: FormatterをANSIカラーコード対応に大幅改修 ▼▼▼
 class DiscordLogFormatter(logging.Formatter):
     """
     ログレベルに応じてANSIエスケープコードを使い、文字色を変更するフォーマッター。
@@ -35,8 +34,6 @@ class DiscordLogFormatter(logging.Formatter):
         """
         log_message = super().format(record)
         color = self.COLOR_MAP.get(record.levelno, self.WHITE)
-
-        # メッセージ全体をカラーコードで囲み、最後にリセットコードを付与
         return f"{color}{log_message}{self.RESET}"
 
 
@@ -59,7 +56,6 @@ class DiscordLogHandler(logging.Handler):
         self._task = self.bot.loop.create_task(self._log_sender_loop())
 
     def add_channel(self, channel_id: int):
-        """ログ送信先チャンネルを動的に追加し、即時反映させる。"""
         if channel_id not in self.channel_ids:
             self.channel_ids.append(channel_id)
             if self.bot.is_ready():
@@ -75,20 +71,15 @@ class DiscordLogHandler(logging.Handler):
                 print(f"DiscordLogHandler: Added channel ID {channel_id}. Will be activated once bot is ready.")
 
     def remove_channel(self, channel_id: int):
-        """ログ送信先チャンネルを動的に削除し、即時反映させる。"""
         if channel_id in self.channel_ids:
             self.channel_ids.remove(channel_id)
             self.channels = [ch for ch in self.channels if ch.id != channel_id]
             print(f"DiscordLogHandler: Immediately removed and deactivated channel {channel_id}.")
 
     def emit(self, record: logging.LogRecord):
-        """
-        ログレコードをフォーマットし、センシティブ情報を伏字化してキューに追加する。
-        """
         if self._closed:
             return
         msg = self.format(record)
-        # サニタイズはカラーコードを適用した後に行う
         msg = self._sanitize_log_message(msg)
         try:
             self.queue.put_nowait(msg)
@@ -96,18 +87,11 @@ class DiscordLogHandler(logging.Handler):
             print("DiscordLogHandler: Log queue is full, dropping message.")
 
     def _get_display_chars(self, text: str, count: int = 2) -> str:
-        """
-        テキストから表示用の文字を取得する。
-        引用符や記号を除外して、実際の文字（英数字、日本語など）から指定数を取得。
-        """
         cleaned = re.sub(r'^[「『"\'『»«‹›〈〉《》【】〔〕［］｛｝（）()［］\s]+', '', text)
         return cleaned[:count] if len(cleaned) >= count else text[:count]
 
     def _sanitize_log_message(self, message: str) -> str:
-        """
-        ログメッセージからセンシティブな情報を部分的に伏字化する。
-        (このメソッドの中身は変更ありません)
-        """
+        # (このメソッドの中身は変更ありません)
         # Windowsユーザーパス
         message = re.sub(
             r'[A-Za-z]:\\Users\\[^\\]+\\[^\\]+',
@@ -115,10 +99,9 @@ class DiscordLogHandler(logging.Handler):
             message,
             flags=re.IGNORECASE
         )
-        # (以下、他の正規表現置換は省略... 元のコードと同じです)
         # Session ID
         message = re.sub(
-            r'((?:Session ID:?|session)\s+)[a-f0-9]{32}',
+            r'((?:Session ID:?|session)\s+)[a-f09]{32}',
             r'\1****',
             message,
             flags=re.IGNORECASE
@@ -198,11 +181,16 @@ class DiscordLogHandler(logging.Handler):
         )
         return message
 
+    # ▼▼▼ このメソッドを全面的に改修しました ▼▼▼
     async def _process_queue(self):
-        """キューに溜まったログを全て取り出し、結合して登録済みの全チャンネルに送信する。"""
+        """
+        キューに溜まったログを全て取り出し、個別のコードブロックに整形。
+        文字数制限を考慮してチャンクに分割し、全チャンネルに送信する。
+        """
         if self.queue.empty():
             return
 
+        # チャンネルの存在確認と更新
         if not self.channels or len(self.channels) != len(self.channel_ids):
             found_channels = []
             for cid in self.channel_ids:
@@ -220,22 +208,52 @@ class DiscordLogHandler(logging.Handler):
                 self.queue.get_nowait()
             return
 
+        # キューから全てのログを取得
         records = []
         while not self.queue.empty():
             records.append(self.queue.get_nowait())
         if not records:
             return
 
-        full_log_message = "\n".join(records)
-        # ANSIコードは文字数にカウントされないため、chunk_sizeは少し余裕を持たせる
-        chunk_size = 1900
-        chunks = [full_log_message[i:i + chunk_size] for i in range(0, len(full_log_message), chunk_size)]
+        # ログブロック単位でチャンクを作成する
+        chunks = []
+        current_chunk = ""
+        CHUNK_LIMIT = 1000
 
+        for record in records:
+            # 各ログを個別のコードブロックで囲む
+            log_block = f"```ansi\n{record}\n```\n"
+
+            # 1つのログブロックが制限を超える場合は、強制的に分割する（レアケース）
+            if len(log_block) > CHUNK_LIMIT:
+                if current_chunk:
+                    chunks.append(current_chunk)
+                    current_chunk = ""
+                # ブロックの中身をさらに分割
+                for i in range(0, len(log_block), CHUNK_LIMIT):
+                    chunks.append(log_block[i:i + CHUNK_LIMIT])
+                continue
+
+            # 現在のチャンクに追記すると制限を超える場合は、新しいチャンクを開始
+            if len(current_chunk) + len(log_block) > CHUNK_LIMIT:
+                chunks.append(current_chunk)
+                current_chunk = log_block
+            else:
+                current_chunk += log_block
+
+        # 最後のチャンクを追加
+        if current_chunk:
+            chunks.append(current_chunk)
+
+        # 全てのチャンネルに、作成したチャンクを送信
         for channel in self.channels:
             for chunk in chunks:
+                if not chunk.strip():
+                    continue
                 try:
-                    # ▼▼▼ 変更点 2: "diff" から "ansi" に変更 ▼▼▼
-                    await channel.send(f"```ansi\n{chunk}\n```", silent=True)
+                    await channel.send(chunk, silent=True)
+                    # チャンク間の送信にわずかな遅延を入れ、レートリミットを回避
+                    await asyncio.sleep(0.2)
                 except Exception as e:
                     print(f"Failed to send log to Discord channel {channel.id}: {e}")
 
@@ -251,6 +269,7 @@ class DiscordLogHandler(logging.Handler):
         except Exception as e:
             print(f"Error in DiscordLogHandler loop: {e}")
         finally:
+            # ループ終了時に残っているログを送信
             await self._process_queue()
 
     def close(self):
@@ -260,9 +279,11 @@ class DiscordLogHandler(logging.Handler):
         self._closed = True
         if self._task:
             self._task.cancel()
+        # 同期的なコンテキストから非同期関数を安全に呼び出す
         if self.bot.loop.is_running():
             try:
                 future = asyncio.run_coroutine_threadsafe(self._process_queue(), self.bot.loop)
+                # タイムアウトを設定して待機
                 future.result(timeout=self.interval)
             except (asyncio.CancelledError, asyncio.TimeoutError, Exception) as e:
                 print(f"Error sending remaining logs on close: {e}")
