@@ -18,12 +18,12 @@ class DiscordLogFormatter(logging.Formatter):
     RESET = "\u001b[0m"
     RED = "\u001b[31m"
     YELLOW = "\u001b[33m"
-    GREEN = "\u001b[32m"
+    BLUE = "\u001b[34m"
     WHITE = "\u001b[37m"
 
     COLOR_MAP = {
         logging.DEBUG: WHITE,
-        logging.INFO: GREEN,
+        logging.INFO: BLUE,
         logging.WARNING: YELLOW,
         logging.ERROR: RED,
         logging.CRITICAL: RED,
