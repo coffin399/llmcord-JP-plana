@@ -82,10 +82,10 @@ class DiscordLogHandler(logging.Handler):
             flags=re.IGNORECASE
         )
 
-        # Session IDを伏字化
-        # 例: Session ID: fe20d79cddc2131565291210e72ce58c -> Session ID: ****
+        # Session IDを伏字化 (複数のパターンに対応)
+        # "Session ID: <ID>" や "... RESUMED session <ID>" の両方に対応
         message = re.sub(
-            r'(Session ID:?\s*)[a-f0-9]{32}',
+            r'((?:Session ID:?|session)\s+)[a-f0-9]{32}',
             r'\1****',
             message,
             flags=re.IGNORECASE
