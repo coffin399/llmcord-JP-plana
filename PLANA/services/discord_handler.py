@@ -128,6 +128,13 @@ class DiscordLogHandler(logging.Handler):
             message
         )
 
+        # BioManager形式: for user [ID] -> for user X****
+        message = re.sub(
+            r"(for user )(\d+)",
+            lambda m: f"{m.group(1)}{m.group(2)[:1]}****",
+            message
+        )
+
         # BioManager形式: Content: 'ユーザーbio' -> Content: 'ユ****'
         message = re.sub(
             r"(Content: ')([^']+)'",
