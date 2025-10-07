@@ -376,9 +376,8 @@ class LLMCog(commands.Cog, name="LLM"):
             f"Collected {len(clean_text)} chars of user text."
         )
 
-        # DEBUGレベルで収集したテキストの具体的な内容を出力
         if clean_text:
-            logger.debug(f"🔵 [IMAGE] Collected text content:\n---\n{clean_text}\n---")
+            logger.info(f"🔵 [IMAGE_TEXT] Text collected from image context:\n{clean_text}")
 
         return image_inputs, clean_text
 
@@ -406,13 +405,21 @@ class LLMCog(commands.Cog, name="LLM"):
             logger.error(f"Failed to get LLM client for channel {message.channel.id}: {e}", exc_info=True)
             await message.reply(self.exception_handler.handle_exception(e), silent=True)
             return
+
+        # 🔧 修正: 元のメッセージ内容を先にロギング
+        original_content = message.content.replace(f'<@!{self.bot.user.id}>', '').replace(f'<@{self.bot.user.id}>',
+                                                                                          '').strip()
+        logger.info(f"🔵 [RAW_INPUT] Original message content from user:\n{original_content}")
+
         image_contents, text_content = await self._prepare_multimodal_content(message)
         text_content = text_content.replace(f'<@!{self.bot.user.id}>', '').replace(f'<@{self.bot.user.id}>', '').strip()
+
         if not text_content and not image_contents:
             error_key = 'empty_reply' if is_reply_to_bot and not is_mentioned else 'empty_mention_reply'
-            default_msg = "何かお話しください。" if error_key == 'empty_reply' else "はい、何か御用でしょうか？"
+            default_msg = "何かお話しください。" if error_key == 'empty_reply' else "はい、何か御用でしょうか?"
             await message.reply(self.llm_config.get('error_msg', {}).get(error_key, default_msg), silent=True)
             return
+
         guild_log = f"guild='{message.guild.name}({message.guild.id})'" if message.guild else "guild='DM'"
         channel_log = f"channel='{message.channel.name}({message.channel.id})'" if hasattr(message.channel,
                                                                                            'name') and message.channel.name else f"channel(id)={message.channel.id}"
@@ -422,7 +429,8 @@ class LLMCog(commands.Cog, name="LLM"):
         model_in_use = llm_client.model_name_for_api_calls
         logger.info(
             f"📨 Received LLM request | {log_context} | model='{model_in_use}' | image_count={len(image_contents)} | is_reply={is_reply_to_bot}")
-        logger.info(f"🔵 [INPUT] User text content:\n{text_content}")
+
+        logger.info(f"🔵 [PROCESSED_INPUT] Final user text content (after image context extraction):\n{text_content}")
 
         thread_id = await self._get_conversation_thread_id(message)
 
