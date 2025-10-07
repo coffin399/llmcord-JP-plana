@@ -71,7 +71,7 @@ try:
         logger.info("✅ Cartopyが正常にインポートされました。地図機能が有効です。")
     except ImportError as e:
         CARTOPY_AVAILABLE = False
-        logger.warning(f"⚠️ Cartopyが見つかりません。地図機能は無効になります。")
+        logger.warning(f"⚠️ Cartopyが見つかりません。Visual C++ 再頒布可能パッケージがインストールされていない可能性があります。地図機能は無効になります。")
         logger.warning(f"   インストール: pip install cartopy")
         logger.warning(f"   または: python -m pip install cartopy")
         logger.error(f"   詳細エラー: {e}", exc_info=True)
