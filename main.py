@@ -14,7 +14,8 @@ logging.getLogger('google.generativeai').setLevel(logging.WARNING)
 logging.getLogger('google.ai').setLevel(logging.WARNING)
 logging.getLogger('httpx').setLevel(logging.WARNING)
 
-from PLANA.services.discord_handler import DiscordLogHandler
+# ▼▼▼ 変更点 1: DiscordLogFormatter をインポート ▼▼▼
+from PLANA.services.discord_handler import DiscordLogHandler, DiscordLogFormatter
 from PLANA.utilities.error.errors import InvalidDiceNotationError, DiceValueError
 
 CONFIG_FILE = 'config.yaml'
@@ -93,12 +94,16 @@ class Shittim(commands.Bot):
         # ================================================================
         # ===== ロギング設定 =============================================
         # ================================================================
-        log_format = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - [%(funcName)s] %(message)s')
+        # コンソール用のフォーマッター
+        console_log_format = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - [%(funcName)s] %(message)s')
+
         root_logger = logging.getLogger()
         root_logger.setLevel(logging.INFO)
-        root_logger.handlers = []
+        root_logger.handlers = []  # 既存のハンドラをクリア
+
+        # コンソールハンドラの設定
         console_handler = logging.StreamHandler()
-        console_handler.setFormatter(log_format)
+        console_handler.setFormatter(console_log_format)
         root_logger.addHandler(console_handler)
 
         log_channel_ids_from_config = self.config.get('log_channel_ids', [])
@@ -130,7 +135,11 @@ class Shittim(commands.Bot):
             try:
                 discord_handler = DiscordLogHandler(bot=self, channel_ids=all_log_channel_ids)
                 discord_handler.setLevel(logging.INFO)
-                discord_handler.setFormatter(log_format)
+
+                # Discordに送信するログ用のフォーマッターを新しく作成
+                discord_formatter = DiscordLogFormatter('%(asctime)s - %(levelname)s - [%(funcName)s] %(message)s')
+                discord_handler.setFormatter(discord_formatter)
+
                 root_logger.addHandler(discord_handler)
                 logging.info(f"DiscordへのロギングをチャンネルID {all_log_channel_ids} で有効化しました。")
             except Exception as e:
@@ -417,6 +426,7 @@ if __name__ == "__main__":
         cog_list = "\n".join([f"• `{ext}`" for ext in sorted(loaded_extensions)])
         await interaction.response.send_message(f"**ロード済みCog一覧** ({len(loaded_extensions)}個):\n{cog_list}",
                                                 ephemeral=False)
+
 
     try:
         bot_instance.run(bot_token_val)

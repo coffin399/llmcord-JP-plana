@@ -1,3 +1,5 @@
+# PLANA/services/discord_handler.py
+
 import asyncio
 import logging
 import re
@@ -5,6 +7,42 @@ from asyncio import Queue
 from typing import List
 
 from discord import Client, TextChannel
+
+
+# 新しく追加するFormatterクラス
+class DiscordLogFormatter(logging.Formatter):
+    """
+    ログレベルに応じてdiff形式の接頭辞を付与するフォーマッター。
+    - INFO: 緑 (+)
+    - WARNING: オレンジ (!)
+    - ERROR/CRITICAL: 赤 (-)
+    - DEBUG: グレー (#)
+    """
+    PREFIX_MAP = {
+        logging.DEBUG: "# ",
+        logging.INFO: "+ ",
+        logging.WARNING: "! ",
+        logging.ERROR: "- ",
+        logging.CRITICAL: "- ",
+    }
+
+    def format(self, record: logging.LogRecord) -> str:
+        """
+        元のログメッセージをフォーマットし、各行に適切な接頭辞を付与する。
+        """
+        # 親クラスのformatメソッドを呼び出して、基本的なログ文字列を生成
+        log_message = super().format(record)
+
+        # ログレベルに対応する接頭辞を取得
+        prefix = self.PREFIX_MAP.get(record.levelno, "")
+
+        # 複数行のログ（トレースバックなど）に対応するため、各行の先頭に接頭辞を付与
+        if prefix:
+            lines = log_message.split('\n')
+            prefixed_lines = [f"{prefix}{line}" for line in lines]
+            return '\n'.join(prefixed_lines)
+
+        return log_message
 
 
 class DiscordLogHandler(logging.Handler):
@@ -61,7 +99,6 @@ class DiscordLogHandler(logging.Handler):
         except asyncio.QueueFull:
             print("DiscordLogHandler: Log queue is full, dropping message.")
 
-
     def _get_display_chars(self, text: str, count: int = 2) -> str:
         """
         テキストから表示用の文字を取得する。
@@ -74,11 +111,7 @@ class DiscordLogHandler(logging.Handler):
     def _sanitize_log_message(self, message: str) -> str:
         """
         ログメッセージからセンシティブな情報を部分的に伏字化する。
-        - Windowsのユーザーパス
-        - Discord Gateway Session ID
-        - Discordのサーバー名、ユーザー名、チャンネル名 (先頭文字のみ表示)
-        - Discordの各種ID (完全に伏字化または部分的に伏字化)
-        - ユーザーbioの内容
+        (このメソッドの中身は変更ありません)
         """
         # Windowsユーザーパス
         message = re.sub(
@@ -218,7 +251,8 @@ class DiscordLogHandler(logging.Handler):
         for channel in self.channels:
             for chunk in chunks:
                 try:
-                    await channel.send(f"```py\n{chunk}\n```", silent=True)
+                    # ▼▼▼ ここを変更しました！ ▼▼▼
+                    await channel.send(f"```diff\n{chunk}\n```", silent=True)
                 except Exception as e:
                     print(f"Failed to send log to Discord channel {channel.id}: {e}")
 
