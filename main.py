@@ -58,6 +58,11 @@ class Shittim(commands.Bot):
         self.status_templates = []
         self.status_index = 0
 
+    def is_admin(self, user_id: int) -> bool:
+        """ユーザーが管理者かどうかをチェック"""
+        admin_ids = self.config.get('admin_user_ids', [])
+        return user_id in admin_ids
+
     async def setup_hook(self):
         """Botの初期セットアップ（ログイン後、接続準備完了前）"""
         if not os.path.exists(CONFIG_FILE):
@@ -337,6 +342,87 @@ if __name__ == "__main__":
     discord.gateway.DiscordWebSocket.identify = mobile_identify
     bot_instance = Shittim(command_prefix=commands.when_mentioned, intents=intents, help_command=None,
                            allowed_mentions=allowed_mentions)
+
+
+    # ================================================================
+    # ===== Cogリロードコマンド ======================================
+    # ================================================================
+    @bot_instance.tree.command(name="reload", description="🔄 Cogをリロードします（管理者専用）")
+    async def reload_cog(interaction: discord.Interaction, cog_name: str = None):
+        if not bot_instance.is_admin(interaction.user.id):
+            await interaction.response.send_message("❌ このコマンドは管理者のみ実行できます。", ephemeral=False)
+            return
+
+        await interaction.response.defer(ephemeral=False)
+
+        if cog_name:
+            # 特定のCogをリロード
+            if not cog_name.startswith('PLANA.'):
+                cog_name = f'PLANA.{cog_name}'
+
+            try:
+                await bot_instance.reload_extension(cog_name)
+                await interaction.followup.send(f"✅ Cog `{cog_name}` をリロードしました。", ephemeral=False)
+                logging.info(f"Cog '{cog_name}' がユーザー {interaction.user} によってリロードされました。")
+            except commands.ExtensionNotLoaded:
+                try:
+                    await bot_instance.load_extension(cog_name)
+                    await interaction.followup.send(f"✅ Cog `{cog_name}` をロードしました（未ロードでした）。",
+                                                    ephemeral=False)
+                    logging.info(f"Cog '{cog_name}' がユーザー {interaction.user} によってロードされました。")
+                except Exception as e:
+                    await interaction.followup.send(f"❌ Cog `{cog_name}` のロードに失敗しました: {e}", ephemeral=False)
+                    logging.error(f"Cog '{cog_name}' のロードに失敗しました: {e}")
+            except Exception as e:
+                await interaction.followup.send(f"❌ Cog `{cog_name}` のリロードに失敗しました: {e}", ephemeral=False)
+                logging.error(f"Cog '{cog_name}' のリロードに失敗しました: {e}")
+        else:
+            # 全Cogをリロード
+            plana_dir = 'PLANA'
+            reloaded = []
+            failed = []
+
+            for root, _, files in os.walk(plana_dir):
+                for file in files:
+                    if file.endswith('.py') and not file.startswith('_'):
+                        module_path = os.path.join(root, file[:-3]).replace(os.sep, '.')
+                        try:
+                            await bot_instance.reload_extension(module_path)
+                            reloaded.append(module_path)
+                        except commands.ExtensionNotLoaded:
+                            try:
+                                await bot_instance.load_extension(module_path)
+                                reloaded.append(f"{module_path} (新規)")
+                            except Exception as e:
+                                failed.append(f"{module_path}: {e}")
+                        except Exception as e:
+                            failed.append(f"{module_path}: {e}")
+
+            result_msg = f"✅ {len(reloaded)}個のCogをリロードしました。"
+            if failed:
+                result_msg += f"\n❌ {len(failed)}個のCogでエラーが発生しました。"
+
+            await interaction.followup.send(result_msg, ephemeral=False)
+            logging.info(
+                f"全Cogリロードがユーザー {interaction.user} によって実行されました。成功: {len(reloaded)}, 失敗: {len(failed)}")
+
+
+    @bot_instance.tree.command(name="list-cogs", description="📋 ロード済みのCog一覧を表示します（管理者専用）")
+    async def list_cogs(interaction: discord.Interaction):
+        if not bot_instance.is_admin(interaction.user.id):
+            await interaction.response.send_message("❌ このコマンドは管理者のみ実行できます。", ephemeral=False)
+            return
+
+        loaded_extensions = list(bot_instance.extensions.keys())
+        if not loaded_extensions:
+            await interaction.response.send_message("現在ロードされているCogはありません。", ephemeral=False)
+            return
+
+        cog_list = "\n".join([f"• `{ext}`" for ext in sorted(loaded_extensions)])
+        await interaction.response.send_message(f"**ロード済みCog一覧** ({len(loaded_extensions)}個):\n{cog_list}",
+                                                ephemeral=False)
+
+
     try:
         bot_instance.run(bot_token_val)
     except Exception as e:
