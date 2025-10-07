@@ -7,8 +7,17 @@ prefix: "!!" # メッセージコマンドのプレフィックス [廃止] 特�
 status_message: "on {guild_count} servers" # Botのステータスメッセージ
 allowed_channel_ids: [] # Botが反応するチャンネルIDのリスト (空の場合は全チャンネルで反応)
 # allowed_role_ids: []  # [廃止] 特権インテント回避のため、この設定は現在使用されません
-admin_user_ids: []    # Botの管理者ユーザーIDのリスト (将来的な管理者用コマンドのため)
 bot_invite_url: https://discord.com/oauth2/authorize?client_id=1031673203774464160&permissions=551906765824&scope=bot #bot invite url
+
+# 管理者ユーザーID（リロードコマンドを実行できるユーザー）
+# DiscordのユーザーIDを数値で指定してください
+# 複数のユーザーを指定可能です
+admin_user_ids:
+  - 270446628622696449  # あなたのユーザーID
+  - 283551714966241281  # 別の管理者のユーザーID
+  - 463985410473721856
+  - 603714693193793558
+  # 必要に応じて追加してください
 
 # =============================================================================
 # LLM Cog Settings (AIとの対話機能に関する設定)
