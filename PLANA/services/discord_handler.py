@@ -213,36 +213,53 @@ class DiscordLogHandler(logging.Handler):
         if not records:
             return
 
-        # ログブロック単位でチャンクを作成する
+        # ログを1つのコードブロック内にまとめてチャンク分けする
         chunks = []
-        current_chunk = ""
-        # Discordの文字数制限より少し余裕を持たせたサイズ
-        CHUNK_LIMIT = 1980
+        current_logs = []
+        # コードブロックのオーバーヘッド: ```ansi\n と \n``` で13文字
+        CODE_BLOCK_OVERHEAD = 13
+        # Discordの制限2000文字ギリギリを狙う（安全のため少し余裕を持たせる）
+        CHUNK_LIMIT = 1990
 
         for record in records:
-            # 各ログを個別のコードブロックで囲む
-            log_block = f"```ansi\n{record}\n```\n"
+            # 改行付きでログを追加した場合のサイズを計算
+            log_with_newline = record if not current_logs else f"\n{record}"
 
-            # 1つのログブロックが制限を超える場合は、強制的に分割する（トレースバックが極端に長い場合など）
-            if len(log_block) > CHUNK_LIMIT:
-                if current_chunk:
-                    chunks.append(current_chunk)
-                    current_chunk = ""
-                # ブロックの中身をさらに分割
-                for i in range(0, len(log_block), CHUNK_LIMIT):
-                    chunks.append(log_block[i:i + CHUNK_LIMIT])
+            # 現在のログ群 + 新しいログ + コードブロックのオーバーヘッド
+            potential_size = sum(len(log) for log in current_logs) + len(log_with_newline) + CODE_BLOCK_OVERHEAD
+            if current_logs:
+                potential_size += len(current_logs) - 1  # 既存ログ間の改行分
+
+            # 1つのログ自体が制限を超える場合
+            if len(record) + CODE_BLOCK_OVERHEAD > CHUNK_LIMIT:
+                # 現在のチャンクを確定
+                if current_logs:
+                    chunks.append("```ansi\n" + "\n".join(current_logs) + "\n```")
+                    current_logs = []
+
+                # 長いログを分割して送信（コードブロックなしで）
+                for i in range(0, len(record), CHUNK_LIMIT):
+                    chunk_part = record[i:i + CHUNK_LIMIT]
+                    # 最初の部分にはコードブロック開始、最後の部分には終了を付ける
+                    if i == 0:
+                        chunk_part = "```ansi\n" + chunk_part
+                    if i + CHUNK_LIMIT >= len(record):
+                        chunk_part = chunk_part + "\n```"
+                    chunks.append(chunk_part)
                 continue
 
-            # 現在のチャンクに追記すると制限を超える場合は、新しいチャンクを開始
-            if len(current_chunk) + len(log_block) > CHUNK_LIMIT:
-                chunks.append(current_chunk)
-                current_chunk = log_block
+            # 追加するとチャンクサイズを超える場合
+            if potential_size > CHUNK_LIMIT:
+                # 現在のチャンクを確定して新しいチャンクを開始
+                chunks.append("```ansi\n" + "\n".join(current_logs) + "\n```")
+                current_logs = [record]
             else:
-                current_chunk += log_block
+                # 現在のチャンクに追加
+                current_logs.append(record)
 
         # 最後のチャンクを追加
-        if current_chunk:
-            chunks.append(current_chunk)
+        if current_logs:
+            chunks.append("```ansi\n" + "\n".join(current_logs) + "\n```")
 
         # 全てのチャンネルに、作成したチャンクを送信
         for channel in self.channels:
