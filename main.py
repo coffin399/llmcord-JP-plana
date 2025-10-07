@@ -1,3 +1,5 @@
+# main.py (変更なし)
+
 import discord
 from discord.ext import commands, tasks
 import yaml
@@ -14,7 +16,6 @@ logging.getLogger('google.generativeai').setLevel(logging.WARNING)
 logging.getLogger('google.ai').setLevel(logging.WARNING)
 logging.getLogger('httpx').setLevel(logging.WARNING)
 
-# ▼▼▼ 変更点 1: DiscordLogFormatter をインポート ▼▼▼
 from PLANA.services.discord_handler import DiscordLogHandler, DiscordLogFormatter
 from PLANA.utilities.error.errors import InvalidDiceNotationError, DiceValueError
 

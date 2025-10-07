@@ -9,40 +9,35 @@ from typing import List
 from discord import Client, TextChannel
 
 
-# 新しく追加するFormatterクラス
+# ▼▼▼ 変更点 1: FormatterをANSIカラーコード対応に大幅改修 ▼▼▼
 class DiscordLogFormatter(logging.Formatter):
     """
-    ログレベルに応じてdiff形式の接頭辞を付与するフォーマッター。
-    - INFO: 緑 (+)
-    - WARNING: オレンジ (!)
-    - ERROR/CRITICAL: 赤 (-)
-    - DEBUG: グレー (#)
+    ログレベルに応じてANSIエスケープコードを使い、文字色を変更するフォーマッター。
     """
-    PREFIX_MAP = {
-        logging.DEBUG: "# ",
-        logging.INFO: "+ ",
-        logging.WARNING: "! ",
-        logging.ERROR: "- ",
-        logging.CRITICAL: "- ",
+    # ANSIカラーコード
+    RESET = "\u001b[0m"
+    RED = "\u001b[31m"
+    YELLOW = "\u001b[33m"
+    CYAN = "\u001b[36m"  # 水色に近い色
+    WHITE = "\u001b[37m"
+
+    COLOR_MAP = {
+        logging.DEBUG: WHITE,
+        logging.INFO: CYAN,
+        logging.WARNING: YELLOW,
+        logging.ERROR: RED,
+        logging.CRITICAL: RED,
     }
 
     def format(self, record: logging.LogRecord) -> str:
         """
-        元のログメッセージをフォーマットし、各行に適切な接頭辞を付与する。
+        元のログメッセージをフォーマットし、全体をANSIカラーコードで囲む。
         """
-        # 親クラスのformatメソッドを呼び出して、基本的なログ文字列を生成
         log_message = super().format(record)
+        color = self.COLOR_MAP.get(record.levelno, self.WHITE)
 
-        # ログレベルに対応する接頭辞を取得
-        prefix = self.PREFIX_MAP.get(record.levelno, "")
-
-        # 複数行のログ（トレースバックなど）に対応するため、各行の先頭に接頭辞を付与
-        if prefix:
-            lines = log_message.split('\n')
-            prefixed_lines = [f"{prefix}{line}" for line in lines]
-            return '\n'.join(prefixed_lines)
-
-        return log_message
+        # メッセージ全体をカラーコードで囲み、最後にリセットコードを付与
+        return f"{color}{log_message}{self.RESET}"
 
 
 class DiscordLogHandler(logging.Handler):
@@ -58,7 +53,7 @@ class DiscordLogHandler(logging.Handler):
         self.interval = interval
 
         self.queue: Queue[str] = Queue()
-        self.channels: List[TextChannel] = []  # チャンネルオブジェクトをリストで保持
+        self.channels: List[TextChannel] = []
         self._closed = False
 
         self._task = self.bot.loop.create_task(self._log_sender_loop())
@@ -93,6 +88,7 @@ class DiscordLogHandler(logging.Handler):
         if self._closed:
             return
         msg = self.format(record)
+        # サニタイズはカラーコードを適用した後に行う
         msg = self._sanitize_log_message(msg)
         try:
             self.queue.put_nowait(msg)
@@ -104,7 +100,6 @@ class DiscordLogHandler(logging.Handler):
         テキストから表示用の文字を取得する。
         引用符や記号を除外して、実際の文字（英数字、日本語など）から指定数を取得。
         """
-        # 引用符や一般的な記号を除外
         cleaned = re.sub(r'^[「『"\'『»«‹›〈〉《》【】〔〕［］｛｝（）()［］\s]+', '', text)
         return cleaned[:count] if len(cleaned) >= count else text[:count]
 
@@ -120,7 +115,7 @@ class DiscordLogHandler(logging.Handler):
             message,
             flags=re.IGNORECASE
         )
-
+        # (以下、他の正規表現置換は省略... 元のコードと同じです)
         # Session ID
         message = re.sub(
             r'((?:Session ID:?|session)\s+)[a-f0-9]{32}',
@@ -128,77 +123,66 @@ class DiscordLogHandler(logging.Handler):
             message,
             flags=re.IGNORECASE
         )
-
         # LLMCog形式: guild='サーバー名(ID or 匿名化済み)' -> guild='サー****(****)'
         message = re.sub(
             r"guild='([^']+)\([^)]+\)'",
             lambda m: f"guild='{self._get_display_chars(m.group(1), 2)}****(****)'",
             message
         )
-
         # LLMCog形式: author='ユーザー名(ID or 匿名化済み)' -> author='ユー****(****)'
         message = re.sub(
             r"author='([^']+)\([^)]+\)'",
             lambda m: f"author='{self._get_display_chars(m.group(1), 2)}****(****)'",
             message
         )
-
         # LLMCog形式: channel='チャンネル名(ID or 匿名化済み)' -> channel='チャ****(****)'
         message = re.sub(
             r"channel='([^']+)\([^)]+\)'",
             lambda m: f"channel='{self._get_display_chars(m.group(1), 2)}****(****)'",
             message
         )
-
         # MusicCog形式: Guild ID (サーバー名): -> Guild ****(サー****):
         message = re.sub(
             r"Guild (\d+) \(([^)]+)\):",
             lambda m: f"Guild ****({m.group(2)[:2]}****):",
             message
         )
-
         # IDのみなので完全匿名化を維持
         message = re.sub(
             r"Channel ID \d+ \(Guild ID \d+\)",
             "Channel ID **** (Guild ID ****)",
             message
         )
-
         # MusicCog形式: Connected to チャンネル名 -> Connected to チャ****
         message = re.sub(
             r"Connected to (.+)",
             lambda m: f"Connected to {m.group(1)[:2]}****",
             message
         )
-
         # BioManager形式: for user [ID] (ユーザー名) -> for user X**** (ユ****)
         message = re.sub(
             r"for user (\d+) \(([^)]+)\)",
             lambda m: f"for user {m.group(1)[:1]}**** ({m.group(2)[:1]}****)",
             message
         )
-
         # BioManager形式: for user [ID] -> for user X**** (括弧がない場合)
         message = re.sub(
             r"for user (\d+)(?!\s*\()",
             lambda m: f"for user {m.group(1)[:1]}****",
             message
         )
-
         # BioManager形式: Content: 'ユーザーbio' -> Content: 'ユ****'
         message = re.sub(
             r"Content: '([^']+)'",
             lambda m: f"Content: '{m.group(1)[:1]}****'",
             message
         )
-
         # Twitch通知形式: ギルド [ID] のチャンネル [ID] -> ギルド X**** のチャンネル Y****
         message = re.sub(
             r"ギルド (\d+) のチャンネル (\d+)",
             lambda m: f"ギルド {m.group(1)[:1]}**** のチャンネル {m.group(2)[:1]}****",
             message
         )
-
         # メッセージID形式: message ID: 1425082992111386664 -> message ID: 1****
         message = re.sub(
             r"message ID:? (\d+)",
@@ -206,14 +190,12 @@ class DiscordLogHandler(logging.Handler):
             message,
             flags=re.IGNORECASE
         )
-
         # 一般的なDiscord ID (18-19桁の数字) -> X****
         message = re.sub(
             r"(?<!\d)(\d{17,19})(?!\d)",
             lambda m: f"{m.group(1)[:1]}****",
             message
         )
-
         return message
 
     async def _process_queue(self):
@@ -245,14 +227,15 @@ class DiscordLogHandler(logging.Handler):
             return
 
         full_log_message = "\n".join(records)
-        chunk_size = 1980
+        # ANSIコードは文字数にカウントされないため、chunk_sizeは少し余裕を持たせる
+        chunk_size = 1900
         chunks = [full_log_message[i:i + chunk_size] for i in range(0, len(full_log_message), chunk_size)]
 
         for channel in self.channels:
             for chunk in chunks:
                 try:
-                    # ▼▼▼ ここを変更しました！ ▼▼▼
-                    await channel.send(f"```diff\n{chunk}\n```", silent=True)
+                    # ▼▼▼ 変更点 2: "diff" から "ansi" に変更 ▼▼▼
+                    await channel.send(f"```ansi\n{chunk}\n```", silent=True)
                 except Exception as e:
                     print(f"Failed to send log to Discord channel {channel.id}: {e}")
 
