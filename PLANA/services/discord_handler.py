@@ -1,6 +1,7 @@
 # PLANA/services/discord_handler.py
 import asyncio
 import logging
+import re
 from asyncio import Queue
 from typing import List
 
@@ -20,7 +21,7 @@ class DiscordLogHandler(logging.Handler):
         self.interval = interval
 
         self.queue: Queue[str] = Queue()
-        self.channels: List[TextChannel] = [] # チャンネルオブジェクトをリストで保持
+        self.channels: List[TextChannel] = []  # チャンネルオブジェクトをリストで保持
         self._closed = False
 
         self._task = self.bot.loop.create_task(self._log_sender_loop())
@@ -36,10 +37,11 @@ class DiscordLogHandler(logging.Handler):
                     self.channels.append(channel)
                     print(f"DiscordLogHandler: Immediately added and activated channel {channel_id}.")
                 else:
-                    print(f"DiscordLogHandler: Added channel ID {channel_id}, but it's not a valid text channel or not found yet.")
+                    print(
+                        f"DiscordLogHandler: Added channel ID {channel_id}, but it's not a valid text channel or not found yet.")
             else:
                 # Botがまだ準備できていない場合は、次回の_process_queueで解決される
-                self.channels = [] # キャッシュをクリア
+                self.channels = []  # キャッシュをクリア
                 print(f"DiscordLogHandler: Added channel ID {channel_id}. Will be activated once bot is ready.")
 
     def remove_channel(self, channel_id: int):
@@ -52,15 +54,44 @@ class DiscordLogHandler(logging.Handler):
 
     def emit(self, record: logging.LogRecord):
         """
-        ログレコードをフォーマットし、キューに追加する。
+        ログレコードをフォーマットし、センシティブ情報を伏字化してキューに追加する。
         """
         if self._closed:
             return
         msg = self.format(record)
+        # センシティブ情報を伏字化
+        msg = self._sanitize_log_message(msg)
         try:
             self.queue.put_nowait(msg)
         except asyncio.QueueFull:
             print("DiscordLogHandler: Log queue is full, dropping message.")
+
+    def _sanitize_log_message(self, message: str) -> str:
+        """
+        ログメッセージからセンシティブな情報を伏字化する。
+        - Windowsのユーザーパス (C:\\Users\\username\\...)
+        - Discord Gateway Session ID
+        """
+        # Windowsユーザーパスの C:\Users\username\ 部分のみを伏字化
+        # 例: C:\Users\hogefuga\piyoyo\LLMcord-PLANA\venv\hoge\fuga\file.txt
+        #  -> ********\LLMcord-PLANA\venv\hoge\fuga\file.txt
+        message = re.sub(
+            r'[A-Za-z]:\\Users\\[^\\]+\\[^\\]+',
+            '********',
+            message,
+            flags=re.IGNORECASE
+        )
+
+        # Session IDを伏字化
+        # 例: Session ID: fe20d79cddc2131565291210e72ce58c -> Session ID: ****
+        message = re.sub(
+            r'(Session ID:?\s*)[a-f0-9]{32}',
+            r'\1****',
+            message,
+            flags=re.IGNORECASE
+        )
+
+        return message
 
     async def _process_queue(self):
         """キューに溜まったログを全て取り出し、結合して登録済みの全チャンネルに送信する。"""
