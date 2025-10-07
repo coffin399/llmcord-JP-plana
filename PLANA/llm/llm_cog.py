@@ -290,7 +290,6 @@ class LLMCog(commands.Cog, name="LLM"):
 
     async def _prepare_multimodal_content(self, message: discord.Message) -> Tuple[List[Dict[str, Any]], str]:
         image_inputs, processed_urls = [], set()
-
         messages_to_scan = []
         visited_ids = set()
         current_msg = message
@@ -302,7 +301,10 @@ class LLMCog(commands.Cog, name="LLM"):
             if not current_msg or current_msg.id in visited_ids:
                 break
 
-            logger.info(f"🔵 [IMAGE] Scanning message ID: {current_msg.id} (Depth: {i + 1})")
+            # ▼▼▼ LOGGING MODIFICATION ▼▼▼
+            # Detailed scan logs are moved to DEBUG level to reduce noise.
+            logger.debug(f"🔵 [IMAGE] Scanning message ID: {current_msg.id} (Depth: {i + 1})")
+            # ▲▲▲ LOGGING MODIFICATION ▲▲▲
             messages_to_scan.append(current_msg)
             visited_ids.add(current_msg.id)
 
@@ -319,18 +321,19 @@ class LLMCog(commands.Cog, name="LLM"):
                 break
 
         source_urls = []
-        # 修正点 1: テキストを収集するためのリストを初期化
         text_parts = []
 
-        # 収集したメッセージを古い順（会話の順）に処理
+        # Process collected messages in chronological order
         for msg in reversed(messages_to_scan):
-            # 修正点 2: 各メッセージからテキストを抽出し、リストに追加
-            # 画像URLを削除した残りのテキストを取得
-            text_content_part = IMAGE_URL_PATTERN.sub('', msg.content).strip()
-            if text_content_part:
-                text_parts.append(text_content_part)
+            # ▼▼▼ BUG FIX (Retained from previous answer) ▼▼▼
+            # Only collect text content from messages sent by users, not the bot itself.
+            if msg.author != self.bot.user:
+                text_content_part = IMAGE_URL_PATTERN.sub('', msg.content).strip()
+                if text_content_part:
+                    text_parts.append(text_content_part)
+            # ▲▲▲ BUG FIX ▲▲▲
 
-            # (既存の画像URL収集処理)
+            # Image URLs are collected from all messages for context.
             for url in IMAGE_URL_PATTERN.findall(msg.content):
                 if url not in processed_urls:
                     source_urls.append(url)
@@ -352,7 +355,7 @@ class LLMCog(commands.Cog, name="LLM"):
 
         if source_urls:
             logger.info(
-                f"🔵 [IMAGE] Found {len(source_urls)} unique image URL(s) from {len(messages_to_scan)} messages: {source_urls}")
+                f"🔵 [IMAGE] Found {len(source_urls)} unique image URL(s) from {len(messages_to_scan)} messages.")
 
         max_images = self.llm_config.get('max_images', 1)
         for url in source_urls[:max_images]:
@@ -369,8 +372,17 @@ class LLMCog(commands.Cog, name="LLM"):
             except discord.HTTPException:
                 pass
 
-        # 修正点 3: 収集したテキストパーツを改行で結合
         clean_text = "\n".join(text_parts)
+
+        # ▼▼▼ LOGGING MODIFICATION ▼▼▼
+        # Add a summary log at the end of the process.
+        logger.info(
+            f"🔵 [IMAGE] Scan complete for message {message.id}. "
+            f"Scanned {len(messages_to_scan)} messages, found {len(source_urls)} image URLs. "
+            f"Collected {len(clean_text)} chars of user text."
+        )
+        # ▲▲▲ LOGGING MODIFICATION ▲▲▲
+
         return image_inputs, clean_text
 
     @commands.Cog.listener()
@@ -1035,9 +1047,9 @@ class LLMCog(commands.Cog, name="LLM"):
             return []
         keys = self.memory_manager.list_memories().keys()
         return [
-                   app_commands.Choice(name=key, value=key)
-                   for key in keys if current.lower() in key.lower()
-               ][:25]
+            app_commands.Choice(name=key, value=key)
+            for key in keys if current.lower() in key.lower()
+        ][:25]
 
     @app_commands.command(
         name="memory-delete",
@@ -1066,9 +1078,9 @@ class LLMCog(commands.Cog, name="LLM"):
         app_commands.Choice[str]]:
         available_models = self.llm_config.get('available_models', [])
         return [
-                   app_commands.Choice(name=model, value=model)
-                   for model in available_models if current.lower() in model.lower()
-               ][:25]
+            app_commands.Choice(name=model, value=model)
+            for model in available_models if current.lower() in model.lower()
+        ][:25]
 
     @app_commands.command(
         name="switch-models",
