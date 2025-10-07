@@ -18,11 +18,6 @@ google-api-python-client
 google-auth-httplib2
 google-auth-oauthlib
 
-matplotlib
-japanize_matplotlib
-
-Shapely
-pyshp
-pyproj
-geos
-cartopy
+matplotlib>=3.5.0
+japanize-matplotlib>=1.1.0
+cartopy>=0.21.0
