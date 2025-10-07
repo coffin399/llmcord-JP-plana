@@ -62,6 +62,15 @@ class DiscordLogHandler(logging.Handler):
             print("DiscordLogHandler: Log queue is full, dropping message.")
 
 
+    def _get_display_chars(self, text: str, count: int = 2) -> str:
+        """
+        テキストから表示用の文字を取得する。
+        引用符や記号を除外して、実際の文字（英数字、日本語など）から指定数を取得。
+        """
+        # 引用符や一般的な記号を除外
+        cleaned = re.sub(r'^[「『"\'『»«‹›〈〉《》【】〔〕［］｛｝（）()［］\s]+', '', text)
+        return cleaned[:count] if len(cleaned) >= count else text[:count]
+
     def _sanitize_log_message(self, message: str) -> str:
         """
         ログメッセージからセンシティブな情報を部分的に伏字化する。
@@ -87,24 +96,24 @@ class DiscordLogHandler(logging.Handler):
             flags=re.IGNORECASE
         )
 
-        # LLMCog形式: guild='サーバー名(ID)' -> guild='サー****(****)'
+        # LLMCog形式: guild='サーバー名(ID or 匿名化済み)' -> guild='サー****(****)'
         message = re.sub(
-            r"guild='([^']+)\((\d+)\)'",
-            lambda m: f"guild='{m.group(1)[:2]}****(****)'",
+            r"guild='([^']+)\([^)]+\)'",
+            lambda m: f"guild='{self._get_display_chars(m.group(1), 2)}****(****)'",
             message
         )
 
-        # LLMCog形式: author='ユーザー名(ID)' -> author='ユー****(****)'
+        # LLMCog形式: author='ユーザー名(ID or 匿名化済み)' -> author='ユー****(****)'
         message = re.sub(
-            r"author='([^']+)\((\d+)\)'",
-            lambda m: f"author='{m.group(1)[:2]}****(****)'",
+            r"author='([^']+)\([^)]+\)'",
+            lambda m: f"author='{self._get_display_chars(m.group(1), 2)}****(****)'",
             message
         )
 
-        # LLMCog形式: channel='チャンネル名(ID)' -> channel='チャ****(****)'
+        # LLMCog形式: channel='チャンネル名(ID or 匿名化済み)' -> channel='チャ****(****)'
         message = re.sub(
-            r"channel='([^']+)\((\d+)\)'",
-            lambda m: f"channel='{m.group(1)[:2]}****(****)'",
+            r"channel='([^']+)\([^)]+\)'",
+            lambda m: f"channel='{self._get_display_chars(m.group(1), 2)}****(****)'",
             message
         )
 
