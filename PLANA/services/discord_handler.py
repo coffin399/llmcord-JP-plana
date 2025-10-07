@@ -68,7 +68,8 @@ class DiscordLogHandler(logging.Handler):
         - Windowsのユーザーパス
         - Discord Gateway Session ID
         - Discordのサーバー名、ユーザー名、チャンネル名 (先頭文字のみ表示)
-        - Discordの各種ID (完全に伏字化)
+        - Discordの各種ID (完全に伏字化または部分的に伏字化)
+        - ユーザーbioの内容
         """
         # Windowsユーザーパス
         message = re.sub(
@@ -88,21 +89,21 @@ class DiscordLogHandler(logging.Handler):
 
         # LLMCog形式: guild='サーバー名(ID)' -> guild='サー****(****)'
         message = re.sub(
-            r"guild='([^']+)\(\d+\)'",
+            r"guild='(.*?)'\(\d+\)'",
             lambda m: f"guild='{m.group(1)[:2]}****(****)'",
             message
         )
 
         # LLMCog形式: author='ユーザー名(ID)' -> author='ユー****(****)'
         message = re.sub(
-            r"author='([^']+)\(\d+\)'",
+            r"author='(.*?)'\(\d+\)'",
             lambda m: f"author='{m.group(1)[:2]}****(****)'",
             message
         )
 
         # LLMCog形式: channel='チャンネル名(ID)' -> channel='チ****(****)'
         message = re.sub(
-            r"channel='([^(]+)\(\d+\)'",
+            r"channel='(.*?)'\(\d+\)'",
             lambda m: f"channel='{m.group(1)[:2]}****(****)'",
             message
         )
