@@ -16,12 +16,11 @@ from discord.ext import commands, tasks
 
 try:
     import matplotlib
-
-    matplotlib.use('Agg')  # GUIバックエンドを使わない
+    matplotlib.use('Agg')
     import matplotlib.pyplot as plt
     from matplotlib.patches import Circle
-
     MATPLOTLIB_AVAILABLE = True
+    plt.rcParams['font.family'] = 'Source Han Code JP'
 except ImportError:
     MATPLOTLIB_AVAILABLE = False
     plt = None
@@ -64,7 +63,6 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
         }
         self.max_processed_ids = 1000
 
-        # WebSocket関連
         self.ws_session = None
         self.ws_connection = None
         self.ws_reconnect_delay = 5
@@ -93,11 +91,9 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
             logger.info("🔄 最新情報のIDを初期化中...")
             await self.initialize_processed_ids()
 
-            # WebSocket接続を開始
             self.ws_running = True
             asyncio.create_task(self.websocket_listener())
 
-            # 統計出力タスクを開始
             self.output_stats_task.start()
 
             logger.info("✅ EarthquakeTsunamiCog セットアップ完了")
@@ -108,18 +104,15 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
     async def cog_unload(self):
         logger.info("🔄 EarthquakeTsunamiCog アンロード中...")
 
-        # WebSocket接続を停止
         self.ws_running = False
         if self.ws_connection and not self.ws_connection.closed:
             await self.ws_connection.close()
         if self.ws_session and not self.ws_session.closed:
             await self.ws_session.close()
 
-        # HTTP接続を停止
         if self.http_session and not self.http_session.closed:
             await self.http_session.close()
 
-        # タスクを停止
         if hasattr(self, 'output_stats_task'):
             self.output_stats_task.cancel()
 
@@ -145,8 +138,7 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
                         if msg.type == aiohttp.WSMsgType.TEXT:
                             try:
                                 data = json.loads(msg.data)
-                                # デバッグ: 受信したメッセージをログ出力
-                                logger.debug(f"WebSocket受信: code={data.get('code')}, id={data.get('id')}")
+                                logger.debug(f"WebSocket受信: code={data.get('code')}, id={data.get('_id') or data.get('id')}")
                                 await self.process_websocket_message(data)
                             except json.JSONDecodeError as e:
                                 logger.error(f"WebSocketメッセージのJSON解析エラー: {e}")
@@ -173,15 +165,12 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
     async def process_websocket_message(self, data: Dict[str, Any]):
         """WebSocketから受信したメッセージを処理"""
         try:
-            # 基本的な検証
             if not isinstance(data, dict):
                 logger.debug("受信データが辞書型ではありません")
                 return
 
-            # code フィールドで情報タイプを判定
             code = data.get('code', 0)
 
-            # 551: 地震情報, 552: 津波予報のみ処理
             if code not in [551, 552]:
                 logger.debug(f"処理対象外のcode: {code}")
                 return
@@ -198,14 +187,12 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
                 logger.debug(f"UNKNOWN情報をスキップ: ID {info_id}, code={code}")
                 return
 
-            # 重複チェック
             if info_id in self.processed_ids[info_type.value]:
                 logger.debug(f"既に処理済みのID: {info_id} ({info_type.value})")
                 return
 
             logger.info(f"🆕 WebSocketで新しい{info_type.value}情報を受信: ID {info_id}, code={code}")
 
-            # 情報タイプに応じて通知を送信
             if info_type == InfoType.EEW:
                 await self.send_eew_notification(data)
                 self.processing_stats['eew_processed'] += 1
@@ -213,7 +200,6 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
                 await self.send_quake_notification(data)
                 self.processing_stats['quake_processed'] += 1
             elif info_type == InfoType.TSUNAMI:
-                # 津波情報の場合、津波データが実際に存在するか確認
                 tsunami_info = self.get_tsunami_info(data)
                 if tsunami_info.get('has_tsunami', False):
                     await self.send_tsunami_notification(data, tsunami_info)
@@ -222,7 +208,6 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
                     logger.debug(f"津波データなし: ID {info_id}")
                     return
 
-            # 処理済みIDとして記録
             self.processed_ids[info_type.value].add(info_id)
             self.last_ids[info_type.value] = info_id
             self.manage_processed_ids(info_type.value)
@@ -306,7 +291,7 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
     def extract_id_safe(self, item: Dict[str, Any]) -> Optional[str]:
         """IDを安全に抽出"""
         try:
-            item_id = item.get('id')
+            item_id = item.get('_id') or item.get('id')
             if item_id is None:
                 return None
             return str(item_id)
@@ -328,23 +313,17 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
         logger.info(stats_msg)
 
     def classify_info_type(self, item: Dict[str, Any]) -> InfoType:
-        """情報タイプを判定（修正版）"""
+        """情報タイプを判定"""
         try:
             code = item.get('code', 0)
             issue_type = item.get('issue', {}).get('type', '').lower()
 
-            # code 552は津波予報
             if code == 552:
                 return InfoType.TSUNAMI
 
-            # code 551は地震情報
             if code == 551:
                 earthquake_data = item.get('earthquake', {})
 
-                # 緊急地震速報（EEW）の判定
-                # - issue.typeが'eew'を含む
-                # - または issue.typeが'foreign'（遠地地震）
-                # - または issue.typeが'scaleprompt'で津波情報が'Unknown'または未設定
                 if 'eew' in issue_type or issue_type == 'foreign':
                     return InfoType.EEW
 
@@ -353,15 +332,9 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
                     if domestic_tsunami in ['Unknown', '', None]:
                         return InfoType.EEW
 
-                # 確定地震情報の判定
-                # - detailscale: 震度速報
-                # - destination: 震源に関する情報
-                # - scaleanddetail: 震源・震度に関する情報
-                # - scaleprompt: 震度速報（津波情報あり）
                 if issue_type in ['detailscale', 'destination', 'scaleanddetail', 'scaleprompt']:
                     return InfoType.QUAKE
 
-                # earthquakeデータがあれば地震情報として扱う
                 if earthquake_data and issue_type:
                     return InfoType.QUAKE
 
@@ -468,10 +441,9 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
             return "不明"
 
     def get_tsunami_info(self, data):
-        """津波情報を抽出（修正版）"""
+        """津波情報を抽出"""
         info = {'has_tsunami': False, 'warning_level': None, 'areas': [], 'description': ""}
         try:
-            # code 552の場合
             if data.get('code') == 552:
                 tsunami_data = data.get('tsunami')
                 if not tsunami_data:
@@ -499,7 +471,6 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
                 info['warning_level'] = level_text
                 return info
 
-            # code 551の場合（地震情報に含まれる津波情報）
             earthquake_data = data.get('earthquake', {})
             domestic_tsunami = earthquake_data.get('domesticTsunami', 'None')
 
@@ -587,7 +558,6 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
             embed.set_footer(text="Powered by P2P地震情報 WebSocket API | PLANA by coffin299")
             embed.set_thumbnail(url="https://www.p2pquake.net/images/QuakeLogo_100x100.png")
 
-            # 地図画像を生成（座標情報がある場合のみ）
             map_file = None
             if MATPLOTLIB_AVAILABLE:
                 lat = hypocenter.get('latitude')
@@ -610,7 +580,6 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
                         embed.set_image(url="attachment://earthquake_location.png")
                     except Exception as e:
                         logger.warning(f"地図生成に失敗: {e}")
-                        # 地図生成失敗時もEmbed送信は継続
 
             await self.send_embed_to_channels(embed, info_type, map_file)
 
@@ -666,72 +635,26 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
         return await loop.run_in_executor(None, self._generate_single_map_sync, quake, info_type)
 
     def _generate_single_map_sync(self, quake: dict, info_type: str) -> io.BytesIO:
-        """単一の地震マップ画像を同期的に生成"""
+        """単一の地震マップ画像を同期的に生成（日本地図表示）"""
         lat, lon = quake['lat'], quake['lon']
         max_scale = quake['max_scale']
 
-        # 地図の範囲を震源地を中心に設定
-        lat_range = 4
-        lon_range = 5
-
-        fig, ax = plt.subplots(figsize=(8, 8), dpi=100)
-        ax.set_xlim(lon - lon_range, lon + lon_range)
-        ax.set_ylim(lat - lat_range, lat + lat_range)
+        fig, ax = plt.subplots(figsize=(10, 12), dpi=100)
+        ax.set_xlim(128, 146)
+        ax.set_ylim(30, 46)
         ax.set_aspect('equal')
 
-        # 背景色
         ax.set_facecolor('#e8f4f8')
         fig.patch.set_facecolor('white')
 
-        # グリッド
         ax.grid(True, linestyle='--', alpha=0.3, color='gray')
         ax.set_xlabel('経度 (°E)', fontsize=10)
         ax.set_ylabel('緯度 (°N)', fontsize=10)
 
-        # タイトル
         title_prefix = "緊急地震速報" if info_type == InfoType.EEW.value else "地震情報"
         title = f'{title_prefix} - 震源位置\n{quake["name"]}'
-        ax.set_title(title, fontsize=12, fontweight='bold', pad=15)
+        ax.set_title(title, fontsize=14, fontweight='bold', pad=20)
 
-        # 震源地の色とサイズ
-        def get_color_and_size(scale):
-            if scale >= 70:
-                return '#8B0000', 400
-            elif scale >= 60:
-                return '#DC143C', 350
-            elif scale >= 55:
-                return '#FF0000', 300
-            elif scale >= 50:
-                return '#FF4500', 250
-            elif scale >= 45:
-                return '#FF8C00', 200
-            elif scale >= 40:
-                return '#FFA500', 180
-            elif scale >= 30:
-                return '#FFD700', 150
-            else:
-                return '#ADD8E6', 120
-
-        color, size = get_color_and_size(max_scale)
-
-        # 震源地マーカー（×印）
-        ax.scatter(lon, lat, marker='x', c='black', s=size * 1.5, linewidths=3, zorder=10, label='震源')
-
-        # 震源地の円（震度の強さを示す）
-        ax.scatter(lon, lat, c=color, s=size, alpha=0.7, edgecolors='black', linewidths=2, zorder=9)
-
-        # 震源情報のテキスト
-        info_text = f'震度: {self.scale_to_japanese(max_scale)}\n'
-        if quake['magnitude'] != -1:
-            info_text += f'M{quake["magnitude"]:.1f}\n'
-        if quake['depth'] != -1:
-            info_text += f'深さ: {quake["depth"]}km'
-
-        ax.text(lon, lat - lat_range * 0.7, info_text,
-                fontsize=10, ha='center', va='top',
-                bbox=dict(boxstyle='round,pad=0.5', facecolor='white', edgecolor='black', linewidth=1.5, alpha=0.9))
-
-        # 主要都市の参考点（範囲内のもののみ）
         cities = {
             '札幌': (141.35, 43.06),
             '仙台': (140.87, 38.27),
@@ -747,17 +670,50 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
         }
 
         for city, (city_lon, city_lat) in cities.items():
-            # 地図範囲内の都市のみ表示
-            if (lon - lon_range <= city_lon <= lon + lon_range and
-                    lat - lat_range <= city_lat <= lat + lat_range):
-                ax.plot(city_lon, city_lat, 'k^', markersize=6, zorder=8)
-                ax.text(city_lon, city_lat + 0.15, city, fontsize=8, ha='center',
-                        bbox=dict(boxstyle='round,pad=0.2', facecolor='white', alpha=0.8))
+            ax.plot(city_lon, city_lat, 'k^', markersize=6, zorder=8)
+            ax.text(city_lon, city_lat + 0.3, city, fontsize=9, ha='center',
+                    bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.8))
 
-        # 凡例
-        ax.legend(loc='upper left', frameon=True, fontsize=9)
+        def get_color_and_size(scale):
+            if scale >= 70:
+                return '#8B0000', 500
+            elif scale >= 60:
+                return '#DC143C', 450
+            elif scale >= 55:
+                return '#FF0000', 400
+            elif scale >= 50:
+                return '#FF4500', 350
+            elif scale >= 45:
+                return '#FF8C00', 300
+            elif scale >= 40:
+                return '#FFA500', 250
+            elif scale >= 30:
+                return '#FFD700', 200
+            else:
+                return '#ADD8E6', 150
 
-        # 画像をバイトストリームに保存
+        color, size = get_color_and_size(max_scale)
+
+        ax.scatter(lon, lat, marker='x', c='red', s=size * 1.8, linewidths=4, zorder=10, label='震源')
+
+        ax.scatter(lon, lat, c=color, s=size, alpha=0.7, edgecolors='black', linewidths=2, zorder=9)
+
+        info_text = f'震度: {self.scale_to_japanese(max_scale)}\n'
+        if quake['magnitude'] != -1:
+            info_text += f'M{quake["magnitude"]:.1f}\n'
+        if quake['depth'] != -1:
+            info_text += f'深さ: {quake["depth"]}km'
+
+        text_y = lat - 2.0
+        if text_y < 31:
+            text_y = lat + 2.0
+
+        ax.text(lon, text_y, info_text,
+                fontsize=11, ha='center', va='top',
+                bbox=dict(boxstyle='round,pad=0.6', facecolor='white', edgecolor='red', linewidth=2, alpha=0.95))
+
+        ax.legend(loc='upper left', frameon=True, fontsize=10)
+
         buffer = io.BytesIO()
         plt.tight_layout()
         plt.savefig(buffer, format='png', dpi=100, bbox_inches='tight')
@@ -804,9 +760,7 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
                     failed_count += 1
                     continue
 
-                # 地図ファイルがある場合は添付、ない場合はEmbedのみ
                 if map_file:
-                    # ファイルをコピーして各チャンネルに送信
                     map_file.fp.seek(0)
                     file_copy = discord.File(fp=map_file.fp, filename=map_file.filename)
                     await channel.send(embed=embed, file=file_copy)
@@ -831,8 +785,6 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
 
         if sent_count == 0 and (failed_count > 0 or skipped_count > 0):
             logger.warning(f"⚠️ {info_type}の通知が1件も送信されませんでした")
-
-    # ========== コマンド群 ==========
 
     @app_commands.command(name="earthquake_channel", description="地震・津波情報の通知チャンネルを設定します")
     @app_commands.describe(channel="通知を送信するチャンネル", info_type="通知したい情報の種類")
@@ -871,7 +823,6 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
                 timestamp=datetime.now(self.jst)
             )
 
-            # WebSocket接続状態
             ws_status = "✅ 接続中" if self.ws_connection and not self.ws_connection.closed else "❌ 切断中"
             embed.add_field(name="🔌 WebSocket状態", value=ws_status, inline=True)
 
@@ -881,14 +832,12 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
                 inline=True
             )
 
-            # 最後のID
             id_status = ""
             for it, lid in self.last_ids.items():
                 count = len(self.processed_ids.get(it, set()))
                 id_status += f"**{it.upper()}**: `{lid[:8] if lid else '未取得'}` ({count}件)\n"
             embed.add_field(name="🆔 最後のID", value=id_status, inline=False)
 
-            # 通知チャンネル設定
             guild_id = str(interaction.guild.id)
             if guild_id in self.config:
                 channel_status = ""
@@ -909,7 +858,6 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
 
             embed.add_field(name="📢 通知チャンネル", value=channel_status, inline=False)
 
-            # エラー統計
             if self.error_stats['last_error_time']:
                 embed.add_field(
                     name="🕐 最後のエラー",
@@ -1118,7 +1066,6 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
                 await interaction.followup.send("❌ 地図機能を使用するにはmatplotlibのインストールが必要です。")
                 return
 
-            # パラメータ検証
             limit = max(1, min(limit, 50))
             hours = max(1, min(hours, 168))
 
@@ -1128,10 +1075,8 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
             }
             min_scale_code = scale_map.get(min_scale, 0) if min_scale else 0
 
-            # 時刻フィルタ用の基準時刻
             cutoff_time = datetime.now(self.jst) - timedelta(hours=hours)
 
-            # APIから地震情報取得
             url = f"{self.api_base_url}/history?codes=551&limit=100"
             data = await self.safe_api_request(url)
 
@@ -1139,7 +1084,6 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
                 await interaction.followup.send("❌ 地震情報の取得に失敗しました。")
                 return
 
-            # フィルタリング
             filtered_quakes = []
             for item in data:
                 info_type = self.classify_info_type(item)
@@ -1149,17 +1093,14 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
                 earthquake = item.get('earthquake', {})
                 max_scale = earthquake.get('maxScale', -1)
 
-                # 震度フィルタ
                 if max_scale < min_scale_code:
                     continue
 
-                # 時刻フィルタ
                 issue = item.get('issue', {})
                 quake_time = self.parse_earthquake_time(earthquake.get('time', ''), issue.get('time', ''))
                 if quake_time < cutoff_time:
                     continue
 
-                # 座標情報がある地震のみ
                 hypocenter = earthquake.get('hypocenter', {})
                 lat = hypocenter.get('latitude')
                 lon = hypocenter.get('longitude')
@@ -1183,10 +1124,8 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
                 await interaction.followup.send(f"ℹ️ 該当する地震情報{filter_text}が見つかりませんでした。")
                 return
 
-            # 地図画像生成
             image_buffer = await self.generate_earthquake_map(filtered_quakes, min_scale, hours)
 
-            # Discord に送信
             file = discord.File(fp=image_buffer, filename="earthquake_map.png")
 
             embed = discord.Embed(
@@ -1209,28 +1148,23 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
 
     async def generate_earthquake_map(self, quakes: list, min_scale: Optional[str], hours: int) -> io.BytesIO:
         """地震マップ画像を生成"""
-        # 非同期処理をブロックしないようにスレッドプールで実行
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, self._generate_map_sync, quakes, min_scale, hours)
 
     def _generate_map_sync(self, quakes: list, min_scale: Optional[str], hours: Optional[int]) -> io.BytesIO:
         """地震マップ画像を同期的に生成"""
-        # 日本の範囲
         fig, ax = plt.subplots(figsize=(10, 12), dpi=100)
         ax.set_xlim(128, 146)
         ax.set_ylim(30, 46)
         ax.set_aspect('equal')
 
-        # 背景色
         ax.set_facecolor('#e8f4f8')
         fig.patch.set_facecolor('white')
 
-        # グリッド
         ax.grid(True, linestyle='--', alpha=0.3, color='gray')
         ax.set_xlabel('経度 (°E)', fontsize=10)
         ax.set_ylabel('緯度 (°N)', fontsize=10)
 
-        # タイトル
         if hours is not None:
             title = f'地震発生地点マップ（過去{hours}時間、{len(quakes)}件）'
         else:
@@ -1239,45 +1173,39 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
             title += f'\n最小震度: {min_scale}'
         ax.set_title(title, fontsize=14, fontweight='bold', pad=20)
 
-        # 震度ごとの色分け
         def get_color_and_size(max_scale):
-            if max_scale >= 70:  # 震度7
+            if max_scale >= 70:
                 return '#8B0000', 300, '震度7'
-            elif max_scale >= 60:  # 震度6強
+            elif max_scale >= 60:
                 return '#DC143C', 250, '震度6強'
-            elif max_scale >= 55:  # 震度6弱
+            elif max_scale >= 55:
                 return '#FF0000', 200, '震度6弱'
-            elif max_scale >= 50:  # 震度5強
+            elif max_scale >= 50:
                 return '#FF4500', 150, '震度5強'
-            elif max_scale >= 45:  # 震度5弱
+            elif max_scale >= 45:
                 return '#FF8C00', 120, '震度5弱'
-            elif max_scale >= 40:  # 震度4
+            elif max_scale >= 40:
                 return '#FFA500', 100, '震度4'
-            elif max_scale >= 30:  # 震度3
+            elif max_scale >= 30:
                 return '#FFD700', 80, '震度3'
-            elif max_scale >= 20:  # 震度2
+            elif max_scale >= 20:
                 return '#90EE90', 60, '震度2'
-            else:  # 震度1
+            else:
                 return '#ADD8E6', 50, '震度1'
 
-        # 凡例用データ
         legend_elements = {}
 
-        # 地震プロット
         for quake in quakes:
             color, size, label = get_color_and_size(quake['max_scale'])
 
-            # 震源地プロット
             ax.scatter(quake['lon'], quake['lat'],
                        c=color, s=size, alpha=0.6,
                        edgecolors='black', linewidths=1, zorder=5)
 
-            # 凡例用に保存
             if label not in legend_elements:
                 legend_elements[label] = plt.scatter([], [], c=color, s=100,
                                                      edgecolors='black', linewidths=1, alpha=0.6)
 
-        # 凡例追加（震度の高い順）
         scale_order = ['震度7', '震度6強', '震度6弱', '震度5強', '震度5弱', '震度4', '震度3', '震度2', '震度1']
         legend_items = [legend_elements[s] for s in scale_order if s in legend_elements]
         legend_labels = [s for s in scale_order if s in legend_elements]
@@ -1287,7 +1215,6 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
                       loc='upper right', frameon=True,
                       fontsize=9, title='震度', title_fontsize=10)
 
-        # 主要都市の参考点（オプション）
         cities = {
             '札幌': (141.35, 43.06),
             '東京': (139.69, 35.69),
@@ -1301,7 +1228,6 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
             ax.text(lon, lat + 0.3, city, fontsize=8, ha='center',
                     bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.7))
 
-        # 画像をバイトストリームに保存
         buffer = io.BytesIO()
         plt.tight_layout()
         plt.savefig(buffer, format='png', dpi=100, bbox_inches='tight')
@@ -1325,17 +1251,14 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
         try:
             await interaction.response.defer(ephemeral=False)
 
-            # limitの範囲チェック
             limit = max(1, min(limit, 20))
 
-            # 最小震度コードへの変換
             scale_map = {
                 "震度1": 10, "震度2": 20, "震度3": 30, "震度4": 40,
                 "震度5弱": 45, "震度5強": 50, "震度6弱": 55, "震度6強": 60, "震度7": 70
             }
             min_scale_code = scale_map.get(min_scale, 0) if min_scale else 0
 
-            # APIから履歴取得（地震情報のみ: code=551）
             url = f"{self.api_base_url}/history?codes=551&limit=100"
             data = await self.safe_api_request(url)
 
@@ -1343,7 +1266,6 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
                 await interaction.followup.send("❌ 地震情報の取得に失敗しました。")
                 return
 
-            # フィルタリング: 地震情報のみ、最小震度以上
             filtered_quakes = []
             for item in data:
                 info_type = self.classify_info_type(item)
@@ -1359,7 +1281,6 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
                 await interaction.followup.send(f"ℹ️ 該当する地震情報{filter_text}が見つかりませんでした。")
                 return
 
-            # 地図用データを準備（座標がある地震のみ）
             map_quakes = []
             for quake in filtered_quakes:
                 earthquake = quake.get('earthquake', {})
@@ -1385,7 +1306,6 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
                         'time': quake_time
                     })
 
-            # Embedを作成
             embed = discord.Embed(
                 title=f"📊 最近の地震情報 ({len(filtered_quakes)}件)",
                 description=f"最小震度: {min_scale or '指定なし'}",
@@ -1404,7 +1324,6 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
                 depth = hypocenter.get('depth', -1)
                 location = hypocenter.get('name', '不明')
 
-                # 震度による絵文字
                 emoji = "🔴" if max_scale >= 55 else "🟠" if max_scale >= 50 else "🟡" if max_scale >= 40 else "🟢" if max_scale >= 30 else "🔵"
 
                 field_value = (
@@ -1420,14 +1339,12 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
                     inline=True if idx <= 3 else False
                 )
 
-                # 3件ごとに改行を入れる
                 if idx % 3 == 0 and idx < len(filtered_quakes):
                     embed.add_field(name="\u200b", value="\u200b", inline=False)
 
             embed.set_footer(text="データ提供: P2P地震情報 API | PLANA by coffin299")
             embed.set_thumbnail(url="https://www.p2pquake.net/images/QuakeLogo_100x100.png")
 
-            # 地図画像を生成（座標情報がある地震が存在する場合）
             if map_quakes and MATPLOTLIB_AVAILABLE:
                 try:
                     map_buffer = await self.generate_earthquake_map(map_quakes, min_scale, None)
@@ -1436,7 +1353,6 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
                     await interaction.followup.send(embed=embed, file=map_file)
                 except Exception as e:
                     logger.warning(f"履歴地図生成に失敗: {e}")
-                    # 地図生成失敗時はテキストのみ送信
                     await interaction.followup.send(embed=embed)
             else:
                 await interaction.followup.send(embed=embed)
