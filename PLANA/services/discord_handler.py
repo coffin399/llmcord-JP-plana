@@ -179,6 +179,14 @@ class DiscordLogHandler(logging.Handler):
             lambda m: f"{m.group(1)[:1]}****",
             message
         )
+
+        # switch_model_slash等のログ形式: by ユーザー名 -> by ユ****
+        message = re.sub(
+            r"\bby ([^\s.]+)",
+            lambda m: f"by {m.group(1)[:1]}****",
+            message
+        )
+
         return message
 
     async def _process_queue(self):
