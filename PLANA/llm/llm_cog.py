@@ -78,6 +78,8 @@ class LLMCog(commands.Cog, name="LLM"):
         self.message_to_thread: Dict[int, int] = {}
         self.llm_clients: Dict[str, openai.AsyncOpenAI] = {}
 
+        self.model_reset_tasks: Dict[int, asyncio.Task] = {}
+
         self.exception_handler = LLMExceptionHandler(self.llm_config)
 
         self.channel_settings_path = "data/channel_llm_models.json"
@@ -87,7 +89,6 @@ class LLMCog(commands.Cog, name="LLM"):
 
         self.jst = timezone(timedelta(hours=+9))
 
-        # プラグインの初期化
         self.search_agent = self._initialize_search_agent()
         self.bio_manager = self._initialize_bio_manager()
         self.memory_manager = self._initialize_memory_manager()
@@ -105,6 +106,9 @@ class LLMCog(commands.Cog, name="LLM"):
 
     async def cog_unload(self):
         await self.http_session.close()
+        for task in self.model_reset_tasks.values():
+            task.cancel()
+        logger.info(f"Cancelled {len(self.model_reset_tasks)} pending model reset tasks.")
         logger.info("LLMCog's aiohttp session has been closed.")
 
     def _load_json_data(self, path: str) -> Dict[str, Any]:
@@ -287,18 +291,14 @@ class LLMCog(commands.Cog, name="LLM"):
     async def _prepare_multimodal_content(self, message: discord.Message) -> Tuple[List[Dict[str, Any]], str]:
         image_inputs, processed_urls = [], set()
 
-        # --- 修正箇所 START ---
-
         messages_to_scan = []
         visited_ids = set()
         current_msg = message
-        max_depth = 5  # 遡るリプライの最大数 (お好みで調整)
+        max_depth = 5
 
         logger.info(f"🔵 [IMAGE] Starting recursive image scan for message ID: {message.id} with max depth: {max_depth}")
 
-        # ループで安全にリプライを遡る
         for i in range(max_depth):
-            # current_msgが存在しない、または既に処理済みの場合はループを抜ける
             if not current_msg or current_msg.id in visited_ids:
                 break
 
@@ -306,40 +306,31 @@ class LLMCog(commands.Cog, name="LLM"):
             messages_to_scan.append(current_msg)
             visited_ids.add(current_msg.id)
 
-            # 次のメッセージ（リプライ元）を取得
             if current_msg.reference and current_msg.reference.message_id:
                 try:
-                    # まずキャッシュを確認し、なければAPIで取得
                     parent_msg = current_msg.reference.resolved or await message.channel.fetch_message(
                         current_msg.reference.message_id)
                     current_msg = parent_msg
                 except (discord.NotFound, discord.HTTPException) as e:
                     logger.warning(
                         f"⚠️ [IMAGE] Could not fetch referenced message (ID: {current_msg.reference.message_id}): {e}")
-                    break  # 親メッセージが取得できなければ終了
+                    break
             else:
-                break  # リプライでなければ終了
+                break
 
-        # --- 修正箇所 END ---
-
-        # 収集ロジック (ここは元のコードと同じ)
         source_urls = []
-        # messages_to_scanを逆順にすることで、古いメッセージの画像から処理する
         for msg in reversed(messages_to_scan):
-            # 1. メッセージ本文のURLを検索
             for url in IMAGE_URL_PATTERN.findall(msg.content):
                 if url not in processed_urls:
                     source_urls.append(url)
                     processed_urls.add(url)
 
-            # 2. 添付ファイルを検索
             for attachment in msg.attachments:
                 if attachment.content_type and attachment.content_type.startswith(
                         'image/') and attachment.url not in processed_urls:
                     source_urls.append(attachment.url)
                     processed_urls.add(attachment.url)
 
-            # 3. 埋め込み(Embed)内の画像を検索
             for embed in msg.embeds:
                 if embed.image and embed.image.url and embed.image.url not in processed_urls:
                     source_urls.append(embed.image.url)
@@ -367,7 +358,6 @@ class LLMCog(commands.Cog, name="LLM"):
             except discord.HTTPException:
                 pass
 
-        # ユーザーが入力したメッセージのテキストのみを返す
         clean_text = IMAGE_URL_PATTERN.sub('', message.content).strip()
         return image_inputs, clean_text
 
@@ -535,7 +525,6 @@ class LLMCog(commands.Cog, name="LLM"):
                 )
 
                 if should_update and full_response_text:
-                    # ストリーミング中は絵文字を前後に追加
                     max_content_length = DISCORD_MESSAGE_MAX_LENGTH - len(emoji_prefix) - len(emoji_suffix)
                     display_text = emoji_prefix + full_response_text[:max_content_length] + emoji_suffix
 
@@ -570,7 +559,6 @@ class LLMCog(commands.Cog, name="LLM"):
                 f"🟢 [STREAMING] Stream completed | Total chunks: {chunk_count} | Final length: {len(full_response_text)} chars")
 
             if full_response_text:
-                # ストリーミング完了後は絵文字を削除して最終テキストのみ表示
                 final_text = full_response_text[:DISCORD_MESSAGE_MAX_LENGTH]
                 if final_text != sent_message.content:
                     try:
@@ -648,7 +636,6 @@ class LLMCog(commands.Cog, name="LLM"):
 
                 if delta and delta.tool_calls:
                     for tool_call_chunk in delta.tool_calls:
-                        # indexがNoneの場合を考慮してデフォルト値を設定
                         chunk_index = tool_call_chunk.index if tool_call_chunk.index is not None else 0
 
                         if len(tool_calls_buffer) <= chunk_index:
@@ -749,6 +736,45 @@ class LLMCog(commands.Cog, name="LLM"):
                 "name": function_name,
                 "content": final_content
             })
+
+    async def _schedule_model_reset(self, channel_id: int):
+        """
+        指定されたチャンネルのモデルを3時間後にデフォルトに戻すタスク。
+        """
+        try:
+            await asyncio.sleep(3 * 60 * 60)
+
+            logger.info(f"Executing scheduled model reset for channel {channel_id}.")
+
+            channel_id_str = str(channel_id)
+            if channel_id_str in self.channel_models:
+                default_model = self.llm_config.get('model')
+                current_model = self.channel_models.get(channel_id_str)
+
+                if current_model and current_model != default_model:
+                    del self.channel_models[channel_id_str]
+                    await self._save_channel_models()
+                    logger.info(f"Model for channel {channel_id} automatically reset to default '{default_model}'.")
+
+                    channel = self.bot.get_channel(channel_id)
+                    if channel and isinstance(channel, discord.TextChannel):
+                        try:
+                            await channel.send(
+                                f"ℹ️ 3時間が経過したため、このチャンネルのAIモデルをデフォルト (`{default_model}`) に戻しました。"
+                            )
+                        except discord.HTTPException as e:
+                            logger.warning(f"Failed to send model reset notification to channel {channel_id}: {e}")
+                else:
+                    logger.info(f"Model for channel {channel_id} was already default. No auto-reset needed.")
+            else:
+                logger.info(f"Channel {channel_id} no longer has a custom model set. No auto-reset needed.")
+
+        except asyncio.CancelledError:
+            logger.info(f"Model reset task for channel {channel_id} was cancelled.")
+        except Exception as e:
+            logger.error(f"An error occurred in the model reset task for channel {channel_id}: {e}", exc_info=True)
+        finally:
+            self.model_reset_tasks.pop(channel_id, None)
 
     @app_commands.command(
         name="set-ai-bio",
@@ -1047,15 +1073,37 @@ class LLMCog(commands.Cog, name="LLM"):
             await interaction.followup.send(f"⚠️ 指定されたモデル '{model}' は利用できません。")
             return
 
-        channel_id_str = str(interaction.channel_id)
+        channel_id = interaction.channel_id
+        channel_id_str = str(channel_id)
+        default_model = self.llm_config.get('model')
+
+        if channel_id in self.model_reset_tasks:
+            self.model_reset_tasks[channel_id].cancel()
+            self.model_reset_tasks.pop(channel_id, None)
+            logger.info(f"Cancelled previous model reset task for channel {channel_id}.")
+
         self.channel_models[channel_id_str] = model
 
         try:
             await self._save_channel_models()
             await self._get_llm_client_for_channel(interaction.channel_id)
-            await interaction.followup.send(f"✅ このチャンネルのAIモデルが `{model}` に切り替えられました。",
-                                            ephemeral=False)
-            logger.info(f"Model for channel {interaction.channel_id} switched to '{model}' by {interaction.user.name}")
+
+            if model != default_model:
+                task = asyncio.create_task(self._schedule_model_reset(channel_id))
+                self.model_reset_tasks[channel_id] = task
+
+                await interaction.followup.send(
+                    f"✅ このチャンネルのAIモデルが `{model}` に切り替えられました。\n"
+                    f"**3時間後**にデフォルトモデル (`{default_model}`) に自動的に戻ります。",
+                    ephemeral=False
+                )
+                logger.info(f"Model for channel {channel_id} switched to '{model}' by {interaction.user.name}. "
+                            f"Reset scheduled in 3 hours.")
+            else:
+                await interaction.followup.send(f"✅ このチャンネルのAIモデルがデフォルトの `{model}` に戻されました。",
+                                                ephemeral=False)
+                logger.info(f"Model for channel {channel_id} switched to default '{model}' by {interaction.user.name}.")
+
         except Exception as e:
             logger.error(f"Failed to save channel model settings: {e}", exc_info=True)
             await interaction.followup.send("❌ 設定の保存に失敗しました。")
@@ -1066,7 +1114,13 @@ class LLMCog(commands.Cog, name="LLM"):
     )
     async def reset_model_slash(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=False)
-        channel_id_str = str(interaction.channel_id)
+        channel_id = interaction.channel_id
+        channel_id_str = str(channel_id)
+
+        if channel_id in self.model_reset_tasks:
+            self.model_reset_tasks[channel_id].cancel()
+            self.model_reset_tasks.pop(channel_id, None)
+            logger.info(f"Cancelled scheduled model reset for channel {channel_id} due to manual reset.")
 
         if channel_id_str in self.channel_models:
             del self.channel_models[channel_id_str]
