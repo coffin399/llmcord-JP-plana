@@ -620,8 +620,7 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
             embed.set_thumbnail(url="https://www.p2pquake.net/images/QuakeLogo_100x100.png")
 
             map_file = None
-            # EEW以外の場合のみ地図を生成（即応性を重視）
-            if CARTOPY_AVAILABLE and info_type != InfoType.EEW.value:
+            if CARTOPY_AVAILABLE:
                 lat = hypocenter.get('latitude')
                 lon = hypocenter.get('longitude')
 
@@ -642,8 +641,6 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
                         embed.set_image(url="attachment://earthquake_location.png")
                     except Exception as e:
                         logger.warning(f"地図生成に失敗: {e}")
-            elif info_type == InfoType.EEW.value:
-                logger.debug("EEWは即応性を重視し、地図生成をスキップしました")
 
             await self.send_embed_to_channels(embed, info_type, map_file)
 
@@ -706,7 +703,7 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
         fig = plt.figure(figsize=(10, 12), dpi=120)
         ax = fig.add_subplot(1, 1, 1, projection=ccrs.PlateCarree())
 
-        # 震源地周辺にズーム（震度に応じて範囲を調整）
+        # 震度に応じてズーム範囲を調整
         if max_scale >= 50:  # 震度5強以上は広範囲
             zoom_range = 4.5
         elif max_scale >= 40:  # 震度4以上は中範囲
@@ -714,11 +711,33 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
         else:  # それ以下は狭い範囲
             zoom_range = 2.5
 
-        # 震源地を中心にズーム（ただし日本の範囲内に制限）
-        lon_min = max(128, lon - zoom_range)
-        lon_max = min(146, lon + zoom_range)
-        lat_min = max(30, lat - zoom_range * 0.8)  # 緯度は少し狭く
-        lat_max = min(46, lat + zoom_range * 0.8)
+        # 震源地を中心に表示範囲を計算し、日本の主要領域からはみ出さないように調整
+        lon_span = zoom_range * 2
+        lat_span = zoom_range * 1.6  # 縦横比を考慮 (zoom_range * 0.8 * 2)
+
+        lon_min = lon - lon_span / 2
+        lon_max = lon + lon_span / 2
+        lat_min = lat - lat_span / 2
+        lat_max = lat + lat_span / 2
+
+        # 日本の表示範囲の境界を設定（沖縄から北海道、小笠原諸島までをカバー）
+        JAPAN_LON_MIN, JAPAN_LON_MAX = 122, 148
+        JAPAN_LAT_MIN, JAPAN_LAT_MAX = 24, 46
+
+        # 理想範囲が境界をはみ出す場合、表示範囲をずらす
+        if lon_min < JAPAN_LON_MIN:
+            lon_min = JAPAN_LON_MIN
+            lon_max = JAPAN_LON_MIN + lon_span
+        elif lon_max > JAPAN_LON_MAX:
+            lon_max = JAPAN_LON_MAX
+            lon_min = JAPAN_LON_MAX - lon_span
+
+        if lat_min < JAPAN_LAT_MIN:
+            lat_min = JAPAN_LAT_MIN
+            lat_max = JAPAN_LAT_MIN + lat_span
+        elif lat_max > JAPAN_LAT_MAX:
+            lat_max = JAPAN_LAT_MAX
+            lat_min = JAPAN_LAT_MAX - lat_span
 
         ax.set_extent([lon_min, lon_max, lat_min, lat_max], crs=ccrs.PlateCarree())
 
@@ -739,13 +758,9 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
         except:
             logger.debug("都道府県境界の追加をスキップ")
 
-        # グリッド線
-        gl = ax.gridlines(crs=ccrs.PlateCarree(), draw_labels=True,
-                          linewidth=0.5, color='gray', alpha=0.5, linestyle='--')
-        gl.top_labels = False
-        gl.right_labels = False
-        gl.xlabel_style = {'size': 10}
-        gl.ylabel_style = {'size': 10}
+        # グリッド線（座標ラベルなし）
+        ax.gridlines(crs=ccrs.PlateCarree(), draw_labels=False,
+                     linewidth=0.5, color='gray', alpha=0.5, linestyle='--')
 
         # タイトル
         title_prefix = "緊急地震速報" if info_type == "eew" else "地震情報"
@@ -891,13 +906,11 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
         except:
             logger.debug("都道府県境界の追加をスキップ")
 
-        # グリッド線
-        gl = ax.gridlines(crs=ccrs.PlateCarree(), draw_labels=True,
-                          linewidth=0.5, color='gray', alpha=0.5, linestyle='--')
-        gl.top_labels = False
-        gl.right_labels = False
-        gl.xlabel_style = {'size': 10}
-        gl.ylabel_style = {'size': 10}
+        # ▼▼▼ 修正点2: 座標情報を削除 ▼▼▼
+        # グリッド線（座標ラベルなし）
+        ax.gridlines(crs=ccrs.PlateCarree(), draw_labels=False,
+                     linewidth=0.5, color='gray', alpha=0.5, linestyle='--')
+        # ▲▲▲ 修正点2 ここまで ▲▲▲
 
         # タイトル
         if hours is not None:
@@ -1430,10 +1443,10 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
         ax.add_feature(cfeature.COASTLINE, edgecolor='gray')
         ax.add_feature(cfeature.BORDERS, linestyle=':', edgecolor='gray')
 
-        gl = ax.gridlines(crs=ccrs.PlateCarree(), draw_labels=True,
+        # ▼▼▼ 修正点2: 座標情報を削除 ▼▼▼
+        gl = ax.gridlines(crs=ccrs.PlateCarree(), draw_labels=False,
                           linewidth=0.5, color='gray', alpha=0.5, linestyle='--')
-        gl.top_labels = False
-        gl.right_labels = False
+        # ▲▲▲ 修正点2 ここまで ▲▲▲
 
         if hours is not None:
             title = f'地震発生地点マップ（過去{hours}時間、{len(quakes)}件）'
