@@ -319,7 +319,18 @@ class LLMCog(commands.Cog, name="LLM"):
                 break
 
         source_urls = []
+        # 修正点 1: テキストを収集するためのリストを初期化
+        text_parts = []
+
+        # 収集したメッセージを古い順（会話の順）に処理
         for msg in reversed(messages_to_scan):
+            # 修正点 2: 各メッセージからテキストを抽出し、リストに追加
+            # 画像URLを削除した残りのテキストを取得
+            text_content_part = IMAGE_URL_PATTERN.sub('', msg.content).strip()
+            if text_content_part:
+                text_parts.append(text_content_part)
+
+            # (既存の画像URL収集処理)
             for url in IMAGE_URL_PATTERN.findall(msg.content):
                 if url not in processed_urls:
                     source_urls.append(url)
@@ -358,7 +369,8 @@ class LLMCog(commands.Cog, name="LLM"):
             except discord.HTTPException:
                 pass
 
-        clean_text = IMAGE_URL_PATTERN.sub('', message.content).strip()
+        # 修正点 3: 収集したテキストパーツを改行で結合
+        clean_text = "\n".join(text_parts)
         return image_inputs, clean_text
 
     @commands.Cog.listener()
