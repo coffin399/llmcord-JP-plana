@@ -17,6 +17,12 @@ akinator
 google-api-python-client
 google-auth-httplib2
 google-auth-oauthlib
+
 matplotlib
 japanize_matplotlib
+
+Shapely
+pyshp
+pyproj
+geos
 cartopy

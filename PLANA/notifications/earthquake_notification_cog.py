@@ -14,16 +14,29 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
+# 最初にロガーを定義
+logger = logging.getLogger('EarthquakeTsunamiCog')
+
 try:
     import matplotlib
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
-    from matplotlib.patches import Circle
+    import japanize_matplotlib  # ★★★ japanize_matplotlib をインポート ★★★
     MATPLOTLIB_AVAILABLE = True
-    plt.rcParams['font.family'] = 'Source Han Code JP'
+    try:
+        import cartopy.crs as ccrs
+        import cartopy.feature as cfeature
+        CARTOPY_AVAILABLE = True
+        logger.info("✅ Cartopyが正常にインポートされました。地図機能が有効です。")
+    except ImportError:
+        CARTOPY_AVAILABLE = False
+        logger.warning("⚠️ Cartopyが見つかりません。地図機能は無効になります。`pip install cartopy`でインストールしてください。")
 except ImportError:
     MATPLOTLIB_AVAILABLE = False
+    CARTOPY_AVAILABLE = False
     plt = None
+    logger.warning("⚠️ Matplotlibが見つかりません。地図機能は無効になります。`pip install matplotlib japanize-matplotlib`でインストールしてください。")
+
 
 from PLANA.notifications.error.earthquake_errors import (
     EarthquakeTsunamiExceptionHandler,
@@ -35,8 +48,6 @@ from PLANA.notifications.error.earthquake_errors import (
 
 DATA_DIR = 'data'
 CONFIG_FILE = os.path.join(DATA_DIR, 'earthquake_tsunami_notification_config.json')
-
-logger = logging.getLogger('EarthquakeTsunamiCog')
 
 
 class InfoType(Enum):
@@ -559,7 +570,7 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
             embed.set_thumbnail(url="https://www.p2pquake.net/images/QuakeLogo_100x100.png")
 
             map_file = None
-            if MATPLOTLIB_AVAILABLE:
+            if CARTOPY_AVAILABLE:
                 lat = hypocenter.get('latitude')
                 lon = hypocenter.get('longitude')
 
@@ -635,68 +646,55 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
         return await loop.run_in_executor(None, self._generate_single_map_sync, quake, info_type)
 
     def _generate_single_map_sync(self, quake: dict, info_type: str) -> io.BytesIO:
-        """単一の地震マップ画像を同期的に生成（日本地図表示）"""
+        """単一の地震マップ画像を同期的に生成（Cartopyで日本地図表示）"""
         lat, lon = quake['lat'], quake['lon']
         max_scale = quake['max_scale']
 
-        fig, ax = plt.subplots(figsize=(10, 12), dpi=100)
-        ax.set_xlim(128, 146)
-        ax.set_ylim(30, 46)
-        ax.set_aspect('equal')
+        fig = plt.figure(figsize=(10, 12), dpi=100)
+        ax = fig.add_subplot(1, 1, 1, projection=ccrs.PlateCarree())
+        ax.set_extent([128, 146, 30, 46], crs=ccrs.PlateCarree())
 
-        ax.set_facecolor('#e8f4f8')
-        fig.patch.set_facecolor('white')
+        ax.add_feature(cfeature.LAND, facecolor='#e8f4f8')
+        ax.add_feature(cfeature.OCEAN, facecolor='white')
+        ax.add_feature(cfeature.COASTLINE, edgecolor='gray')
+        ax.add_feature(cfeature.BORDERS, linestyle=':', edgecolor='gray')
 
-        ax.grid(True, linestyle='--', alpha=0.3, color='gray')
-        ax.set_xlabel('経度 (°E)', fontsize=10)
-        ax.set_ylabel('緯度 (°N)', fontsize=10)
+        gl = ax.gridlines(crs=ccrs.PlateCarree(), draw_labels=True,
+                          linewidth=0.5, color='gray', alpha=0.5, linestyle='--')
+        gl.top_labels = False
+        gl.right_labels = False
 
-        title_prefix = "緊急地震速報" if info_type == InfoType.EEW.value else "地震情報"
+        title_prefix = "緊急地震速報" if info_type == "eew" else "地震情報"
         title = f'{title_prefix} - 震源位置\n{quake["name"]}'
         ax.set_title(title, fontsize=14, fontweight='bold', pad=20)
 
         cities = {
-            '札幌': (141.35, 43.06),
-            '仙台': (140.87, 38.27),
-            '東京': (139.69, 35.69),
-            '横浜': (139.64, 35.44),
-            '名古屋': (136.91, 35.18),
-            '京都': (135.76, 35.01),
-            '大阪': (135.50, 34.69),
-            '神戸': (135.18, 34.69),
-            '広島': (132.46, 34.40),
-            '福岡': (130.42, 33.59),
-            '那覇': (127.68, 26.21),
+            '札幌': (141.35, 43.06), '仙台': (140.87, 38.27), '東京': (139.69, 35.69),
+            '横浜': (139.64, 35.44), '名古屋': (136.91, 35.18), '京都': (135.76, 35.01),
+            '大阪': (135.50, 34.69), '神戸': (135.18, 34.69), '広島': (132.46, 34.40),
+            '福岡': (130.42, 33.59), '那覇': (127.68, 26.21),
         }
 
         for city, (city_lon, city_lat) in cities.items():
-            ax.plot(city_lon, city_lat, 'k^', markersize=6, zorder=8)
+            ax.plot(city_lon, city_lat, 'k^', markersize=6, zorder=8, transform=ccrs.Geodetic())
             ax.text(city_lon, city_lat + 0.3, city, fontsize=9, ha='center',
-                    bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.8))
+                    bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.8),
+                    transform=ccrs.Geodetic())
 
         def get_color_and_size(scale):
-            if scale >= 70:
-                return '#8B0000', 500
-            elif scale >= 60:
-                return '#DC143C', 450
-            elif scale >= 55:
-                return '#FF0000', 400
-            elif scale >= 50:
-                return '#FF4500', 350
-            elif scale >= 45:
-                return '#FF8C00', 300
-            elif scale >= 40:
-                return '#FFA500', 250
-            elif scale >= 30:
-                return '#FFD700', 200
-            else:
-                return '#ADD8E6', 150
+            if scale >= 70: return '#8B0000', 500
+            elif scale >= 60: return '#DC143C', 450
+            elif scale >= 55: return '#FF0000', 400
+            elif scale >= 50: return '#FF4500', 350
+            elif scale >= 45: return '#FF8C00', 300
+            elif scale >= 40: return '#FFA500', 250
+            elif scale >= 30: return '#FFD700', 200
+            else: return '#ADD8E6', 150
 
         color, size = get_color_and_size(max_scale)
 
-        ax.scatter(lon, lat, marker='x', c='red', s=size * 1.8, linewidths=4, zorder=10, label='震源')
-
-        ax.scatter(lon, lat, c=color, s=size, alpha=0.7, edgecolors='black', linewidths=2, zorder=9)
+        ax.scatter(lon, lat, marker='x', c='red', s=size * 1.8, linewidths=4, zorder=10, label='震源', transform=ccrs.Geodetic())
+        ax.scatter(lon, lat, c=color, s=size, alpha=0.7, edgecolors='black', linewidths=2, zorder=9, transform=ccrs.Geodetic())
 
         info_text = f'震度: {self.scale_to_japanese(max_scale)}\n'
         if quake['magnitude'] != -1:
@@ -710,7 +708,8 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
 
         ax.text(lon, text_y, info_text,
                 fontsize=11, ha='center', va='top',
-                bbox=dict(boxstyle='round,pad=0.6', facecolor='white', edgecolor='red', linewidth=2, alpha=0.95))
+                bbox=dict(boxstyle='round,pad=0.6', facecolor='white', edgecolor='red', linewidth=2, alpha=0.95),
+                transform=ccrs.Geodetic())
 
         ax.legend(loc='upper left', frameon=True, fontsize=10)
 
@@ -762,7 +761,7 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
 
                 if map_file:
                     map_file.fp.seek(0)
-                    file_copy = discord.File(fp=map_file.fp, filename=map_file.filename)
+                    file_copy = discord.File(fp=io.BytesIO(map_file.fp.read()), filename=map_file.filename)
                     await channel.send(embed=embed, file=file_copy)
                 else:
                     await channel.send(embed=embed)
@@ -912,17 +911,30 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
                     if channel:
                         target_channel, is_configured = channel, True
 
-            embed = (
-                await self.create_tsunami_test_embed(tsunami_level)
-                if info_type == "津波予報"
-                else await self.create_earthquake_test_embed(
-                    info_type,
-                    max_scale,
-                    {"震度3": 30, "震度5強": 50, "震度7": 70}.get(max_scale, 50)
-                )
-            )
+            map_file = None
+            embed = None
 
-            await target_channel.send(embed=embed)
+            if info_type == "津波予報":
+                embed = await self.create_tsunami_test_embed(tsunami_level)
+            else:
+                scale_code = {"震度3": 30, "震度5強": 50, "震度7": 70}.get(max_scale, 50)
+                embed = await self.create_earthquake_test_embed(info_type, max_scale, scale_code)
+
+                if CARTOPY_AVAILABLE:
+                    try:
+                        test_quake_data = {
+                            'lat': 36.0, 'lon': 140.5, 'magnitude': 7.0, 'depth': 30,
+                            'max_scale': scale_code, 'name': 'テスト震源地 (関東沖)',
+                            'time': datetime.now(self.jst)
+                        }
+                        info_type_value = "eew" if info_type == "緊急地震速報" else "quake"
+                        map_buffer = await self.generate_single_earthquake_map(test_quake_data, info_type_value)
+                        map_file = discord.File(fp=map_buffer, filename="earthquake_test_map.png")
+                        embed.set_image(url="attachment://earthquake_test_map.png")
+                    except Exception as e:
+                        logger.warning(f"テスト通知の地図生成に失敗: {e}")
+
+            await target_channel.send(embed=embed, file=map_file)
 
             msg = (
                 f"✅ 設定されたチャンネル {target_channel.mention} に **{info_type}** のテスト通知を送信しました。"
@@ -952,7 +964,7 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
         )
         embed.add_field(name="🌏 震源地", value="```テスト震源地```", inline=True)
         embed.add_field(name="📊 マグニチュード", value="```M7.0```", inline=True)
-        embed.add_field(name="📏 深さ", value="```10km```", inline=True)
+        embed.add_field(name="📏 深さ", value="```30km```", inline=True)
         embed.add_field(
             name="📍 各地の震度",
             value=f"🔴 **{max_scale}** - テスト県A市\n🟠 **震度4** - テスト県B市\n🟡 **震度3** - テスト県C市",
@@ -1062,8 +1074,8 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
         try:
             await interaction.response.defer(ephemeral=False)
 
-            if not MATPLOTLIB_AVAILABLE:
-                await interaction.followup.send("❌ 地図機能を使用するにはmatplotlibのインストールが必要です。")
+            if not CARTOPY_AVAILABLE:
+                await interaction.followup.send("❌ 地図機能は現在利用できません。Bot管理者にお問い合わせください。")
                 return
 
             limit = max(1, min(limit, 50))
@@ -1153,17 +1165,19 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
 
     def _generate_map_sync(self, quakes: list, min_scale: Optional[str], hours: Optional[int]) -> io.BytesIO:
         """地震マップ画像を同期的に生成"""
-        fig, ax = plt.subplots(figsize=(10, 12), dpi=100)
-        ax.set_xlim(128, 146)
-        ax.set_ylim(30, 46)
-        ax.set_aspect('equal')
+        fig = plt.figure(figsize=(10, 12), dpi=100)
+        ax = fig.add_subplot(1, 1, 1, projection=ccrs.PlateCarree())
+        ax.set_extent([128, 146, 30, 46], crs=ccrs.PlateCarree())
 
-        ax.set_facecolor('#e8f4f8')
-        fig.patch.set_facecolor('white')
+        ax.add_feature(cfeature.LAND, facecolor='#e8f4f8')
+        ax.add_feature(cfeature.OCEAN, facecolor='white')
+        ax.add_feature(cfeature.COASTLINE, edgecolor='gray')
+        ax.add_feature(cfeature.BORDERS, linestyle=':', edgecolor='gray')
 
-        ax.grid(True, linestyle='--', alpha=0.3, color='gray')
-        ax.set_xlabel('経度 (°E)', fontsize=10)
-        ax.set_ylabel('緯度 (°N)', fontsize=10)
+        gl = ax.gridlines(crs=ccrs.PlateCarree(), draw_labels=True,
+                          linewidth=0.5, color='gray', alpha=0.5, linestyle='--')
+        gl.top_labels = False
+        gl.right_labels = False
 
         if hours is not None:
             title = f'地震発生地点マップ（過去{hours}時間、{len(quakes)}件）'
@@ -1174,34 +1188,22 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
         ax.set_title(title, fontsize=14, fontweight='bold', pad=20)
 
         def get_color_and_size(max_scale):
-            if max_scale >= 70:
-                return '#8B0000', 300, '震度7'
-            elif max_scale >= 60:
-                return '#DC143C', 250, '震度6強'
-            elif max_scale >= 55:
-                return '#FF0000', 200, '震度6弱'
-            elif max_scale >= 50:
-                return '#FF4500', 150, '震度5強'
-            elif max_scale >= 45:
-                return '#FF8C00', 120, '震度5弱'
-            elif max_scale >= 40:
-                return '#FFA500', 100, '震度4'
-            elif max_scale >= 30:
-                return '#FFD700', 80, '震度3'
-            elif max_scale >= 20:
-                return '#90EE90', 60, '震度2'
-            else:
-                return '#ADD8E6', 50, '震度1'
+            if max_scale >= 70: return '#8B0000', 300, '震度7'
+            elif max_scale >= 60: return '#DC143C', 250, '震度6強'
+            elif max_scale >= 55: return '#FF0000', 200, '震度6弱'
+            elif max_scale >= 50: return '#FF4500', 150, '震度5強'
+            elif max_scale >= 45: return '#FF8C00', 120, '震度5弱'
+            elif max_scale >= 40: return '#FFA500', 100, '震度4'
+            elif max_scale >= 30: return '#FFD700', 80, '震度3'
+            elif max_scale >= 20: return '#90EE90', 60, '震度2'
+            else: return '#ADD8E6', 50, '震度1'
 
         legend_elements = {}
 
         for quake in quakes:
             color, size, label = get_color_and_size(quake['max_scale'])
-
-            ax.scatter(quake['lon'], quake['lat'],
-                       c=color, s=size, alpha=0.6,
-                       edgecolors='black', linewidths=1, zorder=5)
-
+            ax.scatter(quake['lon'], quake['lat'], c=color, s=size, alpha=0.6,
+                       edgecolors='black', linewidths=1, zorder=5, transform=ccrs.Geodetic())
             if label not in legend_elements:
                 legend_elements[label] = plt.scatter([], [], c=color, s=100,
                                                      edgecolors='black', linewidths=1, alpha=0.6)
@@ -1211,22 +1213,19 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
         legend_labels = [s for s in scale_order if s in legend_elements]
 
         if legend_items:
-            ax.legend(legend_items, legend_labels,
-                      loc='upper right', frameon=True,
+            ax.legend(legend_items, legend_labels, loc='upper right', frameon=True,
                       fontsize=9, title='震度', title_fontsize=10)
 
         cities = {
-            '札幌': (141.35, 43.06),
-            '東京': (139.69, 35.69),
-            '名古屋': (136.91, 35.18),
-            '大阪': (135.50, 34.69),
-            '福岡': (130.42, 33.59),
+            '札幌': (141.35, 43.06), '東京': (139.69, 35.69), '名古屋': (136.91, 35.18),
+            '大阪': (135.50, 34.69), '福岡': (130.42, 33.59),
         }
 
         for city, (lon, lat) in cities.items():
-            ax.plot(lon, lat, 'k^', markersize=5, zorder=3)
+            ax.plot(lon, lat, 'k^', markersize=5, zorder=3, transform=ccrs.Geodetic())
             ax.text(lon, lat + 0.3, city, fontsize=8, ha='center',
-                    bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.7))
+                    bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.7),
+                    transform=ccrs.Geodetic())
 
         buffer = io.BytesIO()
         plt.tight_layout()
@@ -1345,7 +1344,7 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
             embed.set_footer(text="データ提供: P2P地震情報 API | PLANA by coffin299")
             embed.set_thumbnail(url="https://www.p2pquake.net/images/QuakeLogo_100x100.png")
 
-            if map_quakes and MATPLOTLIB_AVAILABLE:
+            if map_quakes and CARTOPY_AVAILABLE:
                 try:
                     map_buffer = await self.generate_earthquake_map(map_quakes, min_scale, None)
                     map_file = discord.File(fp=map_buffer, filename="earthquake_history_map.png")
