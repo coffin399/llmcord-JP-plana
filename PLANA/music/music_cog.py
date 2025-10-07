@@ -85,6 +85,7 @@ class GuildState:
         self.playback_start_time: Optional[float] = None
         self.seek_position: int = 0
         self.paused_at: Optional[float] = None
+        self.is_seeking: bool = False  # 追加: シーク中フラグ
 
     def update_activity(self):
         self.last_activity = datetime.now()
@@ -341,12 +342,14 @@ class MusicCog(commands.Cog, name="music_cog"):
         if state.auto_leave_task and not state.auto_leave_task.done():
             state.auto_leave_task.cancel()
 
-        # seek操作でない場合のみ再生状態をチェック
-        if seek_seconds == 0 and (state.is_paused or (state.voice_client and state.voice_client.is_playing())):
-            return
+        is_seek_operation = seek_seconds > 0
+
+        # シーク操作でない場合のみ再生状態をチェック
+        if not is_seek_operation:
+            if state.is_paused or (state.voice_client and state.voice_client.is_playing()):
+                return
 
         track_to_play: Optional[Track] = None
-        is_seek_operation = seek_seconds > 0
 
         # seek操作の場合は常に現在の曲を使用
         if is_seek_operation and state.current_track:
@@ -412,7 +415,8 @@ class MusicCog(commands.Cog, name="music_cog"):
             logger.info(
                 f"Guild {guild_id} ({guild.name if guild else ''}): Now playing - {track_to_play.title}{seek_info}")
 
-            if state.last_text_channel_id and track_to_play.requester_id and seek_seconds == 0:
+            # シーク時はメッセージを送らない
+            if state.last_text_channel_id and track_to_play.requester_id and not is_seek_operation:
                 try:
                     requester = self.bot.get_user(track_to_play.requester_id) or await self.bot.fetch_user(
                         track_to_play.requester_id)
@@ -431,7 +435,7 @@ class MusicCog(commands.Cog, name="music_cog"):
             if state.last_text_channel_id:
                 await self._send_background_message(state.last_text_channel_id, "error_message_wrapper",
                                                     error=error_message)
-            if state.loop_mode == LoopMode.ALL and track_to_play and seek_seconds == 0:
+            if state.loop_mode == LoopMode.ALL and track_to_play and not is_seek_operation:
                 await state.queue.put(track_to_play)
             state.current_track = None
             state.reset_playback_tracking()
@@ -440,6 +444,11 @@ class MusicCog(commands.Cog, name="music_cog"):
     def _song_finished_callback(self, error: Optional[Exception], guild_id: int):
         state = self._get_guild_state(guild_id)
         if not state:
+            return
+
+        # シーク中の場合はコールバックを無視
+        if state.is_seeking:
+            state.is_seeking = False
             return
 
         finished_track = state.current_track
@@ -600,9 +609,15 @@ class MusicCog(commands.Cog, name="music_cog"):
                                       duration=format_duration(state.current_track.duration))
             return
 
+        # シーク中フラグを設定してコールバックを無視
+        state.is_seeking = True
+
         # 現在の再生を停止して、新しい位置から再生
         if state.voice_client and state.voice_client.is_playing():
             state.voice_client.stop()
+
+        # 少し待機してからシーク再生を開始
+        await asyncio.sleep(0.1)
 
         await self._send_response(interaction, "seeked_to_position", position=format_duration(seek_seconds))
         await self._play_next_song(interaction.guild.id, seek_seconds=seek_seconds)
