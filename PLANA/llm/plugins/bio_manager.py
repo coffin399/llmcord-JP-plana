@@ -49,7 +49,7 @@ class BioManager:
             "type": "function",
             "function": {
                 "name": self.name,
-                "description": "ユーザーに関する情報を記憶・更新します。ユーザーが自己紹介したり、何かを覚えてほしいと頼んだりしたときに呼び出してください。既存の情報は新しい情報で上書きされます。",
+                "description": "ユーザーに関する情報を記憶・更新します。ユーザーが自己紹介したり、何かを覚えてほしいと頼んだりしたときに積極的に呼び出してください。既存の情報は新しい情報で上書きされます。",
                 "parameters": {
                     "type": "object",
                     "properties": {
