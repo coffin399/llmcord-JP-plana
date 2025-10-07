@@ -89,28 +89,28 @@ class DiscordLogHandler(logging.Handler):
         # LLMCog形式: guild='サーバー名(ID)' -> guild='サー****(****)'
         message = re.sub(
             r"guild='([^']+)\(\d+\)'",
-            lambda m: f"guild='{m.group(1)[:3]}****(****)'",
+            lambda m: f"guild='{m.group(1)[:2]}****(****)'",
             message
         )
 
         # LLMCog形式: author='ユーザー名(ID)' -> author='ユー****(****)'
         message = re.sub(
             r"author='([^']+)\(\d+\)'",
-            lambda m: f"author='{m.group(1)[:3]}****(****)'",
+            lambda m: f"author='{m.group(1)[:2]}****(****)'",
             message
         )
 
         # LLMCog形式: channel='チャンネル名(ID)' -> channel='チ****(****)'
         message = re.sub(
             r"channel='([^(]+)\(\d+\)'",
-            lambda m: f"channel='{m.group(1)[:1]}****(****)'",
+            lambda m: f"channel='{m.group(1)[:2]}****(****)'",
             message
         )
 
         # MusicCog形式: Guild ID (サーバー名): -> Guild ****(サー****):
         message = re.sub(
             r"Guild \d+ \(([^)]+)\):",
-            lambda m: f"Guild ****({m.group(1)[:3]}****):",
+            lambda m: f"Guild ****({m.group(1)[:2]}****):",
             message
         )
 
@@ -124,7 +124,21 @@ class DiscordLogHandler(logging.Handler):
         # MusicCog形式: Connected to チャンネル名 -> Connected to チャン****
         message = re.sub(
             r"Connected to (.*)",
-            lambda m: f"Connected to {m.group(1)[:3]}****",
+            lambda m: f"Connected to {m.group(1)[:2]}****",
+            message
+        )
+
+        # BioManager形式: Content: 'ユーザーbio' -> Content: 'ユ****'
+        message = re.sub(
+            r"(Content: ')([^']+)'",
+            lambda m: f"{m.group(1)}{m.group(2)[:2]}****'",
+            message
+        )
+
+        # Twitch通知形式: ギルド [ID] のチャンネル [ID] -> ギルド X**** のチャンネル Y****
+        message = re.sub(
+            r"(ギルド )(\d+)( のチャンネル )(\d+)",
+            lambda m: f"{m.group(1)}{m.group(2)[:1]}****{m.group(3)}{m.group(4)[:1]}****",
             message
         )
 
