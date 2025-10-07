@@ -67,7 +67,7 @@ class DiscordLogHandler(logging.Handler):
         ログメッセージからセンシティブな情報を部分的に伏字化する。
         - Windowsのユーザーパス
         - Discord Gateway Session ID
-        - Discordのサーバー名、ユーザー名、チャンネル名 (先頭3文字のみ表示)
+        - Discordのサーバー名、ユーザー名、チャンネル名 (先頭文字のみ表示)
         - Discordの各種ID (完全に伏字化)
         """
         # Windowsユーザーパス
@@ -86,7 +86,6 @@ class DiscordLogHandler(logging.Handler):
             flags=re.IGNORECASE
         )
 
-
         # LLMCog形式: guild='サーバー名(ID)' -> guild='サー****(****)'
         message = re.sub(
             r"guild='([^']+)\(\d+\)'",
@@ -98,6 +97,13 @@ class DiscordLogHandler(logging.Handler):
         message = re.sub(
             r"author='([^']+)\(\d+\)'",
             lambda m: f"author='{m.group(1)[:3]}****(****)'",
+            message
+        )
+
+        # LLMCog形式: channel='チャンネル名(ID)' -> channel='チ****(****)'
+        message = re.sub(
+            r"channel='([^(]+)\(\d+\)'",
+            lambda m: f"channel='{m.group(1)[:1]}****(****)'",
             message
         )
 
