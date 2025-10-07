@@ -244,11 +244,18 @@ class Shittim(commands.Bot):
         logging.info(f'{self.user.name} ({self.user.id}) としてDiscordにログインし、準備が完了しました！')
         logging.info(f"現在 {len(self.guilds)} サーバーに参加しています。")
         logging.info("📱 モバイルステータスで表示されています")
-        self.status_templates = self.config.get('status_rotation', ["/help", "operating on {guild_count} servers",
+        self.status_templates = self.config.get('status_rotation', ["/help",
                                                                     "operating on {guild_count} servers",
-                                                                    "PLANA Ver.2025-10-06", "PLANA Ver.2025-10-06",
-                                                                    "/llm_help", "/llm_help_en", "/ytdlp",
-                                                                    "/updates", "/updates", "/enable-logging"])
+                                                                    "operating on {guild_count} servers",
+                                                                    "PLANA Ver.2025-10-07",
+                                                                    "PLANA Ver.2025-10-07",
+                                                                    "/llm_help",
+                                                                    "/llm_help_en",
+                                                                    "/ytdlp",
+                                                                    "/updates",
+                                                                    "/updates",
+                                                                    "/enable-logging"
+                                                                    ])
         self.rotate_status.start()
 
     async def on_guild_join(self, guild: discord.Guild):
