@@ -1,5 +1,3 @@
-#PLANA/games/akinator_cog.py
-
 from typing import Optional, Dict
 import asyncio
 
@@ -52,37 +50,31 @@ class GameButtonView(discord.ui.View):
 
     @discord.ui.button(label="はい / Yes", style=discord.ButtonStyle.primary, emoji="✅")
     async def yes_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # すぐに defer() を実行
         await interaction.response.defer()
         await self.handle_answer(interaction, "y")
 
     @discord.ui.button(label="いいえ / No", style=discord.ButtonStyle.primary, emoji="❌")
     async def no_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # すぐに defer() を実行
         await interaction.response.defer()
         await self.handle_answer(interaction, "n")
 
     @discord.ui.button(label="わからない / I Don't Know", style=discord.ButtonStyle.primary, emoji="🤷")
     async def idk_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # すぐに defer() を実行
         await interaction.response.defer()
         await self.handle_answer(interaction, "idk")
 
     @discord.ui.button(label="たぶんそう / Probably", style=discord.ButtonStyle.primary, emoji="👍")
     async def probably_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # すぐに defer() を実行
         await interaction.response.defer()
         await self.handle_answer(interaction, "p")
 
     @discord.ui.button(label="たぶん違う / Probably Not", style=discord.ButtonStyle.primary, emoji="👎")
     async def probably_not_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # すぐに defer() を実行
         await interaction.response.defer()
         await self.handle_answer(interaction, "pn")
 
     @discord.ui.button(label="戻る / Back", style=discord.ButtonStyle.primary, emoji="⬅️", row=1)
     async def back_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # すぐに defer() を実行
         await interaction.response.defer()
         await self.handle_answer(interaction, "b")
 
@@ -91,18 +83,15 @@ class GameButtonView(discord.ui.View):
         if interaction.user.id != self.game.user_id:
             await interaction.response.send_message("このゲームはあなたのものではありません！", ephemeral=True)
             return
-        # このボタンはゲームを終了させるだけなので、ここにも defer() を入れる
         await interaction.response.defer()
         await self.cog._end_game(self.game, "ゲームが中断されました。")
 
     async def handle_answer(self, interaction: discord.Interaction, answer: str):
         if interaction.user.id != self.game.user_id:
-            # defer() 済みなので followup.send を使う
             await interaction.followup.send("このゲームはあなたのものではありません！", ephemeral=True)
             return
 
         if self.game.is_guessing:
-            # defer() 済みなので followup.send を使う
             await interaction.followup.send("推測中です。上のボタンで回答してください！", ephemeral=True)
             return
 
@@ -207,8 +196,9 @@ class AkinatorGame:
         self.is_active = True
         self.is_guessing = False
         self.current_guess = None
-        self.retry_count = 0  # リトライカウンターを追加
-        self.last_step = 0  # 最後のステップを記録
+        self.timeout_count = 0  # タイムアウト専用カウンター
+        self.stuck_count = 0  # スタック専用カウンター
+        self.last_step = 0
 
 
 class AkinatorCog(commands.Cog):
@@ -292,70 +282,83 @@ class AkinatorCog(commands.Cog):
             return
 
         try:
-            # 回答処理の前にステップを記録
             previous_step = game.aki.step
 
             if answer == "b":
                 try:
                     await game.aki.back()
-                    game.retry_count = 0  # 成功したらリトライカウントをリセット
+                    game.timeout_count = 0
+                    game.stuck_count = 0
                 except akinator.CantGoBackAnyFurther:
                     return
             else:
-                # タイムアウトを設定して回答を送信
+                # タイムアウトを15秒に延長（25問目周辺で遅延が発生する可能性）
                 try:
-                    await asyncio.wait_for(game.aki.answer(answer), timeout=10.0)
-                    game.retry_count = 0  # 成功したらリトライカウントをリセット
+                    await asyncio.wait_for(game.aki.answer(answer), timeout=15.0)
+                    game.timeout_count = 0  # 成功したらタイムアウトカウントをリセット
                 except asyncio.TimeoutError:
                     print(f"Answer timeout at step {game.aki.step}")
-                    game.retry_count += 1
+                    game.timeout_count += 1
 
-                    # 3回連続でタイムアウトした場合
-                    if game.retry_count >= 3:
+                    # タイムアウトは5回まで許容（ネットワーク遅延を考慮）
+                    if game.timeout_count >= 5:
                         await self._end_game(game, "接続に問題が発生しました。ゲームを終了します。")
                         return
 
                     # リトライメッセージを表示
                     embed = discord.Embed(
                         title="⚠️ 接続遅延",
-                        description="応答が遅れています... もう一度お試しください。",
+                        description=f"応答が遅れています... もう一度お試しください。(リトライ: {game.timeout_count}/5)",
                         color=discord.Color.orange()
                     )
                     view = GameButtonView(self, game)
                     await game.message.edit(embed=embed, view=view)
                     return
 
-            # ステップが進んでいない場合の検知
             current_step = game.aki.step
+
+            # ステップが進んでいない場合（戻る以外）
             if current_step == previous_step and answer != "b":
                 print(f"Warning: Step did not advance at step {current_step}")
-                game.retry_count += 1
+                game.stuck_count += 1
 
-                if game.retry_count >= 3:
-                    # 3回連続で進まない場合のみ推測フェーズに移行
-                    print(f"Step stuck, forcing guess phase at step {current_step}")
+                # スタックは5回まで許容し、その後も質問を続ける（推測には早期移行しない）
+                if game.stuck_count >= 5 and current_step >= 50:
+                    # 50問以降かつ5回スタックした場合のみ推測を試みる
+                    print(f"Step stuck repeatedly after 50 questions, attempting guess at step {current_step}")
                     await self._try_guess(game)
                     return
+                elif game.stuck_count >= 5:
+                    # 50問未満の場合は警告のみ表示して続行
+                    print(f"Step stuck at {current_step}, but continuing (less than 50 questions)")
+                    game.stuck_count = 0  # カウンターをリセットして続行
+            else:
+                # ステップが正常に進んだらスタックカウントをリセット
+                game.stuck_count = 0
 
-            # 推測判定ロジック（高精度版）
+            # 推測判定ロジック（より保守的に）
             should_guess = False
-            current_step = game.aki.step
             progression = game.aki.progression
 
-            # 高精度モード: より多くの質問をしてから推測
-            if current_step >= 40:
-                # 40問以降、非常に高い確度の場合のみ推測
+            # 段階的な推測基準
+            if current_step >= 50:
+                # 50問以降、非常に高い確度（98%以上）の場合のみ推測
+                if progression >= 98.0:
+                    should_guess = True
+                    print(f"Very high confidence guess at step {current_step} (progression: {progression})")
+            elif current_step >= 65:
+                # 65問以降、高い確度（95%以上）
                 if progression >= 95.0:
                     should_guess = True
                     print(f"High confidence guess at step {current_step} (progression: {progression})")
-            elif current_step >= 60:
-                # 60問以降、少し基準を下げる
+            elif current_step >= 75:
+                # 75問以降、やや確度を下げる（90%以上）
                 if progression >= 90.0:
                     should_guess = True
                     print(f"Medium confidence guess at step {current_step} (progression: {progression})")
 
-            # 75問を超えたら推測を試みる（上限に近いため）
-            if current_step >= 75:
+            # 78問を超えたら推測を試みる（上限に近いため）
+            if current_step >= 78:
                 should_guess = True
                 print(f"Approaching limit, forcing guess at step {current_step}")
 
@@ -368,8 +371,10 @@ class AkinatorCog(commands.Cog):
                 try:
                     question = game.aki.question
                     if not question or question.strip() == "":
-                        print(f"Empty question at step {current_step}, forcing guess")
-                        await self._try_guess(game)
+                        print(f"Empty question at step {current_step}")
+                        # 空の質問の場合、50問以降なら推測、それ以外は継続を試みる
+                        if current_step >= 50:
+                            await self._try_guess(game)
                         return
 
                     embed = self._create_question_embed(question, progression, current_step)
@@ -377,7 +382,9 @@ class AkinatorCog(commands.Cog):
                     await game.message.edit(embed=embed, view=view)
                 except AttributeError as e:
                     print(f"AttributeError at step {current_step}: {e}")
-                    await self._try_guess(game)
+                    # 50問以降ならエラー時に推測を試みる
+                    if current_step >= 50:
+                        await self._try_guess(game)
                     return
 
         except RuntimeError as e:
@@ -386,10 +393,10 @@ class AkinatorCog(commands.Cog):
             error_type = e.__class__.__name__
             print(f"Error handling answer at step {game.aki.step}: {error_type} - {str(e)}")
 
-            # エラーが続く場合は推測フェーズに移行
-            game.retry_count += 1
-            if game.retry_count >= 3 or game.aki.step >= 60:
-                print(f"Too many errors, attempting guess at step {game.aki.step}")
+            # エラーが続く場合、60問以降のみ推測フェーズに移行
+            game.timeout_count += 1
+            if game.timeout_count >= 5 and game.aki.step >= 60:
+                print(f"Too many errors after 60 questions, attempting guess at step {game.aki.step}")
                 await self._try_guess(game)
             else:
                 await errors.handle_connection_error(game, self)
@@ -401,16 +408,14 @@ class AkinatorCog(commands.Cog):
         game.is_guessing = True
 
         try:
-            # 推測データを取得 - winがメソッドかプロパティかを確認
+            # 推測データを取得
             win_attr = getattr(game.aki, 'win', None)
             if callable(win_attr):
-                # winがメソッドの場合
                 try:
-                    await asyncio.wait_for(game.aki.win(), timeout=10.0)
+                    await asyncio.wait_for(game.aki.win(), timeout=15.0)
                 except asyncio.TimeoutError:
                     print(f"win() timeout at step {game.aki.step}")
             else:
-                # winがプロパティの場合は何もしない（既にデータは存在する）
                 print(f"win is a property (value: {win_attr}), skipping call")
 
             # 複数の方法で推測データを取得
@@ -449,7 +454,7 @@ class AkinatorCog(commands.Cog):
             print(f"No guess data available at step {game.aki.step}")
             game.is_guessing = False
 
-            if game.aki.step < 70:
+            if game.aki.step < 75:
                 # まだ質問を続けられる
                 embed = self._create_question_embed(game.aki.question, game.aki.progression, game.aki.step)
                 view = GameButtonView(self, game)
