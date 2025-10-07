@@ -52,26 +52,38 @@ class GameButtonView(discord.ui.View):
 
     @discord.ui.button(label="はい / Yes", style=discord.ButtonStyle.primary, emoji="✅")
     async def yes_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # すぐに defer() を実行
+        await interaction.response.defer()
         await self.handle_answer(interaction, "y")
 
     @discord.ui.button(label="いいえ / No", style=discord.ButtonStyle.primary, emoji="❌")
     async def no_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # すぐに defer() を実行
+        await interaction.response.defer()
         await self.handle_answer(interaction, "n")
 
     @discord.ui.button(label="わからない / I Don't Know", style=discord.ButtonStyle.primary, emoji="🤷")
     async def idk_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # すぐに defer() を実行
+        await interaction.response.defer()
         await self.handle_answer(interaction, "idk")
 
     @discord.ui.button(label="たぶんそう / Probably", style=discord.ButtonStyle.primary, emoji="👍")
     async def probably_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # すぐに defer() を実行
+        await interaction.response.defer()
         await self.handle_answer(interaction, "p")
 
     @discord.ui.button(label="たぶん違う / Probably Not", style=discord.ButtonStyle.primary, emoji="👎")
     async def probably_not_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # すぐに defer() を実行
+        await interaction.response.defer()
         await self.handle_answer(interaction, "pn")
 
     @discord.ui.button(label="戻る / Back", style=discord.ButtonStyle.primary, emoji="⬅️", row=1)
     async def back_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # すぐに defer() を実行
+        await interaction.response.defer()
         await self.handle_answer(interaction, "b")
 
     @discord.ui.button(label="終了 / Stop", style=discord.ButtonStyle.danger, emoji="🛑", row=1)
@@ -79,19 +91,21 @@ class GameButtonView(discord.ui.View):
         if interaction.user.id != self.game.user_id:
             await interaction.response.send_message("このゲームはあなたのものではありません！", ephemeral=True)
             return
+        # このボタンはゲームを終了させるだけなので、ここにも defer() を入れる
         await interaction.response.defer()
         await self.cog._end_game(self.game, "ゲームが中断されました。")
 
     async def handle_answer(self, interaction: discord.Interaction, answer: str):
         if interaction.user.id != self.game.user_id:
-            await interaction.response.send_message("このゲームはあなたのものではありません！", ephemeral=True)
+            # defer() 済みなので followup.send を使う
+            await interaction.followup.send("このゲームはあなたのものではありません！", ephemeral=True)
             return
 
         if self.game.is_guessing:
-            await interaction.response.send_message("推測中です。上のボタンで回答してください！", ephemeral=True)
+            # defer() 済みなので followup.send を使う
+            await interaction.followup.send("推測中です。上のボタンで回答してください！", ephemeral=True)
             return
 
-        await interaction.response.defer()
         await self.cog._handle_answer(self.game, answer)
 
 
