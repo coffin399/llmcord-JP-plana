@@ -1,4 +1,4 @@
-# main.py (変更なし)
+# main.py
 
 import discord
 from discord.ext import commands, tasks
