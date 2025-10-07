@@ -181,11 +181,9 @@ class DiscordLogHandler(logging.Handler):
         )
         return message
 
-    # ▼▼▼ このメソッドを全面的に改修しました ▼▼▼
     async def _process_queue(self):
         """
-        キューに溜まったログを全て取り出し、個別のコードブロックに整形。
-        文字数制限を考慮してチャンクに分割し、全チャンネルに送信する。
+        キューに溜まったログを全て取り出し、個々のログが途切れないようにチャンク分けして送信する。
         """
         if self.queue.empty():
             return
@@ -218,13 +216,14 @@ class DiscordLogHandler(logging.Handler):
         # ログブロック単位でチャンクを作成する
         chunks = []
         current_chunk = ""
-        CHUNK_LIMIT = 1900
+        # Discordの文字数制限より少し余裕を持たせたサイズ
+        CHUNK_LIMIT = 1980
 
         for record in records:
             # 各ログを個別のコードブロックで囲む
             log_block = f"```ansi\n{record}\n```\n"
 
-            # 1つのログブロックが制限を超える場合は、強制的に分割する（レアケース）
+            # 1つのログブロックが制限を超える場合は、強制的に分割する（トレースバックが極端に長い場合など）
             if len(log_block) > CHUNK_LIMIT:
                 if current_chunk:
                     chunks.append(current_chunk)

@@ -1,5 +1,3 @@
-# main.py
-
 import discord
 from discord.ext import commands, tasks
 import yaml
@@ -134,7 +132,7 @@ class Shittim(commands.Bot):
 
         if all_log_channel_ids:
             try:
-                discord_handler = DiscordLogHandler(bot=self, channel_ids=all_log_channel_ids)
+                discord_handler = DiscordLogHandler(bot=self, channel_ids=all_log_channel_ids, interval=6.0)
                 discord_handler.setLevel(logging.INFO)
 
                 # Discordに送信するログ用のフォーマッターを新しく作成
