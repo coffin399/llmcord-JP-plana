@@ -30,7 +30,6 @@ class DiscordLogHandler(logging.Handler):
         """ログ送信先チャンネルを動的に追加し、即時反映させる。"""
         if channel_id not in self.channel_ids:
             self.channel_ids.append(channel_id)
-            # Botが準備完了していれば、チャンネルオブジェクトを即座に取得して追加する
             if self.bot.is_ready():
                 channel = self.bot.get_channel(channel_id)
                 if isinstance(channel, TextChannel):
@@ -40,15 +39,13 @@ class DiscordLogHandler(logging.Handler):
                     print(
                         f"DiscordLogHandler: Added channel ID {channel_id}, but it's not a valid text channel or not found yet.")
             else:
-                # Botがまだ準備できていない場合は、次回の_process_queueで解決される
-                self.channels = []  # キャッシュをクリア
+                self.channels = []
                 print(f"DiscordLogHandler: Added channel ID {channel_id}. Will be activated once bot is ready.")
 
     def remove_channel(self, channel_id: int):
         """ログ送信先チャンネルを動的に削除し、即時反映させる。"""
         if channel_id in self.channel_ids:
             self.channel_ids.remove(channel_id)
-            # アクティブなチャンネルオブジェクトのリストからも即座に削除する
             self.channels = [ch for ch in self.channels if ch.id != channel_id]
             print(f"DiscordLogHandler: Immediately removed and deactivated channel {channel_id}.")
 
@@ -59,7 +56,6 @@ class DiscordLogHandler(logging.Handler):
         if self._closed:
             return
         msg = self.format(record)
-        # センシティブ情報を伏字化
         msg = self._sanitize_log_message(msg)
         try:
             self.queue.put_nowait(msg)
@@ -68,13 +64,13 @@ class DiscordLogHandler(logging.Handler):
 
     def _sanitize_log_message(self, message: str) -> str:
         """
-        ログメッセージからセンシティブな情報を伏字化する。
-        - Windowsのユーザーパス (C:\\Users\\username\\...)
+        ログメッセージからセンシティブな情報を部分的に伏字化する。
+        - Windowsのユーザーパス
         - Discord Gateway Session ID
+        - Discordのサーバー名、ユーザー名、チャンネル名 (先頭3文字のみ表示)
+        - Discordの各種ID (完全に伏字化)
         """
-        # Windowsユーザーパスの C:\Users\username\ 部分のみを伏字化
-        # 例: C:\Users\hogefuga\piyoyo\LLMcord-PLANA\venv\hoge\fuga\file.txt
-        #  -> ********\LLMcord-PLANA\venv\hoge\fuga\file.txt
+        # Windowsユーザーパス
         message = re.sub(
             r'[A-Za-z]:\\Users\\[^\\]+\\[^\\]+',
             '********',
@@ -82,13 +78,47 @@ class DiscordLogHandler(logging.Handler):
             flags=re.IGNORECASE
         )
 
-        # Session IDを伏字化 (複数のパターンに対応)
-        # "Session ID: <ID>" や "... RESUMED session <ID>" の両方に対応
+        # Session ID
         message = re.sub(
             r'((?:Session ID:?|session)\s+)[a-f0-9]{32}',
             r'\1****',
             message,
             flags=re.IGNORECASE
+        )
+
+        # LLMCog形式: guild='サーバー名(ID)' -> guild='サー****(****)'
+        message = re.sub(
+            r"guild='([^']+)\(\d+\)'",
+            lambda m: f"guild='{m.group(1)[:3]}****(****)'",
+            message
+        )
+
+        # LLMCog形式: author='ユーザー名(ID)' -> author='ユー****(****)'
+        message = re.sub(
+            r"author='([^']+)\(\d+\)'",
+            lambda m: f"author='{m.group(1)[:3]}****(****)'",
+            message
+        )
+
+        # MusicCog形式: Guild ID (サーバー名): -> Guild ****(サー****):
+        message = re.sub(
+            r"Guild \d+ \(([^)]+)\):",
+            lambda m: f"Guild ****({m.group(1)[:3]}****):",
+            message
+        )
+
+        # IDのみなので完全匿名化を維持
+        message = re.sub(
+            r"Channel ID \d+ \(Guild ID \d+\)",
+            "Channel ID **** (Guild ID ****)",
+            message
+        )
+
+        # MusicCog形式: Connected to チャンネル名 -> Connected to チャン****
+        message = re.sub(
+            r"Connected to (.*)",
+            lambda m: f"Connected to {m.group(1)[:3]}****",
+            message
         )
 
         return message
@@ -98,7 +128,6 @@ class DiscordLogHandler(logging.Handler):
         if self.queue.empty():
             return
 
-        # チャンネルオブジェクトのリストが空、またはIDリストと数が一致しない場合は再取得
         if not self.channels or len(self.channels) != len(self.channel_ids):
             found_channels = []
             for cid in self.channel_ids:
