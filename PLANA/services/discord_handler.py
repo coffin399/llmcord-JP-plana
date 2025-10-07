@@ -1,4 +1,3 @@
-# PLANA/services/discord_handler.py
 import asyncio
 import logging
 import re
@@ -102,7 +101,7 @@ class DiscordLogHandler(logging.Handler):
             message
         )
 
-        # LLMCog形式: channel='チャンネル名(ID)' -> channel='チ****(****)'
+        # LLMCog形式: channel='チャンネル名(ID)' -> channel='チャ****(****)'
         message = re.sub(
             r"channel='([^']+)\((\d+)\)'",
             lambda m: f"channel='{m.group(1)[:2]}****(****)'",
@@ -111,8 +110,8 @@ class DiscordLogHandler(logging.Handler):
 
         # MusicCog形式: Guild ID (サーバー名): -> Guild ****(サー****):
         message = re.sub(
-            r"Guild \d+ \(([^)]+)\):",
-            lambda m: f"Guild ****({m.group(1)[:2]}****):",
+            r"Guild (\d+) \(([^)]+)\):",
+            lambda m: f"Guild ****({m.group(2)[:2]}****):",
             message
         )
 
@@ -123,31 +122,53 @@ class DiscordLogHandler(logging.Handler):
             message
         )
 
-        # MusicCog形式: Connected to チャンネル名 -> Connected to チャン****
+        # MusicCog形式: Connected to チャンネル名 -> Connected to チャ****
         message = re.sub(
-            r"Connected to (.*)",
+            r"Connected to (.+)",
             lambda m: f"Connected to {m.group(1)[:2]}****",
             message
         )
 
-        # BioManager形式: for user [ID] -> for user X****
+        # BioManager形式: for user [ID] (ユーザー名) -> for user X**** (ユ****)
         message = re.sub(
-            r"(for user )(\d+)",
-            lambda m: f"{m.group(1)}{m.group(2)[:1]}****",
+            r"for user (\d+) \(([^)]+)\)",
+            lambda m: f"for user {m.group(1)[:1]}**** ({m.group(2)[:1]}****)",
+            message
+        )
+
+        # BioManager形式: for user [ID] -> for user X**** (括弧がない場合)
+        message = re.sub(
+            r"for user (\d+)(?!\s*\()",
+            lambda m: f"for user {m.group(1)[:1]}****",
             message
         )
 
         # BioManager形式: Content: 'ユーザーbio' -> Content: 'ユ****'
         message = re.sub(
-            r"(Content: ')([^']+)'",
-            lambda m: f"{m.group(1)}{m.group(2)[:2]}****'",
+            r"Content: '([^']+)'",
+            lambda m: f"Content: '{m.group(1)[:1]}****'",
             message
         )
 
         # Twitch通知形式: ギルド [ID] のチャンネル [ID] -> ギルド X**** のチャンネル Y****
         message = re.sub(
-            r"(ギルド )(\d+)( のチャンネル )(\d+)",
-            lambda m: f"{m.group(1)}{m.group(2)[:1]}****{m.group(3)}{m.group(4)[:1]}****",
+            r"ギルド (\d+) のチャンネル (\d+)",
+            lambda m: f"ギルド {m.group(1)[:1]}**** のチャンネル {m.group(2)[:1]}****",
+            message
+        )
+
+        # メッセージID形式: message ID: 1425082992111386664 -> message ID: 1****
+        message = re.sub(
+            r"message ID:? (\d+)",
+            lambda m: f"message ID: {m.group(1)[:1]}****",
+            message,
+            flags=re.IGNORECASE
+        )
+
+        # 一般的なDiscord ID (18-19桁の数字) -> X****
+        message = re.sub(
+            r"(?<!\d)(\d{17,19})(?!\d)",
+            lambda m: f"{m.group(1)[:1]}****",
             message
         )
 
