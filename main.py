@@ -347,7 +347,7 @@ if __name__ == "__main__":
     # ================================================================
     # ===== Cogリロードコマンド ======================================
     # ================================================================
-    @bot_instance.tree.command(name="reload", description="🔄 Cogをリロードします（管理者専用）")
+    @bot_instance.tree.command(name="reload_plana", description="🔄 Cogをリロードします（管理者専用）")
     async def reload_cog(interaction: discord.Interaction, cog_name: str = None):
         if not bot_instance.is_admin(interaction.user.id):
             await interaction.response.send_message("❌ このコマンドは管理者のみ実行できます。", ephemeral=False)
@@ -384,7 +384,7 @@ if __name__ == "__main__":
 
             for root, _, files in os.walk(plana_dir):
                 for file in files:
-                    if file.endswith('.py') and not file.startswith('_'):
+                    if file.endswith('_cog.py'):
                         module_path = os.path.join(root, file[:-3]).replace(os.sep, '.')
                         try:
                             await bot_instance.reload_extension(module_path)
@@ -407,12 +407,8 @@ if __name__ == "__main__":
                 f"全Cogリロードがユーザー {interaction.user} によって実行されました。成功: {len(reloaded)}, 失敗: {len(failed)}")
 
 
-    @bot_instance.tree.command(name="list-cogs", description="📋 ロード済みのCog一覧を表示します（管理者専用）")
+    @bot_instance.tree.command(name="list_plana_cogs", description="📋 ロード済みのCog一覧を表示します")
     async def list_cogs(interaction: discord.Interaction):
-        if not bot_instance.is_admin(interaction.user.id):
-            await interaction.response.send_message("❌ このコマンドは管理者のみ実行できます。", ephemeral=False)
-            return
-
         loaded_extensions = list(bot_instance.extensions.keys())
         if not loaded_extensions:
             await interaction.response.send_message("現在ロードされているCogはありません。", ephemeral=False)
@@ -421,7 +417,6 @@ if __name__ == "__main__":
         cog_list = "\n".join([f"• `{ext}`" for ext in sorted(loaded_extensions)])
         await interaction.response.send_message(f"**ロード済みCog一覧** ({len(loaded_extensions)}個):\n{cog_list}",
                                                 ephemeral=False)
-
 
     try:
         bot_instance.run(bot_token_val)
