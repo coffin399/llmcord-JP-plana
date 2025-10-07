@@ -620,7 +620,8 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
             embed.set_thumbnail(url="https://www.p2pquake.net/images/QuakeLogo_100x100.png")
 
             map_file = None
-            if CARTOPY_AVAILABLE:
+            # EEW以外の場合のみ地図を生成（即応性を重視）
+            if CARTOPY_AVAILABLE and info_type != InfoType.EEW.value:
                 lat = hypocenter.get('latitude')
                 lon = hypocenter.get('longitude')
 
@@ -641,6 +642,8 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
                         embed.set_image(url="attachment://earthquake_location.png")
                     except Exception as e:
                         logger.warning(f"地図生成に失敗: {e}")
+            elif info_type == InfoType.EEW.value:
+                logger.debug("EEWは即応性を重視し、地図生成をスキップしました")
 
             await self.send_embed_to_channels(embed, info_type, map_file)
 
