@@ -59,6 +59,11 @@ try:
 
     # Cartopyのインポート（Natural Earth使用）
     try:
+        import sys
+
+        logger.info(f"ℹ️ Python実行パス: {sys.executable}")
+        logger.info(f"ℹ️ Pythonバージョン: {sys.version}")
+
         import cartopy.crs as ccrs
         import cartopy.feature as cfeature
 
@@ -68,7 +73,8 @@ try:
         CARTOPY_AVAILABLE = False
         logger.warning(f"⚠️ Cartopyが見つかりません。地図機能は無効になります。")
         logger.warning(f"   インストール: pip install cartopy")
-        logger.debug(f"   詳細: {e}")
+        logger.warning(f"   または: python -m pip install cartopy")
+        logger.error(f"   詳細エラー: {e}", exc_info=True)
 
 except ImportError as e:
     MATPLOTLIB_AVAILABLE = False
@@ -89,6 +95,7 @@ from PLANA.notifications.error.earthquake_errors import (
     ConfigError,
     NotificationError
 )
+
 DATA_DIR = 'data'
 CONFIG_FILE = os.path.join(DATA_DIR, 'earthquake_tsunami_notification_config.json')
 
