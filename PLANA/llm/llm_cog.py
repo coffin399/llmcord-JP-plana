@@ -243,6 +243,12 @@ class LLMCog(commands.Cog, name="LLM"):
             try:
                 parent_msg = current_msg.reference.resolved or await message.channel.fetch_message(
                     current_msg.reference.message_id)
+
+                # Check if parent message is deleted
+                if isinstance(parent_msg, discord.DeletedReferencedMessage):
+                    logger.debug(f"Encountered deleted referenced message in history collection.")
+                    break
+
                 if parent_msg.author != self.bot.user:
                     image_contents, text_content = await self._prepare_multimodal_content(parent_msg)
                     text_content = text_content.replace(f'<@!{self.bot.user.id}>', '').replace(f'<@{self.bot.user.id}>',
@@ -299,6 +305,11 @@ class LLMCog(commands.Cog, name="LLM"):
 
         for i in range(max_depth):
             if not current_msg or current_msg.id in visited_ids:
+                break
+
+            # Check if the message is a DeletedReferencedMessage
+            if isinstance(current_msg, discord.DeletedReferencedMessage):
+                logger.debug(f"🔵 [IMAGE] Encountered deleted message at depth {i + 1}, stopping scan.")
                 break
 
             logger.debug(f"🔵 [IMAGE] Scanning message ID: {current_msg.id} (Depth: {i + 1})")
