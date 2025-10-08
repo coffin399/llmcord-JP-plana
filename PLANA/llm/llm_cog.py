@@ -301,18 +301,14 @@ class LLMCog(commands.Cog, name="LLM"):
         current_msg = message
         max_depth = 5
 
-        logger.debug(f"🔵 [IMAGE] Starting recursive image scan for message ID: {message.id} with max depth: {max_depth}")
-
         for i in range(max_depth):
             if not current_msg or current_msg.id in visited_ids:
                 break
 
             # Check if the message is a DeletedReferencedMessage
             if isinstance(current_msg, discord.DeletedReferencedMessage):
-                logger.debug(f"🔵 [IMAGE] Encountered deleted message at depth {i + 1}, stopping scan.")
                 break
 
-            logger.debug(f"🔵 [IMAGE] Scanning message ID: {current_msg.id} (Depth: {i + 1})")
             messages_to_scan.append(current_msg)
             visited_ids.add(current_msg.id)
 
@@ -322,8 +318,6 @@ class LLMCog(commands.Cog, name="LLM"):
                         current_msg.reference.message_id)
                     current_msg = parent_msg
                 except (discord.NotFound, discord.HTTPException) as e:
-                    logger.warning(
-                        f"⚠️ [IMAGE] Could not fetch referenced message (ID: {current_msg.reference.message_id}): {e}")
                     break
             else:
                 break
@@ -359,17 +353,12 @@ class LLMCog(commands.Cog, name="LLM"):
                     source_urls.append(embed.thumbnail.url)
                     processed_urls.add(embed.thumbnail.url)
 
-        if source_urls:
-            logger.debug(
-                f"🔵 [IMAGE] Found {len(source_urls)} unique image URL(s) from {len(messages_to_scan)} messages.")
-
         max_images = self.llm_config.get('max_images', 1)
         for url in source_urls[:max_images]:
             if image_data := await self._process_image_url(url):
                 image_inputs.append(image_data)
 
         if len(source_urls) > max_images:
-            logger.info(f"Reached max image limit ({max_images}). Ignoring {len(source_urls) - max_images} images.")
             try:
                 error_msg_template = self.llm_config.get('error_msg', {}).get('msg_max_image_size',
                                                                               "⚠️ Max images ({max_images}) reached.")
@@ -380,16 +369,15 @@ class LLMCog(commands.Cog, name="LLM"):
 
         clean_text = "\n".join(text_parts)
 
-        # 最終結果のみをINFOレベルでログ出力
+        # 🔧 最終的に返却される内容のみをロギング（LLMに送信される直前のメッセージ）
         logger.info(
-            f"🔵 [IMAGE_SCAN_RESULT] Message {message.id}: "
-            f"Scanned {len(messages_to_scan)} messages, "
-            f"found {len(source_urls)} image URLs, "
-            f"collected {len(clean_text)} chars of user text."
+            f"🔵 [FINAL_USER_MESSAGE] Prepared content for LLM:\n"
+            f"  - Text length: {len(clean_text)} chars\n"
+            f"  - Image count: {len(image_inputs)}"
         )
 
         if clean_text:
-            logger.info(f"🔵 [IMAGE_TEXT_CONTENT] Extracted text from image context:\n{clean_text}")
+            logger.info(f"🔵 [FINAL_USER_TEXT] Text content to be sent:\n{clean_text}")
 
         return image_inputs, clean_text
 
