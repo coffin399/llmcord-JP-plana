@@ -301,7 +301,7 @@ class LLMCog(commands.Cog, name="LLM"):
         current_msg = message
         max_depth = 5
 
-        logger.info(f"🔵 [IMAGE] Starting recursive image scan for message ID: {message.id} with max depth: {max_depth}")
+        logger.debug(f"🔵 [IMAGE] Starting recursive image scan for message ID: {message.id} with max depth: {max_depth}")
 
         for i in range(max_depth):
             if not current_msg or current_msg.id in visited_ids:
@@ -360,7 +360,7 @@ class LLMCog(commands.Cog, name="LLM"):
                     processed_urls.add(embed.thumbnail.url)
 
         if source_urls:
-            logger.info(
+            logger.debug(
                 f"🔵 [IMAGE] Found {len(source_urls)} unique image URL(s) from {len(messages_to_scan)} messages.")
 
         max_images = self.llm_config.get('max_images', 1)
@@ -380,15 +380,16 @@ class LLMCog(commands.Cog, name="LLM"):
 
         clean_text = "\n".join(text_parts)
 
-        # INFOレベルで概要ログを出力
+        # 最終結果のみをINFOレベルでログ出力
         logger.info(
-            f"🔵 [IMAGE] Scan complete for message {message.id}. "
-            f"Scanned {len(messages_to_scan)} messages, found {len(source_urls)} image URLs. "
-            f"Collected {len(clean_text)} chars of user text."
+            f"🔵 [IMAGE_SCAN_RESULT] Message {message.id}: "
+            f"Scanned {len(messages_to_scan)} messages, "
+            f"found {len(source_urls)} image URLs, "
+            f"collected {len(clean_text)} chars of user text."
         )
 
         if clean_text:
-            logger.info(f"🔵 [IMAGE_TEXT] Text collected from image context:\n{clean_text}")
+            logger.info(f"🔵 [IMAGE_TEXT_CONTENT] Extracted text from image context:\n{clean_text}")
 
         return image_inputs, clean_text
 
