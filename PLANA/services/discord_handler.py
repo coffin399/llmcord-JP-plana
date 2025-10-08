@@ -106,6 +106,13 @@ class DiscordLogHandler(logging.Handler):
             message,
             flags=re.IGNORECASE
         )
+        # Session ID (上で取り切れなかった場合)
+        message = re.sub(
+            r'((?:Session ID:?|session)\s+)([a-f0-9])([a-f0-9]{31})',
+            r'\1\2****',
+            message,
+            flags=re.IGNORECASE
+        )
         # LLMCog形式: guild='サーバー名(ID or 匿名化済み)' -> guild='サー****(****)'
         message = re.sub(
             r"guild='([^']+)\([^)]+\)'",
