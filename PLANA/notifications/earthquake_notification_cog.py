@@ -757,8 +757,8 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
         lat, lon = quake['lat'], quake['lon']
         max_scale = quake['max_scale']
 
-        fig = plt.figure(figsize=(10, 12), dpi=120)
-        ax = fig.add_subplot(1, 1, 1, projection=ccrs.PlateCarree())
+        fig = plt.figure(figsize=(16, 16), dpi=150)
+        ax = fig.add_axes([0, 0, 1, 1], projection=ccrs.PlateCarree())
 
         # 震度に応じてズーム範囲を調整
         if max_scale >= 50:  # 震度5強以上は広範囲
@@ -822,7 +822,10 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
         # タイトル
         title_prefix = "緊急地震速報" if info_type == "eew" else "地震情報"
         title = f'{title_prefix} - 震源位置\n{quake["name"]}'
-        ax.set_title(title, fontsize=14, fontweight='bold', pad=20)
+        ax.text(0.5, 0.98, title, transform=ax.transAxes,
+                fontsize=18, fontweight='bold', ha='center', va='top',
+                bbox=dict(boxstyle='round,pad=0.8', facecolor='white',
+                          edgecolor='black', alpha=0.95, linewidth=2))
 
         # 主要都市のマーカー（表示範囲内のみ）
         cities = {
@@ -925,14 +928,14 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
                 transform=ccrs.Geodetic(), zorder=12, fontweight='bold')
 
         # 凡例
-        ax.legend(loc='upper left', frameon=True, fontsize=10,
-                  fancybox=True, shadow=True, framealpha=0.9)
+        ax.legend(loc='upper left', frameon=True, fontsize=12,
+                  fancybox=True, shadow=True, framealpha=0.9,
+                  bbox_to_anchor=(0.02, 0.92))
 
         # 画像として保存
         buffer = io.BytesIO()
-        plt.tight_layout()
-        plt.savefig(buffer, format='png', dpi=120, bbox_inches='tight',
-                    facecolor='white', edgecolor='none')
+        plt.savefig(buffer, format='png', dpi=150, bbox_inches='tight',
+                    pad_inches=0, facecolor='white', edgecolor='none')
         buffer.seek(0)
         plt.close(fig)
 
@@ -940,8 +943,8 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
 
     def _generate_map_sync(self, quakes: list, min_scale: Optional[str], hours: Optional[int]) -> io.BytesIO:
         """複数の地震マップ画像を同期的に生成（Natural Earthで日本地図表示）"""
-        fig = plt.figure(figsize=(10, 12), dpi=120)
-        ax = fig.add_subplot(1, 1, 1, projection=ccrs.PlateCarree())
+        fig = plt.figure(figsize=(16, 16), dpi=150)
+        ax = fig.add_axes([0, 0, 1, 1], projection=ccrs.PlateCarree())
 
         # 日本周辺に範囲を限定
         ax.set_extent([128, 146, 30, 46], crs=ccrs.PlateCarree())
@@ -963,11 +966,9 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
         except:
             logger.debug("都道府県境界の追加をスキップ")
 
-        # ▼▼▼ 修正点2: 座標情報を削除 ▼▼▼
         # グリッド線（座標ラベルなし）
         ax.gridlines(crs=ccrs.PlateCarree(), draw_labels=False,
                      linewidth=0.5, color='gray', alpha=0.5, linestyle='--')
-        # ▲▲▲ 修正点2 ここまで ▲▲▲
 
         # タイトル
         if hours is not None:
@@ -976,7 +977,10 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
             title = f'地震発生地点マップ（{len(quakes)}件）'
         if min_scale:
             title += f'\n最小震度: {min_scale}'
-        ax.set_title(title, fontsize=14, fontweight='bold', pad=20)
+        ax.text(0.5, 0.98, title, transform=ax.transAxes,
+                fontsize=18, fontweight='bold', ha='center', va='top',
+                bbox=dict(boxstyle='round,pad=0.8', facecolor='white',
+                          edgecolor='black', alpha=0.95, linewidth=2))
 
         # 震度に応じた色とサイズを取得
         def get_color_and_size(max_scale):
@@ -1018,8 +1022,9 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
 
         if legend_items:
             ax.legend(legend_items, legend_labels, loc='upper right', frameon=True,
-                      fontsize=9, title='震度', title_fontsize=10,
-                      fancybox=True, shadow=True, framealpha=0.9)
+                      fontsize=11, title='震度', title_fontsize=12,
+                      fancybox=True, shadow=True, framealpha=0.9,
+                      bbox_to_anchor=(0.98, 0.92))
 
         # 主要都市のマーカー
         cities = {
@@ -1039,9 +1044,8 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
 
         # 画像として保存
         buffer = io.BytesIO()
-        plt.tight_layout()
-        plt.savefig(buffer, format='png', dpi=120, bbox_inches='tight',
-                    facecolor='white', edgecolor='none')
+        plt.savefig(buffer, format='png', dpi=150, bbox_inches='tight',
+                    pad_inches=0, facecolor='white', edgecolor='none')
         buffer.seek(0)
         plt.close(fig)
 
@@ -1488,78 +1492,6 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
         """地震マップ画像を生成"""
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, self._generate_map_sync, quakes, min_scale, hours)
-
-    def _generate_map_sync(self, quakes: list, min_scale: Optional[str], hours: Optional[int]) -> io.BytesIO:
-        """地震マップ画像を同期的に生成"""
-        fig = plt.figure(figsize=(10, 12), dpi=100)
-        ax = fig.add_subplot(1, 1, 1, projection=ccrs.PlateCarree())
-        ax.set_extent([128, 146, 30, 46], crs=ccrs.PlateCarree())
-
-        ax.add_feature(cfeature.LAND, facecolor='#e8f4f8')
-        ax.add_feature(cfeature.OCEAN, facecolor='white')
-        ax.add_feature(cfeature.COASTLINE, edgecolor='gray')
-        ax.add_feature(cfeature.BORDERS, linestyle=':', edgecolor='gray')
-
-        # ▼▼▼ 修正点2: 座標情報を削除 ▼▼▼
-        gl = ax.gridlines(crs=ccrs.PlateCarree(), draw_labels=False,
-                          linewidth=0.5, color='gray', alpha=0.5, linestyle='--')
-        # ▲▲▲ 修正点2 ここまで ▲▲▲
-
-        if hours is not None:
-            title = f'地震発生地点マップ（過去{hours}時間、{len(quakes)}件）'
-        else:
-            title = f'地震発生地点マップ（{len(quakes)}件）'
-        if min_scale:
-            title += f'\n最小震度: {min_scale}'
-        ax.set_title(title, fontsize=14, fontweight='bold', pad=20)
-
-        def get_color_and_size(max_scale):
-            if max_scale >= 70: return '#8B0000', 300, '震度7'
-            elif max_scale >= 60: return '#DC143C', 250, '震度6強'
-            elif max_scale >= 55: return '#FF0000', 200, '震度6弱'
-            elif max_scale >= 50: return '#FF4500', 150, '震度5強'
-            elif max_scale >= 45: return '#FF8C00', 120, '震度5弱'
-            elif max_scale >= 40: return '#FFA500', 100, '震度4'
-            elif max_scale >= 30: return '#FFD700', 80, '震度3'
-            elif max_scale >= 20: return '#90EE90', 60, '震度2'
-            else: return '#ADD8E6', 50, '震度1'
-
-        legend_elements = {}
-
-        for quake in quakes:
-            color, size, label = get_color_and_size(quake['max_scale'])
-            ax.scatter(quake['lon'], quake['lat'], c=color, s=size, alpha=0.6,
-                       edgecolors='black', linewidths=1, zorder=5, transform=ccrs.Geodetic())
-            if label not in legend_elements:
-                legend_elements[label] = plt.scatter([], [], c=color, s=100,
-                                                     edgecolors='black', linewidths=1, alpha=0.6)
-
-        scale_order = ['震度7', '震度6強', '震度6弱', '震度5強', '震度5弱', '震度4', '震度3', '震度2', '震度1']
-        legend_items = [legend_elements[s] for s in scale_order if s in legend_elements]
-        legend_labels = [s for s in scale_order if s in legend_elements]
-
-        if legend_items:
-            ax.legend(legend_items, legend_labels, loc='upper right', frameon=True,
-                      fontsize=9, title='震度', title_fontsize=10)
-
-        cities = {
-            '札幌': (141.35, 43.06), '東京': (139.69, 35.69), '名古屋': (136.91, 35.18),
-            '大阪': (135.50, 34.69), '福岡': (130.42, 33.59),
-        }
-
-        for city, (lon, lat) in cities.items():
-            ax.plot(lon, lat, 'k^', markersize=5, zorder=3, transform=ccrs.Geodetic())
-            ax.text(lon, lat + 0.3, city, fontsize=8, ha='center',
-                    bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.7),
-                    transform=ccrs.Geodetic())
-
-        buffer = io.BytesIO()
-        plt.tight_layout()
-        plt.savefig(buffer, format='png', dpi=100, bbox_inches='tight')
-        buffer.seek(0)
-        plt.close(fig)
-
-        return buffer
 
     @app_commands.command(name="earthquake_history", description="最近の地震情報を表示します")
     @app_commands.describe(
