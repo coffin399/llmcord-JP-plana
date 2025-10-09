@@ -244,7 +244,6 @@ class LLMCog(commands.Cog, name="LLM"):
                 parent_msg = current_msg.reference.resolved or await message.channel.fetch_message(
                     current_msg.reference.message_id)
 
-                # Check if parent message is deleted
                 if isinstance(parent_msg, discord.DeletedReferencedMessage):
                     logger.debug(f"Encountered deleted referenced message in history collection.")
                     break
@@ -305,7 +304,6 @@ class LLMCog(commands.Cog, name="LLM"):
             if not current_msg or current_msg.id in visited_ids:
                 break
 
-            # Check if the message is a DeletedReferencedMessage
             if isinstance(current_msg, discord.DeletedReferencedMessage):
                 break
 
@@ -325,15 +323,12 @@ class LLMCog(commands.Cog, name="LLM"):
         source_urls = []
         text_parts = []
 
-        # Process collected messages in chronological order
         for msg in reversed(messages_to_scan):
-            # Only collect text content from messages sent by users, not the bot itself.
             if msg.author != self.bot.user:
                 text_content_part = IMAGE_URL_PATTERN.sub('', msg.content).strip()
                 if text_content_part:
                     text_parts.append(text_content_part)
 
-            # Image URLs are collected from all messages for context.
             for url in IMAGE_URL_PATTERN.findall(msg.content):
                 if url not in processed_urls:
                     source_urls.append(url)
@@ -361,7 +356,7 @@ class LLMCog(commands.Cog, name="LLM"):
         if len(source_urls) > max_images:
             try:
                 error_msg_template = self.llm_config.get('error_msg', {}).get('msg_max_image_size',
-                                                                              "⚠️ Max images ({max_images}) reached.")
+                                                                              "⚠️ Max images ({max_images}) reached.\n⚠️ 一度に処理できる画像の最大枚数({max_images}枚)を超えました。")
                 await message.channel.send(error_msg_template.format(max_images=max_images), delete_after=10,
                                            silent=True)
             except discord.HTTPException:
@@ -369,7 +364,6 @@ class LLMCog(commands.Cog, name="LLM"):
 
         clean_text = "\n".join(text_parts)
 
-        # 🔧 最終的に返却される内容のみをロギング（LLMに送信される直前のメッセージ）
         logger.info(
             f"🔵 [FINAL_USER_MESSAGE] Prepared content for LLM:\n"
             f"  - Text length: {len(clean_text)} chars\n"
@@ -398,7 +392,7 @@ class LLMCog(commands.Cog, name="LLM"):
             llm_client = await self._get_llm_client_for_channel(message.channel.id)
             if not llm_client:
                 error_msg = self.llm_config.get('error_msg', {}).get('general_error',
-                                                                     "LLM client is not available for this channel.")
+                                                                     "LLM client is not available for this channel.\nこのチャンネルではLLMクライアントが利用できません。")
                 await message.reply(error_msg, silent=True)
                 return
         except Exception as e:
@@ -406,7 +400,6 @@ class LLMCog(commands.Cog, name="LLM"):
             await message.reply(self.exception_handler.handle_exception(e), silent=True)
             return
 
-        # 🔧 修正: 元のメッセージ内容を先にロギング
         original_content = message.content.replace(f'<@!{self.bot.user.id}>', '').replace(f'<@{self.bot.user.id}>',
                                                                                           '').strip()
         logger.info(f"🔵 [RAW_INPUT] Original message content from user:\n{original_content}")
@@ -416,7 +409,7 @@ class LLMCog(commands.Cog, name="LLM"):
 
         if not text_content and not image_contents:
             error_key = 'empty_reply' if is_reply_to_bot and not is_mentioned else 'empty_mention_reply'
-            default_msg = "何かお話しください。" if error_key == 'empty_reply' else "はい、何か御用でしょうか?"
+            default_msg = "Please say something.\n何かお話しください。" if error_key == 'empty_reply' else "Yes, how can I help you?\nはい、何か御用でしょうか?"
             await message.reply(self.llm_config.get('error_msg', {}).get(error_key, default_msg), silent=True)
             return
 
@@ -435,7 +428,7 @@ class LLMCog(commands.Cog, name="LLM"):
         thread_id = await self._get_conversation_thread_id(message)
 
         if not self.bio_manager or not self.memory_manager:
-            await message.reply("必要なプラグインが初期化されていないため、応答できません。", silent=True)
+            await message.reply("Cannot respond because required plugins are not initialized.\n必要なプラグインが初期化されていないため、応答できません。", silent=True)
             return
 
         system_prompt = self.bio_manager.get_system_prompt(
@@ -522,7 +515,7 @@ class LLMCog(commands.Cog, name="LLM"):
         update_interval = 0.5
         min_update_chars = 15
         retry_sleep_time = 2.0
-        placeholder = ":incoming_envelope: Thinking... :incoming_envelope:"
+        placeholder = ":incoming_envelope: Thinking... / 思考中... :incoming_envelope:"
         emoji_prefix = ":incoming_envelope: "
         emoji_suffix = " :incoming_envelope:"
         logger.info(f"🔵 [STREAMING] Starting LLM stream | {log_context}")
@@ -599,7 +592,7 @@ class LLMCog(commands.Cog, name="LLM"):
                         )
             else:
                 error_msg = self.llm_config.get('error_msg', {}).get(
-                    'general_error', "AIから応答がありませんでした。"
+                    'general_error', "There was no response from the AI.\nAIから応答がありませんでした。"
                 )
                 logger.warning(f"⚠️ Empty response from LLM")
                 await sent_message.edit(content=error_msg)
@@ -704,7 +697,8 @@ class LLMCog(commands.Cog, name="LLM"):
             await self._process_tool_calls(tool_calls_obj, current_messages, log_context, channel_id, user_id)
 
         logger.warning(f"⚠️ Tool processing exceeded max iterations ({max_iterations})")
-        yield self.llm_config.get('error_msg', {}).get('tool_loop_timeout', "Tool processing exceeded max iterations.")
+        yield self.llm_config.get('error_msg', {}).get('tool_loop_timeout',
+                                                       "Tool processing exceeded max iterations.\nツールの処理が最大反復回数を超えました。")
 
     async def _process_tool_calls(self, tool_calls: List[Any], messages: List[Dict[str, Any]],
                                   log_context: str, channel_id: int, user_id: int) -> None:
@@ -745,16 +739,16 @@ class LLMCog(commands.Cog, name="LLM"):
                 error_content = f"Error: Invalid JSON arguments - {str(e)}"
             except SearchAPIRateLimitError as e:
                 logger.warning(f"⚠️ SearchAgent rate limit hit: {e}")
-                error_content = "[Google Search Error]\nGoogle検索APIの利用制限に達しました。時間を置いてから再試行するようにユーザーに伝えてください。"
+                error_content = "[Google Search Error]\nThe Google Search API rate limit has been reached. Please tell the user to try again later."
             except SearchAPIServerError as e:
                 logger.error(f"❌ SearchAgent server error: {e}")
-                error_content = "[Google Search Error]\n検索サービスで一時的なサーバーエラーが発生しました。時間を置いてから再試行するようにユーザーに伝えてください。"
+                error_content = "[Google Search Error]\nA temporary server error occurred with the search service. Please tell the user to try again later."
             except SearchAgentError as e:
                 logger.error(f"❌ Error during SearchAgent execution for {function_name}: {e}", exc_info=True)
-                error_content = f"[Google Search Error]\n検索の実行中にエラーが発生しました: {str(e)}"
+                error_content = f"[Google Search Error]\nAn error occurred during the search execution: {str(e)}"
             except Exception as e:
                 logger.error(f"❌ Unexpected error during tool call for {function_name}: {e}", exc_info=True)
-                error_content = f"[Tool Error]\n予期しないエラーが発生しました: {str(e)}"
+                error_content = f"[Tool Error]\nAn unexpected error occurred: {str(e)}"
 
             final_content = error_content if error_content else tool_response_content
             logger.info(f"🔧 [TOOL RESULT] Sending tool response back to LLM (length: {len(final_content)} chars)")
@@ -768,6 +762,7 @@ class LLMCog(commands.Cog, name="LLM"):
 
     async def _schedule_model_reset(self, channel_id: int):
         """
+        Schedules a task to reset the channel's model to default after 3 hours.
         指定されたチャンネルのモデルを3時間後にデフォルトに戻すタスク。
         """
         try:
@@ -789,6 +784,7 @@ class LLMCog(commands.Cog, name="LLM"):
                     if channel and isinstance(channel, discord.TextChannel):
                         try:
                             await channel.send(
+                                f"ℹ️ The AI model for this channel has been reset to the default (`{default_model}`) after 3 hours.\n"
                                 f"ℹ️ 3時間が経過したため、このチャンネルのAIモデルをデフォルト (`{default_model}`) に戻しました。"
                             )
                         except discord.HTTPException as e:
@@ -806,52 +802,230 @@ class LLMCog(commands.Cog, name="LLM"):
             self.model_reset_tasks.pop(channel_id, None)
 
     @app_commands.command(
-        name="set-ai-bio",
-        description="このチャンネルのAIの性格や役割(bio)を設定します。/ Set the AI's personality/role (bio) for this channel."
+        name="chat",
+        description="Chat with the AI without needing to mention.\nAIと対話します。メンション不要で会話できます。"
     )
     @app_commands.describe(
-        bio="AIに設定したい性格や役割を記述してください。(例: あなたは猫です。語尾に「にゃん」をつけて話します。)"
+        message="The message you want to send to the AI.\nAIに送信したいメッセージ",
+        image_url="URL of an image (optional).\n画像のURL（オプション）"
+    )
+    async def chat_slash(self, interaction: discord.Interaction, message: str, image_url: str = None):
+        """
+        /chat command: Allows interaction with the LLM without mentions or replies.
+        /chatコマンド: メンションや返信なしでLLMと対話できるコマンド
+        """
+        await interaction.response.defer(ephemeral=False)
+
+        try:
+            llm_client = await self._get_llm_client_for_channel(interaction.channel_id)
+            if not llm_client:
+                error_msg = self.llm_config.get('error_msg', {}).get('general_error',
+                                                                     "LLM client is not available for this channel.\nこのチャンネルではLLMクライアントが利用できません。")
+                await interaction.followup.send(error_msg, ephemeral=False)
+                return
+        except Exception as e:
+            logger.error(f"Failed to get LLM client for channel {interaction.channel_id}: {e}", exc_info=True)
+            await interaction.followup.send(self.exception_handler.handle_exception(e), ephemeral=False)
+            return
+
+        if not message.strip():
+            await interaction.followup.send("⚠️ Please enter a message.\n⚠️ メッセージを入力してください。", ephemeral=False)
+            return
+
+        guild_log = f"guild='{interaction.guild.name}({interaction.guild.id})'" if interaction.guild else "guild='DM'"
+        channel_log = f"channel='{interaction.channel.name}({interaction.channel.id})'" if hasattr(interaction.channel,
+                                                                                                   'name') else f"channel(id)={interaction.channel.id}"
+        author_log = f"author='{interaction.user.name}({interaction.user.id})'"
+        log_context = f"{guild_log}, {channel_log}, {author_log}"
+
+        model_in_use = llm_client.model_name_for_api_calls
+        logger.info(f"📨 Received /chat command | {log_context} | model='{model_in_use}'")
+        logger.info(f"🔵 [RAW_INPUT] /chat message from user:\n{message}")
+
+        image_contents = []
+        if image_url:
+            if image_data := await self._process_image_url(image_url):
+                image_contents.append(image_data)
+                logger.info(f"🔵 [INPUT] Including 1 image from URL in /chat request")
+            else:
+                await interaction.followup.send("⚠️ Failed to process the specified image URL.\n⚠️ 指定された画像URLの処理に失敗しました。", ephemeral=False)
+                return
+
+        if not self.bio_manager or not self.memory_manager:
+            await interaction.followup.send("❌ Cannot respond because required plugins are not initialized.\n❌ 必要なプラグインが初期化されていないため、応答できません。",
+                                            ephemeral=False)
+            return
+
+        system_prompt = self.bio_manager.get_system_prompt(
+            channel_id=interaction.channel_id,
+            user_id=interaction.user.id,
+            user_display_name=interaction.user.display_name
+        )
+
+        try:
+            now = datetime.now(self.jst)
+            current_date_str = now.strftime('%Y年%m月%d日')
+            current_time_str = now.strftime('%H:%M')
+            system_prompt = system_prompt.format(current_date=current_date_str, current_time=current_time_str)
+        except (KeyError, ValueError) as e:
+            logger.warning(f"Could not format system_prompt with date/time: {e}")
+
+        if formatted_memories := self.memory_manager.get_formatted_memories():
+            system_prompt += f"\n\n{formatted_memories}"
+
+        logger.info(f"🔵 [INPUT] System prompt prepared for /chat (length: {len(system_prompt)} chars)")
+
+        messages_for_api: List[Dict[str, Any]] = [{"role": "system", "content": system_prompt}]
+
+        user_content_parts = []
+        timestamp = interaction.created_at.astimezone(self.jst).strftime('[%H:%M]')
+        formatted_text = f"{timestamp} {message}"
+        user_content_parts.append({"type": "text", "text": formatted_text})
+        user_content_parts.extend(image_contents)
+
+        user_message_for_api = {"role": "user", "content": user_content_parts}
+        messages_for_api.append(user_message_for_api)
+
+        logger.info(f"🔵 [INPUT] Total messages for API: {len(messages_for_api)} (system + user)")
+
+        try:
+            temp_message = await interaction.followup.send(
+                ":incoming_envelope: Thinking... / 思考中... :incoming_envelope:",
+                ephemeral=False,
+                wait=True
+            )
+
+            full_response_text = ""
+            last_update = 0.0
+            last_displayed_length = 0
+            chunk_count = 0
+            update_interval = 0.5
+            min_update_chars = 15
+            emoji_prefix = ":incoming_envelope: "
+            emoji_suffix = " :incoming_envelope:"
+
+            logger.info(f"🔵 [STREAMING] Starting LLM stream for /chat | {log_context}")
+
+            stream_generator = self._llm_stream_and_tool_handler(
+                messages_for_api, llm_client, log_context, interaction.channel_id, interaction.user.id
+            )
+
+            async for content_chunk in stream_generator:
+                chunk_count += 1
+                full_response_text += content_chunk
+
+                if chunk_count % 100 == 0:
+                    logger.debug(
+                        f"🟢 [STREAMING] Received chunk #{chunk_count}, total length: {len(full_response_text)} chars")
+
+                current_time = time.time()
+                chars_accumulated = len(full_response_text) - last_displayed_length
+
+                should_update = (
+                        current_time - last_update > update_interval and
+                        chars_accumulated >= min_update_chars
+                )
+
+                if should_update and full_response_text:
+                    max_content_length = DISCORD_MESSAGE_MAX_LENGTH - len(emoji_prefix) - len(emoji_suffix)
+                    display_text = emoji_prefix + full_response_text[:max_content_length] + emoji_suffix
+
+                    if display_text != temp_message.content:
+                        try:
+                            await temp_message.edit(content=display_text)
+                            last_update = current_time
+                            last_displayed_length = len(full_response_text)
+                            logger.debug(
+                                f"🟢 [STREAMING] Updated Discord message (displayed: {len(display_text)} chars)")
+                        except discord.NotFound:
+                            logger.warning(f"⚠️ Message deleted during stream. Aborting.")
+                            return
+                        except discord.HTTPException as e:
+                            if e.status == 429:
+                                retry_after = (e.retry_after or 1.0) + 0.5
+                                logger.warning(f"⚠️ Rate limited. Waiting {retry_after:.2f}s")
+                                await asyncio.sleep(retry_after)
+                                last_update = time.time()
+                            else:
+                                logger.warning(f"⚠️ Failed to edit message: {e.status}")
+                                await asyncio.sleep(2.0)
+
+            logger.info(
+                f"🟢 [STREAMING] Stream completed | Total chunks: {chunk_count} | Final length: {len(full_response_text)} chars")
+
+            if full_response_text:
+                final_text = full_response_text[:DISCORD_MESSAGE_MAX_LENGTH]
+                if final_text != temp_message.content:
+                    try:
+                        await temp_message.edit(content=final_text)
+                        logger.info(
+                            f"🟢 [OUTPUT] LLM final response for /chat (length: {len(full_response_text)} chars):\n{full_response_text}")
+                        logger.info(f"✅ /chat LLM stream finished | {log_context} | model='{model_in_use}'")
+                    except discord.HTTPException as e:
+                        logger.error(f"❌ Failed to update final message: {e}")
+            else:
+                error_msg = self.llm_config.get('error_msg', {}).get('general_error',
+                                                                     "There was no response from the AI.\nAIから応答がありませんでした。")
+                logger.warning(f"⚠️ Empty response from LLM for /chat")
+                await temp_message.edit(content=error_msg)
+
+        except Exception as e:
+            logger.error(f"❌ Error during /chat LLM streaming response: {e}", exc_info=True)
+            error_msg = self.exception_handler.handle_exception(e)
+            try:
+                await interaction.followup.send(error_msg, ephemeral=False)
+            except discord.HTTPException:
+                pass
+
+    @app_commands.command(
+        name="set-ai-bio",
+        description="Set the AI's personality/role (bio) for this channel.\nこのチャンネルのAIの性格や役割(bio)を設定します。"
+    )
+    @app_commands.describe(
+        bio="Describe the personality or role for the AI (e.g., You are a cat and end sentences with 'nya').\nAIに設定したい性格や役割を記述してください。(例: あなたは猫です。語尾に「にゃん」をつけて話します。)"
     )
     async def set_ai_bio_slash(self, interaction: discord.Interaction, bio: str):
         await interaction.response.defer(ephemeral=False)
         if not self.bio_manager:
-            await interaction.followup.send("❌ BioManagerが利用できません。", ephemeral=False)
+            await interaction.followup.send("❌ BioManager is not available.\n❌ BioManagerが利用できません。", ephemeral=False)
             return
 
         if len(bio) > 1024:
-            await interaction.followup.send("⚠️ AIのbioが長すぎます。1024文字以内で設定してください。", ephemeral=False)
+            await interaction.followup.send(
+                "⚠️ The AI bio is too long. Please set it within 1024 characters.\n⚠️ AIのbioが長すぎます。1024文字以内で設定してください。", ephemeral=False)
             return
 
         try:
             await self.bio_manager.set_channel_bio(interaction.channel_id, bio)
             logger.info(f"AI bio for channel {interaction.channel_id} set by {interaction.user.name}")
             embed = discord.Embed(
-                title="✅ AIのbioを設定しました",
-                description=f"このチャンネルでのAIの役割が以下のように設定されました。\n\n**新しいAIのbio:**\n```\n{bio}\n```",
+                title="✅ AI Bio Set / AIのbioを設定しました",
+                description=f"The AI's role in this channel has been set as follows.\nこのチャンネルでのAIの役割が以下のように設定されました。\n\n**New AI Bio / 新しいAIのbio:**\n```\n{bio}\n```",
                 color=discord.Color.green()
             )
             await interaction.followup.send(embed=embed, ephemeral=False)
         except Exception as e:
             logger.error(f"Failed to save channel AI bio settings: {e}", exc_info=True)
-            await interaction.followup.send("❌ AIのbio設定の保存に失敗しました。", ephemeral=False)
+            await interaction.followup.send(
+                "❌ Failed to save AI bio settings.\n❌ AIのbio設定の保存に失敗しました。", ephemeral=False)
 
     @app_commands.command(
         name="show-ai-bio",
-        description="このチャンネルのAIに現在設定されているbioを表示します。/ Show the AI's current bio for this channel."
+        description="Show the AI's current bio for this channel.\nこのチャンネルのAIに現在設定されているbioを表示します。"
     )
     async def show_ai_bio_slash(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=False)
         if not self.bio_manager:
-            await interaction.followup.send("❌ BioManagerが利用できません。", ephemeral=False)
+            await interaction.followup.send("❌ BioManager is not available.\n❌ BioManagerが利用できません。", ephemeral=False)
             return
 
         current_bio = self.bio_manager.get_channel_bio(interaction.channel_id)
         if current_bio:
-            title = "現在のAIのbio"
-            description = f"このチャンネルでは、AIに以下の役割が設定されています。\n\n**AIのbio:**\n```\n{current_bio}\n```"
+            title = "Current AI Bio / 現在のAIのbio"
+            description = f"In this channel, the AI has the following role set.\nこのチャンネルでは、AIに以下の役割が設定されています。\n\n**AI Bio / AIのbio:**\n```\n{current_bio}\n```"
             color = discord.Color.blue()
         else:
-            default_prompt = self.llm_config.get('system_prompt', "設定されていません。")
+            default_prompt = self.llm_config.get('system_prompt', "Not set. / 設定されていません。")
             try:
                 now = datetime.now(self.jst)
                 current_date_str = now.strftime('%Y年%m月%d日')
@@ -860,26 +1034,26 @@ class LLMCog(commands.Cog, name="LLM"):
             except (KeyError, ValueError):
                 formatted_prompt = default_prompt
 
-            title = "現在のAIのbio"
-            description = f"このチャンネルには専用のAI bioが設定されていません。\nサーバーのデフォルト設定が使用されます。\n\n**デフォルト設定:**\n```\n{formatted_prompt}\n```"
+            title = "Current AI Bio / 現在のAIのbio"
+            description = f"No specific AI bio is set for this channel. The server's default setting is used.\nこのチャンネルには専用のAI bioが設定されていません。サーバーのデフォルト設定が使用されます。\n\n**Default Setting / デフォルト設定:**\n```\n{formatted_prompt}\n```"
             color = discord.Color.greyple()
         embed = discord.Embed(title=title, description=description, color=color)
         await interaction.followup.send(embed=embed, ephemeral=False)
 
     @app_commands.command(
         name="reset-ai-bio",
-        description="このチャンネルのAIのbioをデフォルト設定に戻します。/ Reset the AI's bio to default for this channel."
+        description="Reset the AI's bio to default for this channel.\nこのチャンネルのAIのbioをデフォルト設定に戻します。"
     )
     async def reset_ai_bio_slash(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=False)
         if not self.bio_manager:
-            await interaction.followup.send("❌ BioManagerが利用できません。", ephemeral=False)
+            await interaction.followup.send("❌ BioManager is not available.\n❌ BioManagerが利用できません。", ephemeral=False)
             return
 
         try:
             if await self.bio_manager.reset_channel_bio(interaction.channel_id):
                 logger.info(f"AI bio for channel {interaction.channel_id} reset by {interaction.user.name}")
-                default_prompt = self.llm_config.get('system_prompt', '未設定')
+                default_prompt = self.llm_config.get('system_prompt', 'Not set / 未設定')
                 try:
                     now = datetime.now(self.jst)
                     current_date_str = now.strftime('%Y年%m月%d日')
@@ -893,37 +1067,40 @@ class LLMCog(commands.Cog, name="LLM"):
                     formatted_prompt) > 103 else formatted_prompt
 
                 await interaction.followup.send(
-                    f"✅ このチャンネルのAIのbioをデフォルト設定に戻しました。\n> 現在のデフォルト: `{display_prompt}`",
+                    f"✅ The AI bio for this channel has been reset to the default.\n✅ このチャンネルのAIのbioをデフォルト設定に戻しました。\n> Current Default / 現在のデフォルト: `{display_prompt}`",
                     ephemeral=False
                 )
             else:
-                await interaction.followup.send("ℹ️ このチャンネルには専用のAI bioが設定されていません。",
-                                                ephemeral=False)
+                await interaction.followup.send(
+                    "ℹ️ No custom AI bio is set for this channel.\nℹ️ このチャンネルには専用のAI bioが設定されていません。",
+                    ephemeral=False)
         except Exception as e:
             logger.error(f"Failed to save channel AI bio settings after reset: {e}", exc_info=True)
-            await interaction.followup.send("❌ AIのbio設定の保存に失敗しました。", ephemeral=False)
+            await interaction.followup.send(
+                "❌ Failed to save AI bio settings.\n❌ AIのbio設定の保存に失敗しました。", ephemeral=False)
 
     @app_commands.command(
         name="set-user-bio",
-        description="AIにあなたの情報を記憶させます。/ Save your information for the AI to remember."
+        description="Save your information for the AI to remember.\nAIにあなたの情報を記憶させます。"
     )
     @app_commands.describe(
-        bio="AIに覚えてほしいあなたの情報を記述してください。(例: 私の名前は田中です。趣味は読書です。)",
-        mode="保存モードを選択してください。'上書き'または'追記'が可能です。"
+        bio="Information about you for the AI to remember (e.g., My name is Tanaka. My hobby is reading.).\nAIに覚えてほしいあなたの情報を記述してください。(例: 私の名前は田中です。趣味は読書です。)",
+        mode="Select save mode. 'Overwrite' or 'Append' is available.\n保存モードを選択してください。'上書き'または'追記'が可能です。"
     )
     @app_commands.choices(mode=[
-        app_commands.Choice(name="上書き (Overwrite)", value="overwrite"),
-        app_commands.Choice(name="追記 (Append)", value="append"),
+        app_commands.Choice(name="Overwrite / 上書き", value="overwrite"),
+        app_commands.Choice(name="Append / 追記", value="append"),
     ])
     async def set_user_bio_slash(self, interaction: discord.Interaction, bio: str, mode: app_commands.Choice[str]):
         await interaction.response.defer(ephemeral=False)
         if not self.bio_manager:
-            await interaction.followup.send("❌ BioManagerが利用できません。", ephemeral=False)
+            await interaction.followup.send("❌ BioManager is not available.\n❌ BioManagerが利用できません。", ephemeral=False)
             return
 
         if len(bio) > 1024:
-            await interaction.followup.send("⚠️ ユーザー情報(bio)が長すぎます。1024文字以内で設定してください。",
-                                            ephemeral=False)
+            await interaction.followup.send(
+                "⚠️ User bio is too long. Please set it within 1024 characters.\n⚠️ ユーザー情報(bio)が長すぎます。1024文字以内で設定してください。",
+                ephemeral=False)
             return
 
         try:
@@ -934,112 +1111,115 @@ class LLMCog(commands.Cog, name="LLM"):
             updated_bio = self.bio_manager.get_user_bio(interaction.user.id)
 
             embed = discord.Embed(
-                title=f"✅ あなたの情報を記憶しました ({mode.name})",
-                description=f"AIはあなたの情報を以下のように記憶しました。\n\n**あなたのbio:**\n```\n{updated_bio}\n```",
+                title=f"✅ Your information has been saved ({mode.name}).\n✅ あなたの情報を記憶しました ({mode.name})",
+                description=f"The AI has stored your information as follows.\nAIはあなたの情報を以下のように記憶しました。\n\n**Your Bio / あなたのbio:**\n```\n{updated_bio}\n```",
                 color=discord.Color.green()
             )
             await interaction.followup.send(embed=embed, ephemeral=False)
         except Exception as e:
             logger.error(f"Failed to save user bio settings: {e}", exc_info=True)
-            await interaction.followup.send("❌ あなたの情報の保存に失敗しました。", ephemeral=False)
+            await interaction.followup.send("❌ Failed to save your information.\n❌ あなたの情報の保存に失敗しました。", ephemeral=False)
 
     @app_commands.command(
         name="show-user-bio",
-        description="AIが記憶しているあなたの情報を表示します。/ Show the information the AI has stored about you."
+        description="Show the information the AI has stored about you.\nAIが記憶しているあなたの情報を表示します。"
     )
     async def show_user_bio_slash(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=False)
         if not self.bio_manager:
-            await interaction.followup.send("❌ BioManagerが利用できません。", ephemeral=False)
+            await interaction.followup.send("❌ BioManager is not available.\n❌ BioManagerが利用できません。", ephemeral=False)
             return
 
         current_bio = self.bio_manager.get_user_bio(interaction.user.id)
         if current_bio:
             embed = discord.Embed(
-                title=f"💡 {interaction.user.display_name}さんの情報",
-                description=f"**bio:**\n```\n{current_bio}\n```",
+                title=f"💡 {interaction.user.display_name}'s Information / {interaction.user.display_name}さんの情報",
+                description=f"**Bio:**\n```\n{current_bio}\n```",
                 color=discord.Color.blue()
             )
         else:
             embed = discord.Embed(
-                title=f"💡 {interaction.user.display_name}さんの情報",
-                description="現在、あなたに関する情報は何も記憶されていません。\n`/set-user-bio` コマンドか、会話の中でAIに記憶を頼むことで設定できます。",
+                title=f"💡 {interaction.user.display_name}'s Information / {interaction.user.display_name}さんの情報",
+                description="Currently, no information is stored about you.\nYou can set it using the `/set-user-bio` command or by asking the AI to remember it in conversation.\n現在、あなたに関する情報は何も記憶されていません。\n`/set-user-bio` コマンドか、会話の中でAIに記憶を頼むことで設定できます。",
                 color=discord.Color.greyple()
             )
         await interaction.followup.send(embed=embed, ephemeral=False)
 
     @app_commands.command(
         name="reset-user-bio",
-        description="AIが記憶しているあなたの情報をすべて削除します。/ Delete all information the AI has stored about you."
+        description="Delete all information the AI has stored about you.\nAIが記憶しているあなたの情報をすべて削除します。"
     )
     async def reset_user_bio_slash(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=False)
         if not self.bio_manager:
-            await interaction.followup.send("❌ BioManagerが利用できません。", ephemeral=False)
+            await interaction.followup.send("❌ BioManager is not available.\n❌ BioManagerが利用できません。", ephemeral=False)
             return
 
         try:
             if await self.bio_manager.reset_user_bio(interaction.user.id):
                 logger.info(f"User bio for {interaction.user.name} ({interaction.user.id}) was reset.")
                 await interaction.followup.send(
-                    f"✅ {interaction.user.display_name}さんに関する情報をすべて削除しました。", ephemeral=False)
+                    f"✅ All information about {interaction.user.display_name} has been deleted.\n✅ {interaction.user.display_name}さんに関する情報をすべて削除しました。", ephemeral=False)
             else:
-                await interaction.followup.send("ℹ️ あなたに関する情報は何も記憶されていません。", ephemeral=False)
+                await interaction.followup.send(
+                    "ℹ️ No information is stored about you.\nℹ️ あなたに関する情報は何も記憶されていません。", ephemeral=False)
         except Exception as e:
             logger.error(f"Failed to save user bio settings after reset: {e}", exc_info=True)
-            await interaction.followup.send("❌ あなたの情報の削除に失敗しました。", ephemeral=False)
+            await interaction.followup.send("❌ Failed to delete your information.\n❌ あなたの情報の削除に失敗しました。", ephemeral=False)
 
     @app_commands.command(
         name="memory-save",
-        description="グローバル共有メモリに情報を保存します。/ Save information to the global shared memory."
+        description="Save information to the global shared memory.\nグローバル共有メモリに情報を保存します。"
     )
     @app_commands.describe(
-        key="情報のキー（項目名） 例: '開発者からのお知らせ'",
-        value="情報の内容 例: '次回のメンテナンスは...'"
+        key="The key for the information (e.g., 'Developer Announcement').\n情報のキー（項目名） 例: '開発者からのお知らせ'",
+        value="The content of the information (e.g., 'Next maintenance is...').\n情報の内容 例: '次回のメンテナンスは...'"
     )
     async def memory_save_slash(self, interaction: discord.Interaction, key: str, value: str):
         await interaction.response.defer(ephemeral=False)
         if not self.memory_manager:
-            await interaction.followup.send("❌ MemoryManagerが利用できません。", ephemeral=False)
+            await interaction.followup.send("❌ MemoryManager is not available.\n❌ MemoryManagerが利用できません。", ephemeral=False)
             return
 
         try:
             await self.memory_manager.save_memory(key, value)
             embed = discord.Embed(
-                title="✅ グローバル共有メモリに保存しました",
+                title="✅ Saved to Global Shared Memory / グローバル共有メモリに保存しました",
                 color=discord.Color.green()
             )
-            embed.add_field(name="キー", value=f"```{key}```", inline=False)
-            embed.add_field(name="値", value=f"```{value}```", inline=False)
+            embed.add_field(name="Key / キー", value=f"```{key}```", inline=False)
+            embed.add_field(name="Value / 値", value=f"```{value}```", inline=False)
             await interaction.followup.send(embed=embed, ephemeral=False)
         except Exception as e:
             logger.error(f"Failed to save global memory via command: {e}", exc_info=True)
-            await interaction.followup.send("❌ グローバル共有メモリへの保存に失敗しました。", ephemeral=False)
+            await interaction.followup.send(
+                "❌ Failed to save to global shared memory.\n❌ グローバル共有メモリへの保存に失敗しました。", ephemeral=False)
 
     @app_commands.command(
         name="memory-list",
-        description="グローバル共有メモリの情報を一覧表示します。/ List all global shared memories."
+        description="List all global shared memories.\nグローバル共有メモリの情報を一覧表示します。"
     )
     async def memory_list_slash(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=False)
         if not self.memory_manager:
-            await interaction.followup.send("❌ MemoryManagerが利用できません。", ephemeral=False)
+            await interaction.followup.send("❌ MemoryManager is not available.\n❌ MemoryManagerが利用できません。", ephemeral=False)
             return
 
         memories = self.memory_manager.list_memories()
         if not memories:
-            await interaction.followup.send("ℹ️ グローバル共有メモリには何も保存されていません。", ephemeral=False)
+            await interaction.followup.send(
+                "ℹ️ Nothing is saved in the global shared memory.\nℹ️ グローバル共有メモリには何も保存されていません。", ephemeral=False)
             return
 
         embed = discord.Embed(
-            title="🌐 グローバル共有メモリ",
+            title="🌐 Global Shared Memory / グローバル共有メモリ",
             color=discord.Color.blue()
         )
         description = ""
         for key, value in memories.items():
             field_text = f"**{key}**: {value}\n"
             if len(description) + len(field_text) > 4000:
-                description += "\n... (表示制限のため一部省略)"
+                description += "\n... (partially omitted due to display limit / 表示制限のため一部省略)"
                 break
             description += field_text
 
@@ -1058,26 +1238,29 @@ class LLMCog(commands.Cog, name="LLM"):
 
     @app_commands.command(
         name="memory-delete",
-        description="グローバル共有メモリから情報を削除します。/ Delete a global shared memory."
+        description="Delete a global shared memory.\nグローバル共有メモリから情報を削除します。"
     )
-    @app_commands.describe(key="削除したい情報のキー")
+    @app_commands.describe(key="The key of the memory to delete.\n削除したい情報のキー")
     @app_commands.autocomplete(key=memory_key_autocomplete)
     async def memory_delete_slash(self, interaction: discord.Interaction, key: str):
         await interaction.response.defer(ephemeral=False)
         if not self.memory_manager:
-            await interaction.followup.send("❌ MemoryManagerが利用できません。", ephemeral=False)
+            await interaction.followup.send("❌ MemoryManager is not available.\n❌ MemoryManagerが利用できません。", ephemeral=False)
             return
 
         try:
             if await self.memory_manager.delete_memory(key):
-                await interaction.followup.send(f"✅ グローバル共有メモリからキー '{key}' を削除しました。",
-                                                ephemeral=False)
+                await interaction.followup.send(
+                    f"✅ Deleted key '{key}' from global shared memory.\n✅ グローバル共有メモリからキー '{key}' を削除しました。",
+                    ephemeral=False)
             else:
-                await interaction.followup.send(f"⚠️ キー '{key}' はグローバル共有メモリに存在しません。",
-                                                ephemeral=False)
+                await interaction.followup.send(
+                    f"⚠️ Key '{key}' does not exist in global shared memory.\n⚠️ キー '{key}' はグローバル共有メモリに存在しません。",
+                    ephemeral=False)
         except Exception as e:
             logger.error(f"Failed to delete global memory via command: {e}", exc_info=True)
-            await interaction.followup.send("❌ グローバル共有メモリからの削除に失敗しました。", ephemeral=False)
+            await interaction.followup.send(
+                "❌ Failed to delete from global shared memory.\n❌ グローバル共有メモリからの削除に失敗しました。", ephemeral=False)
 
     async def model_autocomplete(self, interaction: discord.Interaction, current: str) -> List[
         app_commands.Choice[str]]:
@@ -1089,17 +1272,18 @@ class LLMCog(commands.Cog, name="LLM"):
 
     @app_commands.command(
         name="switch-models",
-        description="このチャンネルで使用するAIモデルを切り替えます。/ Switches the AI model used for this channel."
+        description="Switches the AI model used for this channel.\nこのチャンネルで使用するAIモデルを切り替えます。"
     )
     @app_commands.describe(
-        model="使用したいモデルを選択してください。"
+        model="Select the model you want to use.\n使用したいモデルを選択してください。"
     )
     @app_commands.autocomplete(model=model_autocomplete)
     async def switch_model_slash(self, interaction: discord.Interaction, model: str):
         await interaction.response.defer(ephemeral=False)
         available_models = self.llm_config.get('available_models', [])
         if model not in available_models:
-            await interaction.followup.send(f"⚠️ 指定されたモデル '{model}' は利用できません。")
+            await interaction.followup.send(
+                f"⚠️ The specified model '{model}' is not available.\n⚠️ 指定されたモデル '{model}' は利用できません。")
             return
 
         channel_id = interaction.channel_id
@@ -1122,6 +1306,8 @@ class LLMCog(commands.Cog, name="LLM"):
                 self.model_reset_tasks[channel_id] = task
 
                 await interaction.followup.send(
+                    f"✅ The AI model for this channel has been switched to `{model}`.\n"
+                    f"It will automatically revert to the default model (`{default_model}`) **after 3 hours**.\n"
                     f"✅ このチャンネルのAIモデルが `{model}` に切り替えられました。\n"
                     f"**3時間後**にデフォルトモデル (`{default_model}`) に自動的に戻ります。",
                     ephemeral=False
@@ -1129,17 +1315,18 @@ class LLMCog(commands.Cog, name="LLM"):
                 logger.info(f"Model for channel {channel_id} switched to '{model}' by {interaction.user.name}. "
                             f"Reset scheduled in 3 hours.")
             else:
-                await interaction.followup.send(f"✅ このチャンネルのAIモデルがデフォルトの `{model}` に戻されました。",
-                                                ephemeral=False)
+                await interaction.followup.send(
+                    f"✅ The AI model for this channel has been reset to the default `{model}`.\n✅ このチャンネルのAIモデルがデフォルトの `{model}` に戻されました。",
+                    ephemeral=False)
                 logger.info(f"Model for channel {channel_id} switched to default '{model}' by {interaction.user.name}.")
 
         except Exception as e:
             logger.error(f"Failed to save channel model settings: {e}", exc_info=True)
-            await interaction.followup.send("❌ 設定の保存に失敗しました。")
+            await interaction.followup.send("❌ Failed to save settings.\n❌ 設定の保存に失敗しました。")
 
     @app_commands.command(
         name="switch-models-default-server",
-        description="このチャンネルのAIモデルをサーバーのデフォルト設定に戻します。/ Resets the AI model for this channel to the server default."
+        description="Resets the AI model for this channel to the server default.\nこのチャンネルのAIモデルをサーバーのデフォルト設定に戻します。"
     )
     async def reset_model_slash(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=False)
@@ -1155,169 +1342,115 @@ class LLMCog(commands.Cog, name="LLM"):
             del self.channel_models[channel_id_str]
             try:
                 await self._save_channel_models()
-                default_model = self.llm_config.get('model', '未設定')
+                default_model = self.llm_config.get('model', 'Not set / 未設定')
                 await interaction.followup.send(
-                    f"✅ このチャンネルのAIモデルをデフォルト (`{default_model}`) に戻しました。", ephemeral=False)
+                    f"✅ The AI model for this channel has been reset to the default (`{default_model}`).\n✅ このチャンネルのAIモデルをデフォルト (`{default_model}`) に戻しました。",
+                    ephemeral=False)
                 logger.info(f"Model for channel {interaction.channel_id} reset to default by {interaction.user.name}")
             except Exception as e:
                 logger.error(f"Failed to save channel model settings after reset: {e}", exc_info=True)
-                await interaction.followup.send("❌ 設定の保存に失敗しました。")
+                await interaction.followup.send("❌ Failed to save settings.\n❌ 設定の保存に失敗しました。")
         else:
-            await interaction.followup.send("ℹ️ このチャンネルには専用のモデルが設定されていません。", ephemeral=False)
+            await interaction.followup.send(
+                "ℹ️ No custom model is set for this channel.\nℹ️ このチャンネルには専用のモデルが設定されていません。", ephemeral=False)
 
     @switch_model_slash.error
     async def switch_model_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
         logger.error(f"Error in /switch-model command: {error}", exc_info=True)
+        error_message = f"An unexpected error occurred: {error}\n予期せぬエラーが発生しました: {error}"
         if not interaction.response.is_done():
-            await interaction.response.send_message(f"予期せぬエラーが発生しました: {error}", ephemeral=False)
+            await interaction.response.send_message(error_message, ephemeral=False)
         else:
-            await interaction.followup.send(f"予期せぬエラーが発生しました: {error}", ephemeral=False)
+            await interaction.followup.send(error_message, ephemeral=False)
 
     @app_commands.command(name="llm_help",
-                          description="LLM (AI対話) 機能のヘルプと利用ガイドラインを表示します。/ Displays help and usage guidelines for LLM (AI Chat) features.")
+                          description="Displays help and usage guidelines for LLM (AI Chat) features.\nLLM (AI対話) 機能のヘルプと利用ガイドラインを表示します。")
     async def llm_help_slash(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=False)
         bot_user = self.bot.user or interaction.client.user
-        bot_name = bot_user.name if bot_user else "当Bot"
-        embed = discord.Embed(title=f"💡 {bot_name} AI対話機能ヘルプ＆ガイドライン",
-                              description=f"{bot_name}のAI対話機能についての説明と利用規約です。",
+        bot_name = bot_user.name if bot_user else "This Bot / 当Bot"
+        embed = discord.Embed(title=f"💡 {bot_name} AI Chat Help & Guidelines / AI対話機能ヘルプ＆ガイドライン",
+                              description=f"Explanation and terms of use for the AI chat features.\n{bot_name}のAI対話機能についての説明と利用規約です。",
                               color=discord.Color.purple())
         if bot_user and bot_user.avatar: embed.set_thumbnail(url=bot_user.avatar.url)
         embed.add_field(
-            name="基本的な使い方",
+            name="Basic Usage / 基本的な使い方",
             value=(
-                f"• Botにメンション (`@{bot_name}`) して話しかけると、AIが応答します。\n"
-                f"• **Botのメッセージに返信することでも会話を続けられます（メンション不要）。**\n"
-                f"• 「私の名前は〇〇です。覚えておいて」のように話しかけると、AIがあなたの情報を記憶しようとします。\n"
-                f"• 画像と一緒に話しかけると、AIが画像の内容も理解しようとします。"
+                f"• Mention the bot (`@{bot_name}`) to get a response from the AI.\n  Botにメンション (`@{bot_name}`) して話しかけると、AIが応答します。\n"
+                f"• **You can also continue the conversation by replying to the bot's messages (no mention needed).**\n  **Botのメッセージに返信することでも会話を続けられます（メンション不要）。**\n"
+                f"• If you ask the AI to remember something, it will try to store that information.\n  「私の名前は〇〇です。覚えておいて」のように話しかけると、AIがあなたの情報を記憶しようとします。\n"
+                f"• Attach images or paste image URLs with your message, and the AI will try to understand them.\n  画像と一緒に話しかけると、AIが画像の内容も理解しようとします。"
             ),
             inline=False
         )
         embed.add_field(
-            name="便利なコマンド",
+            name="Useful Commands / 便利なコマンド",
             value=(
-                "**【AIの設定 (チャンネルごと)】**\n"
-                "• `/switch-models`: このチャンネルで使うAIモデルを変更します。\n"
-                "• `/set-ai-bio`: このチャンネル専用のAIの性格や役割を設定します。\n"
-                "• `/show-ai-bio`: 現在のAIのbio設定を確認します。\n"
-                "• `/reset-ai-bio`: AIのbio設定をデフォルトに戻します。\n"
-                "**【あなたの情報】**\n"
-                "• `/set-user-bio`: AIに覚えてほしいあなたの情報を設定します。\n"
-                "• `/show-user-bio`: AIが記憶しているあなたの情報を確認します。\n"
-                "• `/reset-user-bio`: あなたの情報をAIの記憶から削除します。\n"
-                "**【グローバルメモリ】**\n"
-                "• `/memory-save`: 全サーバー共通のメモリに情報を保存します。\n"
-                "• `/memory-list`: グローバルメモリの情報を一覧表示します。\n"
-                "• `/memory-delete`: グローバルメモリから情報を削除します。\n"
-                "**【その他】**\n"
-                "• `/clear_history`: 会話履歴をリセットします。"
+                "**[AI Settings (Per Channel) / AIの設定 (チャンネルごと)]**\n"
+                "• `/switch-models`: Change the AI model used in this channel. / このチャンネルで使うAIモデルを変更します。\n"
+                "• `/set-ai-bio`: Set a custom personality/role for the AI in this channel. / このチャンネル専用のAIの性格や役割を設定します。\n"
+                "• `/show-ai-bio`: Check the current AI bio setting. / 現在のAIのbio設定を確認します。\n"
+                "• `/reset-ai-bio`: Reset the AI bio to the default. / AIのbio設定をデフォルトに戻します。\n"
+                "**[Your Information / あなたの情報]**\n"
+                "• `/set-user-bio`: Set information about you for the AI to remember. / AIに覚えてほしいあなたの情報を設定します。\n"
+                "• `/show-user-bio`: Check the information the AI has stored about you. / AIが記憶しているあなたの情報を確認します。\n"
+                "• `/reset-user-bio`: Delete your information from the AI's memory. / あなたの情報をAIの記憶から削除します。\n"
+                "**[Global Memory / グローバルメモリ]**\n"
+                "• `/memory-save`: Save information to the global shared memory. / 全サーバー共通のメモリに情報を保存します。\n"
+                "• `/memory-list`: List all information in the global memory. / グローバルメモリの情報を一覧表示します。\n"
+                "• `/memory-delete`: Delete information from the global memory. / グローバルメモリから情報を削除します。\n"
+                "**[Other / その他]**\n"
+                "• `/clear_history`: Reset the conversation history. / 会話履歴をリセットします。"
             ),
             inline=False
         )
         channel_model_str = self.channel_models.get(str(interaction.channel_id))
-        model_display = f"`{channel_model_str}` (このチャンネル専用)" if channel_model_str else f"`{self.llm_config.get('model', '未設定')}` (デフォルト)"
+        model_display = f"`{channel_model_str}` (Channel-specific / このチャンネル専用)" if channel_model_str else f"`{self.llm_config.get('model', 'Not set / 未設定')}` (Default / デフォルト)"
 
         ai_bio_display = "N/A"
         user_bio_display = "N/A"
         if self.bio_manager:
-            ai_bio_display = "✅ (専用設定あり)" if self.bio_manager.get_channel_bio(interaction.channel_id) else "デフォルト"
-            user_bio_display = "✅ (記憶あり)" if self.bio_manager.get_user_bio(interaction.user.id) else "なし"
+            ai_bio_display = "✅ (Custom / 専用設定あり)" if self.bio_manager.get_channel_bio(
+                interaction.channel_id) else "Default / デフォルト"
+            user_bio_display = "✅ (Stored / 記憶あり)" if self.bio_manager.get_user_bio(
+                interaction.user.id) else "None / なし"
 
         active_tools = self.llm_config.get('active_tools', [])
-        tools_info = "• なし" if not active_tools else "• " + ", ".join(active_tools)
-        embed.add_field(name="現在のAI設定",
-                        value=f"• **使用モデル:** {model_display}\n"
-                              f"• **AIの役割(チャンネル):** {ai_bio_display} (詳細は `/show-ai-bio`)\n"
-                              f"• **あなたの情報:** {user_bio_display} (詳細は `/show-user-bio`)\n"
-                              f"• **会話履歴の最大保持数:** {self.llm_config.get('max_messages', '未設定')} ペア\n"
-                              f"• **一度に処理できる最大画像枚数:** {self.llm_config.get('max_images', '未設定')} 枚\n"
-                              f"• **利用可能なツール:** {tools_info}",
+        tools_info = "• None / なし" if not active_tools else "• " + ", ".join(active_tools)
+        embed.add_field(name="Current AI Settings / 現在のAI設定",
+                        value=f"• **Model in Use / 使用モデル:** {model_display}\n"
+                              f"• **AI Role (Channel) / AIの役割(チャンネル):** {ai_bio_display} (see `/show-ai-bio`)\n"
+                              f"• **Your Info / あなたの情報:** {user_bio_display} (see `/show-user-bio`)\n"
+                              f"• **Max Conversation History / 会話履歴の最大保持数:** {self.llm_config.get('max_messages', 'Not set / 未設定')} pairs\n"
+                              f"• **Max Images at Once / 一度に処理できる最大画像枚数:** {self.llm_config.get('max_images', 'Not set / 未設定')} image(s)\n"
+                              f"• **Available Tools / 利用可能なツール:** {tools_info}",
                         inline=False)
-        embed.add_field(name="--- 📜 AI利用ガイドライン ---",
-                        value="AI機能を安全にご利用いただくため、以下の内容を必ずご確認ください。", inline=False)
-        embed.add_field(name="⚠️ 1. データ入力時の注意", value=(
+        embed.add_field(name="--- 📜 AI Usage Guidelines / AI利用ガイドライン ---",
+                        value="Please review the following to ensure safe use of the AI features.\nAI機能を安全にご利用いただくため、以下の内容を必ずご確認ください。",
+                        inline=False)
+        embed.add_field(name="⚠️ 1. Data Input Precautions / データ入力時の注意", value=(
+            "**NEVER include personal or confidential information** such as your name, contact details, or passwords.\n"
             "AIに記憶させる情報には、氏名、連絡先、パスワードなどの**個人情報や秘密情報を絶対に含めないでください。**"),
                         inline=False)
-        embed.add_field(name="✅ 2. 生成物利用時の注意", value=(
+        embed.add_field(name="✅ 2. Precautions for Using Generated Output / 生成物利用時の注意", value=(
+            "The AI's responses may contain inaccuracies or biases. **Always fact-check and use them at your own risk.**\n"
             "AIの応答には虚偽や偏見が含まれる可能性があります。**必ずファクトチェックを行い、自己の責任で利用してください。**"),
                         inline=False)
-        embed.set_footer(text="ガイドラインは予告なく変更される場合があります。")
+        embed.set_footer(
+            text="These guidelines are subject to change without notice.\nガイドラインは予告なく変更される場合があります。")
         await interaction.followup.send(embed=embed, ephemeral=False)
 
     @app_commands.command(name="llm_help_en",
-                          description="Displays help and usage guidelines for LLM (AI Chat) features.")
+                          description="Displays help and usage guidelines for LLM (AI Chat) features.\nLLM (AI対話) 機能のヘルプと利用ガイドラインを表示します。")
     async def llm_help_en_slash(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=False)
-        bot_user = self.bot.user or interaction.client.user
-        bot_name = bot_user.name if bot_user else "This Bot"
-        embed = discord.Embed(title=f"💡 {bot_name} AI Chat Help & Guidelines",
-                              description=f"Explanation and terms of use for the AI chat features of {bot_name}.",
-                              color=discord.Color.purple())
-        if bot_user and bot_user.avatar: embed.set_thumbnail(url=bot_user.avatar.url)
-        embed.add_field(
-            name="Basic Usage",
-            value=(
-                f"• Mention the bot (`@{bot_name}`) to get a response from the AI.\n"
-                f"• **You can also continue the conversation by replying to the bot's messages (no mention needed).**\n"
-                f"• If you ask the AI to remember something (e.g., 'My name is John, please remember it'), it will try to store that information.\n"
-                f"• Attach images or paste image URLs with your message, and the AI will try to understand them."
-            ),
-            inline=False
-        )
-        embed.add_field(
-            name="Useful Commands",
-            value=(
-                "**[AI Settings (Per Channel)]**\n"
-                "• `/switch-models`: Change the AI model used in this channel.\n"
-                "• `/set-ai-bio`: Set a custom personality/role for the AI in this channel.\n"
-                "• `/show-ai-bio`: Check the current AI bio setting.\n"
-                "• `/reset-ai-bio`: Reset the AI bio to the default.\n"
-                "**[Your Information]**\n"
-                "• `/set-user-bio`: Set information about you for the AI to remember.\n"
-                "• `/show-user-bio`: Check the information the AI has stored about you.\n"
-                "• `/reset-user-bio`: Delete your information from the AI's memory.\n"
-                "**[Global Memory]**\n"
-                "• `/memory-save`: Save information to the global shared memory.\n"
-                "• `/memory-list`: List all information in the global memory.\n"
-                "• `/memory-delete`: Delete information from the global memory.\n"
-                "**[Other]**\n"
-                "• `/clear_history`: Reset the conversation history."
-            ),
-            inline=False
-        )
-        channel_model_str = self.channel_models.get(str(interaction.channel_id))
-        model_display = f"`{channel_model_str}` (Channel-specific)" if channel_model_str else f"`{self.llm_config.get('model', 'Not set')}` (Default)"
-
-        ai_bio_display = "N/A"
-        user_bio_display = "N/A"
-        if self.bio_manager:
-            ai_bio_display = "✅ (Custom)" if self.bio_manager.get_channel_bio(interaction.channel_id) else "Default"
-            user_bio_display = "✅ (Stored)" if self.bio_manager.get_user_bio(interaction.user.id) else "None"
-
-        active_tools = self.llm_config.get('active_tools', [])
-        tools_info = "• None" if not active_tools else "• " + ", ".join(active_tools)
-        embed.add_field(name="Current AI Settings",
-                        value=f"• **Model in Use:** {model_display}\n"
-                              f"• **AI Role (Channel):** {ai_bio_display} (see `/show-ai-bio`)\n"
-                              f"• **Your Info:** {user_bio_display} (see `/show-user-bio`)\n"
-                              f"• **Max Conversation History:** {self.llm_config.get('max_messages', 'Not set')} pairs\n"
-                              f"• **Max Images Processed at Once:** {self.llm_config.get('max_images', 'Not set')} image(s)\n"
-                              f"• **Available Tools:** {tools_info}",
-                        inline=False)
-        embed.add_field(name="--- 📜 AI Usage Guidelines ---",
-                        value="Please review the following to ensure safe use of the AI features.", inline=False)
-        embed.add_field(name="⚠️ 1. Precautions for Data Input", value=(
-            "**NEVER include personal or confidential information** such as your name, contact details, or passwords in the information you ask the AI to remember."),
-                        inline=False)
-        embed.add_field(name="✅ 2. Precautions for Using Generated Output", value=(
-            "The AI's responses may contain inaccuracies or biases. **Always fact-check and use them at your own risk.**"),
-                        inline=False)
-        embed.set_footer(text="These guidelines are subject to change without notice.")
-        await interaction.followup.send(embed=embed, ephemeral=False)
+        # This command is now identical to llm_help, as both are bilingual.
+        # You might consider removing this one and keeping only ll.
+        # このコマンドはllm_helpと同一になりました。片方を削除することも検討してください。
+        await self.llm_help_slash(interaction)
 
     @app_commands.command(
         name="clear_history",
-        description="現在の会話スレッドの履歴をクリアします。/ Clears the history of the current conversation thread."
+        description="Clears the history of the current conversation thread.\n現在の会話スレッドの履歴をクリアします。"
     )
     async def clear_history_slash(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=False)
@@ -1328,7 +1461,8 @@ class LLMCog(commands.Cog, name="LLM"):
                 if msg.id in self.message_to_thread:
                     threads_to_clear.add(self.message_to_thread[msg.id])
         except (discord.Forbidden, discord.HTTPException):
-            await interaction.followup.send("⚠️ チャンネルのメッセージ履歴を読み取れませんでした。")
+            await interaction.followup.send(
+                "⚠️ Could not read the channel's message history.\n⚠️ チャンネルのメッセージ履歴を読み取れませんでした。")
             return
         for thread_id in threads_to_clear:
             if thread_id in self.conversation_threads:
@@ -1337,9 +1471,10 @@ class LLMCog(commands.Cog, name="LLM"):
                 cleared_count += 1
         if cleared_count > 0:
             await interaction.followup.send(
-                f"✅ このチャンネルに関連する {cleared_count} 個の会話スレッドの履歴をクリアしました。")
+                f"✅ Cleared the history of {cleared_count} conversation thread(s) related to this channel.\n✅ このチャンネルに関連する {cleared_count} 個の会話スレッドの履歴をクリアしました。")
         else:
-            await interaction.followup.send("ℹ️ クリア対象の会話履歴が見つかりませんでした。")
+            await interaction.followup.send(
+                "ℹ️ No conversation history to clear was found.\nℹ️ クリア対象の会話履歴が見つかりませんでした。")
 
 
 async def setup(bot: commands.Bot):
