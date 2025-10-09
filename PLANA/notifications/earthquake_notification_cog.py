@@ -752,6 +752,94 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, self._generate_single_map_sync, quake, info_type)
 
+    def _calculate_smart_map_extent(self, lat: float, lon: float, max_scale: int) -> tuple:
+        """
+        震源地の位置と震度に基づいて、最適な地図表示範囲を計算
+        日本列島全体が見えるように、偏りを自動調整する
+
+        Args:
+            lat: 震源地の緯度
+            lon: 震源地の経度
+            max_scale: 最大震度コード
+
+        Returns:
+            tuple: (lon_min, lon_max, lat_min, lat_max)
+        """
+        # 日本全体の境界
+        JAPAN_LON_MIN, JAPAN_LON_MAX = 122, 148
+        JAPAN_LAT_MIN, JAPAN_LAT_MAX = 24, 46
+
+        # 震度に応じた基本ズーム範囲
+        if max_scale >= 50:
+            base_zoom = 4.5
+        elif max_scale >= 40:
+            base_zoom = 3.5
+        else:
+            base_zoom = 2.5
+
+        lon_span = base_zoom * 2
+        lat_span = base_zoom * 1.6
+
+        # 震源地が日本の端にある場合の判定
+        # 端からの距離を計算
+        dist_to_west = lon - JAPAN_LON_MIN
+        dist_to_east = JAPAN_LON_MAX - lon
+        dist_to_south = lat - JAPAN_LAT_MIN
+        dist_to_north = JAPAN_LAT_MAX - lat
+
+        # 端に近い場合（余裕が半分のズーム範囲より小さい）、中心をずらす
+        edge_threshold = base_zoom
+
+        center_lon = lon
+        center_lat = lat
+
+        # 西端に近い場合（トカラ列島、沖縄など）
+        if dist_to_west < edge_threshold:
+            # 中心を東寄りに調整
+            center_lon = lon + (edge_threshold - dist_to_west) * 0.7
+        # 東端に近い場合（小笠原諸島など）
+        elif dist_to_east < edge_threshold:
+            # 中心を西寄りに調整
+            center_lon = lon - (edge_threshold - dist_to_east) * 0.7
+
+        # 南端に近い場合（沖縄、南西諸島など）
+        if dist_to_south < edge_threshold:
+            # 中心を北寄りに調整
+            center_lat = lat + (edge_threshold - dist_to_south) * 0.7
+        # 北端に近い場合（北海道北部など）
+        elif dist_to_north < edge_threshold:
+            # 中心を南寄りに調整
+            center_lat = lat - (edge_threshold - dist_to_north) * 0.7
+
+        # 調整後の表示範囲を計算
+        lon_min = center_lon - lon_span / 2
+        lon_max = center_lon + lon_span / 2
+        lat_min = center_lat - lat_span / 2
+        lat_max = center_lat + lat_span / 2
+
+        # 日本の境界を超えないように最終調整
+        if lon_min < JAPAN_LON_MIN:
+            shift = JAPAN_LON_MIN - lon_min
+            lon_min = JAPAN_LON_MIN
+            lon_max = min(lon_max + shift, JAPAN_LON_MAX)
+
+        if lon_max > JAPAN_LON_MAX:
+            shift = lon_max - JAPAN_LON_MAX
+            lon_max = JAPAN_LON_MAX
+            lon_min = max(lon_min - shift, JAPAN_LON_MIN)
+
+        if lat_min < JAPAN_LAT_MIN:
+            shift = JAPAN_LAT_MIN - lat_min
+            lat_min = JAPAN_LAT_MIN
+            lat_max = min(lat_max + shift, JAPAN_LAT_MAX)
+
+        if lat_max > JAPAN_LAT_MAX:
+            shift = lat_max - JAPAN_LAT_MAX
+            lat_max = JAPAN_LAT_MAX
+            lat_min = max(lat_min - shift, JAPAN_LAT_MIN)
+
+        return (lon_min, lon_max, lat_min, lat_max)
+
     def _generate_single_map_sync(self, quake: dict, info_type: str) -> io.BytesIO:
         """単一の地震マップ画像を同期的に生成（Natural Earthで日本地図表示）"""
         lat, lon = quake['lat'], quake['lon']
@@ -760,41 +848,8 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
         fig = plt.figure(figsize=(16, 16), dpi=150)
         ax = fig.add_axes([0, 0, 1, 1], projection=ccrs.PlateCarree())
 
-        # 震度に応じてズーム範囲を調整
-        if max_scale >= 50:  # 震度5強以上は広範囲
-            zoom_range = 4.5
-        elif max_scale >= 40:  # 震度4以上は中範囲
-            zoom_range = 3.5
-        else:  # それ以下は狭い範囲
-            zoom_range = 2.5
-
-        # 震源地を中心に表示範囲を計算し、日本の主要領域からはみ出さないように調整
-        lon_span = zoom_range * 2
-        lat_span = zoom_range * 1.6  # 縦横比を考慮 (zoom_range * 0.8 * 2)
-
-        lon_min = lon - lon_span / 2
-        lon_max = lon + lon_span / 2
-        lat_min = lat - lat_span / 2
-        lat_max = lat + lat_span / 2
-
-        # 日本の表示範囲の境界を設定（沖縄から北海道、小笠原諸島までをカバー）
-        JAPAN_LON_MIN, JAPAN_LON_MAX = 122, 148
-        JAPAN_LAT_MIN, JAPAN_LAT_MAX = 24, 46
-
-        # 理想範囲が境界をはみ出す場合、表示範囲をずらす
-        if lon_min < JAPAN_LON_MIN:
-            lon_min = JAPAN_LON_MIN
-            lon_max = JAPAN_LON_MIN + lon_span
-        elif lon_max > JAPAN_LON_MAX:
-            lon_max = JAPAN_LON_MAX
-            lon_min = JAPAN_LON_MAX - lon_span
-
-        if lat_min < JAPAN_LAT_MIN:
-            lat_min = JAPAN_LAT_MIN
-            lat_max = JAPAN_LAT_MIN + lat_span
-        elif lat_max > JAPAN_LAT_MAX:
-            lat_max = JAPAN_LAT_MAX
-            lat_min = JAPAN_LAT_MAX - lat_span
+        # スマートな地図範囲計算（端に偏らないように自動調整）
+        lon_min, lon_max, lat_min, lat_max = self._calculate_smart_map_extent(lat, lon, max_scale)
 
         ax.set_extent([lon_min, lon_max, lat_min, lat_max], crs=ccrs.PlateCarree())
 
@@ -906,7 +961,8 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
         if quake['depth'] != -1:
             info_text += f'深さ: {quake["depth"]}km'
 
-        # テキストボックスの位置を動的に調整
+        # テキストボックスの位置を動的に調整（スマート範囲計算に対応）
+        zoom_range = (lon_max - lon_min) / 2
         text_offset = zoom_range * 0.6
         text_y = lat - text_offset
 
