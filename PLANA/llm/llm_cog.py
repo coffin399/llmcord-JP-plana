@@ -515,7 +515,7 @@ class LLMCog(commands.Cog, name="LLM"):
         update_interval = 0.5
         min_update_chars = 15
         retry_sleep_time = 2.0
-        placeholder = ":incoming_envelope: Thinking... / 思考中... :incoming_envelope:"
+        placeholder = ":incoming_envelope: Thinking...:incoming_envelope:"
         emoji_prefix = ":incoming_envelope: "
         emoji_suffix = " :incoming_envelope:"
         logger.info(f"🔵 [STREAMING] Starting LLM stream | {log_context}")
@@ -890,7 +890,7 @@ class LLMCog(commands.Cog, name="LLM"):
 
         try:
             temp_message = await interaction.followup.send(
-                ":incoming_envelope: Thinking... / 思考中... :incoming_envelope:",
+                ":incoming_envelope: Thinking...:incoming_envelope:",
                 ephemeral=False,
                 wait=True
             )
