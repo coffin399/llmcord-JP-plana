@@ -223,27 +223,34 @@ class Shittim(commands.Bot):
 
     @tasks.loop(seconds=10)
     async def rotate_status(self):
-        if not self.status_templates: return
+        # ボットが完全に準備完了しているか、ステータステンプレートが存在するかを確認
+        # これにより、再接続中の実行や設定不備を防ぐ
+        if not self.is_ready() or not self.status_templates:
+            return
+
         current_template = self.status_templates[self.status_index]
         status_text = current_template.format(guild_count=len(self.guilds), prefix=self.config.get('prefix', '!!'))
         activity_type_str = self.config.get('status_activity_type', 'playing').lower()
-        activity_type_map = {'playing': discord.ActivityType.playing, 'streaming': discord.ActivityType.streaming,
-                             'listening': discord.ActivityType.listening, 'watching': discord.ActivityType.watching,
-                             'competing': discord.ActivityType.competing}
+        activity_type_map = {
+            'playing': discord.ActivityType.playing,
+            'streaming': discord.ActivityType.streaming,
+            'listening': discord.ActivityType.listening,
+            'watching': discord.ActivityType.watching,
+            'competing': discord.ActivityType.competing
+        }
         selected_activity_type = activity_type_map.get(activity_type_str, discord.ActivityType.streaming)
+
         if selected_activity_type == discord.ActivityType.streaming:
             stream_url = self.config.get('status_stream_url', 'https://www.twitch.tv/coffinnoob299')
             activity = discord.Streaming(name=status_text, url=stream_url)
         else:
             activity = discord.Activity(type=selected_activity_type, name=status_text)
+
         try:
-            if self.ws:
-                await self.ws.send_as_json({'op': 3, 'd': {'since': 0, 'activities': [activity.to_dict()],
-                                                           'status': 'online', 'afk': False}})
-            else:
-                await self.change_presence(activity=activity, status=discord.Status.online)
+            await self.change_presence(activity=activity, status=discord.Status.online)
         except Exception as e:
-            logging.error(f"ステータスの更新中にエラーが発生しました: {e}", exc_info=True)
+            logging.warning(f"ステータスの更新中に一時的なエラーが発生しました: {e}")
+
         self.status_index = (self.status_index + 1) % len(self.status_templates)
 
     @rotate_status.before_loop
@@ -260,8 +267,8 @@ class Shittim(commands.Bot):
         self.status_templates = self.config.get('status_rotation', ["/help",
                                                                     "operating on {guild_count} servers",
                                                                     "operating on {guild_count} servers",
-                                                                    "PLANA Ver.2025-10-07",
-                                                                    "PLANA Ver.2025-10-07",
+                                                                    "PLANA Ver.2025-10-09",
+                                                                    "PLANA Ver.2025-10-09",
                                                                     "/llm_help",
                                                                     "/llm_help_en",
                                                                     "/ytdlp",
