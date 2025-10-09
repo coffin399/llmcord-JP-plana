@@ -1,6 +1,6 @@
 ECHO PLANA STARTER
 
-set VENV_DIR=venv
+set VENV_DIR=.venv
 
 if not exist "%VENV_DIR%" (
     ECHO Creating virtual environment in '%VENV_DIR%' folder...
