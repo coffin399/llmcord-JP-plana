@@ -5,7 +5,7 @@ from discord.ext import commands
 import aiohttp
 import yaml
 from typing import Literal
-from error.errors import (
+from PLANA.tracker.error.errors import (
     TRNAPIError,
     PlayerNotFoundError,
     GameNotSupportedError,
