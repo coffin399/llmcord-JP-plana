@@ -123,7 +123,6 @@ class DiscordLogHandler(logging.Handler):
             return text[:count] if text else ''
 
     def _sanitize_log_message(self, message: str) -> str:
-        # (このメソッドの中身は変更ありません)
         # Windowsユーザーパス
         message = re.sub(
             r'[A-Za-z]:\\Users\\[^\\]+\\[^\\]+',
