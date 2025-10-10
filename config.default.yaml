@@ -136,6 +136,10 @@ llm:
     api_status_error: "⚠️AIとの通信でエラーが発生しました。\n⚠️ An error occurred while communicating with the AI. (Code: {status_code})"
     general_error: "⚠️ 予期しないエラーが発生しました。もう一度お試しください。\n⚠️ An unexpected error occurred. Please try again. (Code: {status_code})"
     tool_loop_timeout: "⚠️ツールの処理が複雑すぎたため、応答を生成できませんでした。\n⚠️ Failed to generate a response because the tool's operation was too complex. (Code: {status_code})"
+# =============================================================================
+# TRN API settings
+# =============================================================================
+trn_api_key: "YOUR_TRN_API_KEY_HERE"
 
 # =============================================================================
 # Slash Command Cog Settings (汎用スラッシュコマンド)
