@@ -1,10 +1,10 @@
 discord.py
-discord.py[voice]>=2.3.2
+discord.py[voice]
 aiohttp
 openai
 pyyaml
 google-genai
-PyNaCl>=1.5.0
+PyNaCl
 google-generativeai
 yt-dlp
 akinator
