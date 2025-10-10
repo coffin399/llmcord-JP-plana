@@ -31,20 +31,17 @@ try:
     MATPLOTLIB_AVAILABLE = True
     logger.info("✅ Matplotlibが正常にインポートされました。")
 
-    # 日本語フォント設定（Windows環境向け）
+    # 日本語フォント設定（改善版）
     try:
-        # まずjapanize_matplotlibを試す
         import japanize_matplotlib
 
         logger.info("✅ japanize_matplotlibが正常にインポートされました。")
     except ImportError:
-        # japanize_matplotlibがなければWindowsの標準フォントを使う
-        logger.info("ℹ️ japanize_matplotlibなし。Windowsフォントを使用します。")
+        logger.info("ℹ️ japanize_matplotlibなし。代替フォントを設定します。")
         try:
-            # Windowsで利用可能な日本語フォントを試す
             import matplotlib.font_manager as fm
 
-            japanese_fonts = ['MS Gothic', 'Yu Gothic', 'Meiryo', 'MS UI Gothic']
+            japanese_fonts = ['MS Gothic', 'Yu Gothic', 'Meiryo', 'MS UI Gothic', 'DejaVu Sans']
             available_fonts = [f.name for f in fm.fontManager.ttflist]
 
             for font in japanese_fonts:
@@ -53,17 +50,13 @@ try:
                     logger.info(f"✅ 日本語フォント設定: {font}")
                     break
             else:
-                logger.warning("⚠️ 日本語フォントが見つかりません。文字化けする可能性があります。")
+                plt.rcParams['font.sans-serif'] = ['DejaVu Sans']
+                logger.warning("⚠️ 日本語フォントが見つかりません。")
         except Exception as e:
             logger.debug(f"フォント設定エラー（続行）: {e}")
 
-    # Cartopyのインポート（Natural Earth使用）
+    # Cartopyのインポート
     try:
-        import sys
-
-        logger.info(f"ℹ️ Python実行パス: {sys.executable}")
-        logger.info(f"ℹ️ Pythonバージョン: {sys.version}")
-
         import cartopy.crs as ccrs
         import cartopy.feature as cfeature
 
@@ -71,9 +64,7 @@ try:
         logger.info("✅ Cartopyが正常にインポートされました。地図機能が有効です。")
     except ImportError as e:
         CARTOPY_AVAILABLE = False
-        logger.warning(f"⚠️ Cartopyが見つかりません。Visual C++ 再頒布可能パッケージがインストールされていない可能性があります。地図機能は無効になります。")
-        logger.warning(f"   インストール: pip install cartopy")
-        logger.warning(f"   または: python -m pip install cartopy")
+        logger.warning(f"⚠️ Cartopyが見つかりません。地図機能は無効になります。")
         logger.error(f"   詳細エラー: {e}", exc_info=True)
 
 except ImportError as e:
@@ -81,7 +72,6 @@ except ImportError as e:
     CARTOPY_AVAILABLE = False
     plt = None
     logger.error(f"❌ Matplotlibのインポートに失敗しました: {e}")
-    logger.error(f"   インストール: pip install matplotlib")
 except Exception as e:
     MATPLOTLIB_AVAILABLE = False
     CARTOPY_AVAILABLE = False
@@ -199,7 +189,8 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
                         if msg.type == aiohttp.WSMsgType.TEXT:
                             try:
                                 data = json.loads(msg.data)
-                                logger.debug(f"WebSocket受信: code={data.get('code')}, id={data.get('_id') or data.get('id')}")
+                                logger.debug(
+                                    f"WebSocket受信: code={data.get('code')}, id={data.get('_id') or data.get('id')}")
                                 await self.process_websocket_message(data)
                             except json.JSONDecodeError as e:
                                 logger.error(f"WebSocketメッセージのJSON解析エラー: {e}")
@@ -366,23 +357,15 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
             if data and isinstance(data, list):
                 logger.info(f"✅ 津波情報を{len(data)}件取得")
 
-                # 最初の数件のデータ構造を確認
-                if len(data) > 0:
-                    sample = data[0]
-                    logger.debug(f"  津波情報サンプル keys: {list(sample.keys())}")
-                    logger.debug(
-                        f"  津波情報サンプル _id: {sample.get('_id')}, id: {sample.get('id')}, code: {sample.get('code')}")
-
                 latest_tsunami_id = None
 
                 for idx, item in enumerate(data):
                     item_id = self.extract_id_safe(item)
                     if not item_id:
-                        if idx < 3:  # 最初の3件のみ詳細ログ
+                        if idx < 3:
                             logger.warning(f"  津波情報[{idx}]のID抽出失敗: keys={list(item.keys())}")
                         continue
 
-                    # code 552は常にTSUNAMI
                     if item.get('code') == 552:
                         self.processed_ids[InfoType.TSUNAMI.value].add(item_id)
                         if latest_tsunami_id is None:
@@ -755,110 +738,101 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
     def _calculate_smart_map_extent(self, lat: float, lon: float, max_scale: int) -> tuple:
         """
         震源地の位置と震度に基づいて、最適な地図表示範囲を計算
-        日本列島全体が見えるように、偏りを自動調整する
-
-        Args:
-            lat: 震源地の緯度
-            lon: 震源地の経度
-            max_scale: 最大震度コード
-
-        Returns:
-            tuple: (lon_min, lon_max, lat_min, lat_max)
+        フィリピンなど遠方の地震にも対応
         """
-        # 日本全体の境界
-        JAPAN_LON_MIN, JAPAN_LON_MAX = 122, 148
-        JAPAN_LAT_MIN, JAPAN_LAT_MAX = 24, 46
+        # 拡大した日本周辺の境界（フィリピンを含む）
+        REGION_LON_MIN, REGION_LON_MAX = 118, 150
+        REGION_LAT_MIN, REGION_LAT_MAX = 10, 46
+
+        # 震源地が範囲外（フィリピンなど）の場合の判定
+        is_far_south = lat < 24
+        is_far_west = lon < 122
 
         # 震度に応じた基本ズーム範囲
         if max_scale >= 50:
-            base_zoom = 4.5
+            base_zoom = 5.0
         elif max_scale >= 40:
-            base_zoom = 3.5
+            base_zoom = 4.0
         else:
-            base_zoom = 2.5
+            base_zoom = 3.0
+
+        # フィリピン付近の場合はズームを調整
+        if is_far_south or is_far_west:
+            base_zoom = max(base_zoom, 8.0)
 
         lon_span = base_zoom * 2
         lat_span = base_zoom * 1.6
 
-        # 震源地が日本の端にある場合の判定
-        # 端からの距離を計算
-        dist_to_west = lon - JAPAN_LON_MIN
-        dist_to_east = JAPAN_LON_MAX - lon
-        dist_to_south = lat - JAPAN_LAT_MIN
-        dist_to_north = JAPAN_LAT_MAX - lat
+        # 震源地からの距離を計算
+        dist_to_west = lon - REGION_LON_MIN
+        dist_to_east = REGION_LON_MAX - lon
+        dist_to_south = lat - REGION_LAT_MIN
+        dist_to_north = REGION_LAT_MAX - lat
 
-        # 端に近い場合（余裕が半分のズーム範囲より小さい）、中心をずらす
         edge_threshold = base_zoom
 
         center_lon = lon
         center_lat = lat
 
-        # 西端に近い場合（トカラ列島、沖縄など）
+        # 西端・東端の調整
         if dist_to_west < edge_threshold:
-            # 中心を東寄りに調整
-            center_lon = lon + (edge_threshold - dist_to_west) * 0.7
-        # 東端に近い場合（小笠原諸島など）
+            center_lon = lon + (edge_threshold - dist_to_west) * 0.5
         elif dist_to_east < edge_threshold:
-            # 中心を西寄りに調整
-            center_lon = lon - (edge_threshold - dist_to_east) * 0.7
+            center_lon = lon - (edge_threshold - dist_to_east) * 0.5
 
-        # 南端に近い場合（沖縄、南西諸島など）
+        # 南端・北端の調整（フィリピンなど南方向を特に考慮）
         if dist_to_south < edge_threshold:
-            # 中心を北寄りに調整
-            center_lat = lat + (edge_threshold - dist_to_south) * 0.7
-        # 北端に近い場合（北海道北部など）
+            center_lat = lat + (edge_threshold - dist_to_south) * 0.5
         elif dist_to_north < edge_threshold:
-            # 中心を南寄りに調整
-            center_lat = lat - (edge_threshold - dist_to_north) * 0.7
+            center_lat = lat - (edge_threshold - dist_to_north) * 0.5
 
-        # 調整後の表示範囲を計算
+        # 表示範囲を計算
         lon_min = center_lon - lon_span / 2
         lon_max = center_lon + lon_span / 2
         lat_min = center_lat - lat_span / 2
         lat_max = center_lat + lat_span / 2
 
-        # 日本の境界を超えないように最終調整
-        if lon_min < JAPAN_LON_MIN:
-            shift = JAPAN_LON_MIN - lon_min
-            lon_min = JAPAN_LON_MIN
-            lon_max = min(lon_max + shift, JAPAN_LON_MAX)
+        # 境界調整
+        if lon_min < REGION_LON_MIN:
+            shift = REGION_LON_MIN - lon_min
+            lon_min = REGION_LON_MIN
+            lon_max = min(lon_max + shift, REGION_LON_MAX)
 
-        if lon_max > JAPAN_LON_MAX:
-            shift = lon_max - JAPAN_LON_MAX
-            lon_max = JAPAN_LON_MAX
-            lon_min = max(lon_min - shift, JAPAN_LON_MIN)
+        if lon_max > REGION_LON_MAX:
+            shift = lon_max - REGION_LON_MAX
+            lon_max = REGION_LON_MAX
+            lon_min = max(lon_min - shift, REGION_LON_MIN)
 
-        if lat_min < JAPAN_LAT_MIN:
-            shift = JAPAN_LAT_MIN - lat_min
-            lat_min = JAPAN_LAT_MIN
-            lat_max = min(lat_max + shift, JAPAN_LAT_MAX)
+        if lat_min < REGION_LAT_MIN:
+            shift = REGION_LAT_MIN - lat_min
+            lat_min = REGION_LAT_MIN
+            lat_max = min(lat_max + shift, REGION_LAT_MAX)
 
-        if lat_max > JAPAN_LAT_MAX:
-            shift = lat_max - JAPAN_LAT_MAX
-            lat_max = JAPAN_LAT_MAX
-            lat_min = max(lat_min - shift, JAPAN_LAT_MIN)
+        if lat_max > REGION_LAT_MAX:
+            shift = lat_max - REGION_LAT_MAX
+            lat_max = REGION_LAT_MAX
+            lat_min = max(lat_min - shift, REGION_LAT_MIN)
 
         return (lon_min, lon_max, lat_min, lat_max)
 
     def _generate_single_map_sync(self, quake: dict, info_type: str) -> io.BytesIO:
-        """単一の地震マップ画像を同期的に生成（Natural Earthで日本地図表示）"""
+        """単一の地震マップ画像を生成（台風風デザイン）"""
         lat, lon = quake['lat'], quake['lon']
         max_scale = quake['max_scale']
 
-        fig = plt.figure(figsize=(16, 16), dpi=150)
-        ax = fig.add_axes([0, 0, 1, 1], projection=ccrs.PlateCarree())
+        fig = plt.figure(figsize=(16, 16), dpi=150, facecolor='#2c3e50')
+        ax = fig.add_axes([0, 0, 1, 1], projection=ccrs.PlateCarree(), facecolor='#2c3e50')
 
-        # スマートな地図範囲計算（端に偏らないように自動調整）
+        # スマートな地図範囲計算
         lon_min, lon_max, lat_min, lat_max = self._calculate_smart_map_extent(lat, lon, max_scale)
-
         ax.set_extent([lon_min, lon_max, lat_min, lat_max], crs=ccrs.PlateCarree())
 
-        # Natural Earthの詳細な地形データを追加
-        ax.add_feature(cfeature.LAND, facecolor='#f5f5dc', edgecolor='none', zorder=1)
-        ax.add_feature(cfeature.OCEAN, facecolor='#e6f2ff', zorder=0)
-        ax.add_feature(cfeature.COASTLINE, edgecolor='#404040', linewidth=1.2, zorder=3)
+        # 台風風のデザイン：海と陸の色分け
+        ax.add_feature(cfeature.OCEAN, facecolor='#2c3e50', zorder=0)
+        ax.add_feature(cfeature.LAND, facecolor='#95a5a6', edgecolor='none', zorder=1)
+        ax.add_feature(cfeature.COASTLINE, edgecolor='white', linewidth=1.5, zorder=3)
 
-        # 都道府県境界を追加（利用可能な場合）
+        # 都道府県境界
         try:
             states = cfeature.NaturalEarthFeature(
                 category='cultural',
@@ -866,67 +840,42 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
                 scale='10m',
                 facecolor='none'
             )
-            ax.add_feature(states, edgecolor='#808080', linewidth=0.5, zorder=2)
+            ax.add_feature(states, edgecolor='white', linewidth=0.6, alpha=0.5, zorder=2)
         except:
             logger.debug("都道府県境界の追加をスキップ")
 
-        # グリッド線（座標ラベルなし）
+        # グリッド線（白色）
         ax.gridlines(crs=ccrs.PlateCarree(), draw_labels=False,
-                     linewidth=0.5, color='gray', alpha=0.5, linestyle='--')
+                     linewidth=0.5, color='white', alpha=0.3, linestyle='--')
 
         # タイトル
         title_prefix = "緊急地震速報" if info_type == "eew" else "地震情報"
         title = f'{title_prefix} - 震源位置\n{quake["name"]}'
         ax.text(0.5, 0.98, title, transform=ax.transAxes,
-                fontsize=18, fontweight='bold', ha='center', va='top',
-                bbox=dict(boxstyle='round,pad=0.8', facecolor='white',
-                          edgecolor='black', alpha=0.95, linewidth=2))
+                fontsize=18, fontweight='bold', ha='center', va='top', color='white',
+                bbox=dict(boxstyle='round,pad=0.8', facecolor='black',
+                          edgecolor='white', alpha=0.8, linewidth=2))
 
-        # 主要都市のマーカー（表示範囲内のみ）
+        # 主要都市のマーカー
         cities = {
-            '札幌': (141.35, 43.06), '函館': (140.73, 41.77), '青森': (140.74, 40.82),
-            '仙台': (140.87, 38.27), '山形': (140.34, 38.25), '福島': (140.47, 37.75),
-            '新潟': (139.04, 37.92), '長野': (138.18, 36.65), '富山': (137.21, 36.70),
-            '金沢': (136.66, 36.59), '東京': (139.69, 35.69), '横浜': (139.64, 35.44),
-            '千葉': (140.12, 35.61), '埼玉': (139.65, 35.86), '宇都宮': (139.88, 36.56),
-            '水戸': (140.47, 36.34), '前橋': (139.06, 36.39), '静岡': (138.38, 34.98),
-            '名古屋': (136.91, 35.18), '岐阜': (136.72, 35.42), '津': (136.51, 34.73),
-            '京都': (135.76, 35.01), '大阪': (135.50, 34.69), '神戸': (135.18, 34.69),
-            '奈良': (135.83, 34.69), '和歌山': (135.17, 34.23), '岡山': (133.92, 34.66),
-            '広島': (132.46, 34.40), '鳥取': (134.24, 35.50), '松江': (133.05, 35.47),
-            '山口': (131.47, 34.19), '高松': (134.04, 34.34), '松山': (132.77, 33.84),
-            '高知': (133.53, 33.56), '福岡': (130.42, 33.59), '佐賀': (130.30, 33.25),
-            '長崎': (129.87, 32.75), '熊本': (130.71, 32.79), '大分': (131.61, 33.24),
-            '宮崎': (131.42, 31.91), '鹿児島': (130.56, 31.60), '那覇': (127.68, 26.21),
+            '札幌': (141.35, 43.06), '仙台': (140.87, 38.27), '東京': (139.69, 35.69),
+            '名古屋': (136.91, 35.18), '大阪': (135.50, 34.69), '福岡': (130.42, 33.59),
+            '那覇': (127.68, 26.21), 'マニラ': (120.98, 14.60)
         }
 
         displayed_cities = 0
         for city, (city_lon, city_lat) in cities.items():
-            # 表示範囲内の都市のみ表示
             if lon_min <= city_lon <= lon_max and lat_min <= city_lat <= lat_max:
-                ax.plot(city_lon, city_lat, marker='^', color='black',
-                        markersize=7, zorder=8, transform=ccrs.Geodetic(),
-                        markeredgecolor='white', markeredgewidth=1)
-                ax.text(city_lon, city_lat + 0.15, city, fontsize=8, ha='center',
-                        bbox=dict(boxstyle='round,pad=0.3', facecolor='white',
-                                  edgecolor='black', alpha=0.9, linewidth=0.8),
-                        transform=ccrs.Geodetic(), zorder=9)
+                ax.plot(city_lon, city_lat, marker='^', color='yellow',
+                        markersize=8, zorder=8, transform=ccrs.Geodetic(),
+                        markeredgecolor='black', markeredgewidth=1.5)
+                ax.text(city_lon, city_lat + 0.15, city, fontsize=9, ha='center', color='white',
+                        bbox=dict(boxstyle='round,pad=0.3', facecolor='black',
+                                  edgecolor='yellow', alpha=0.85, linewidth=1),
+                        transform=ccrs.Geodetic(), zorder=9, fontweight='bold')
                 displayed_cities += 1
 
-        # 都市が少なすぎる場合は主要都市を強制表示
-        if displayed_cities == 0:
-            major_cities = {'東京': (139.69, 35.69), '大阪': (135.50, 34.69), '福岡': (130.42, 33.59)}
-            for city, (city_lon, city_lat) in major_cities.items():
-                if abs(city_lon - lon) < 10 and abs(city_lat - lat) < 10:
-                    ax.plot(city_lon, city_lat, marker='^', color='black',
-                            markersize=7, zorder=8, transform=ccrs.Geodetic(),
-                            markeredgecolor='white', markeredgewidth=1)
-                    ax.text(city_lon, city_lat + 0.15, city, fontsize=8, ha='center',
-                            bbox=dict(boxstyle='round,pad=0.3', facecolor='white',
-                                      edgecolor='black', alpha=0.9, linewidth=0.8),
-                            transform=ccrs.Geodetic(), zorder=9)
-
-        # 震源地の色とサイズを震度に応じて設定
+        # 震源地の色とサイズ
         def get_color_and_size(scale):
             if scale >= 70:
                 return '#8B0000', 550
@@ -947,70 +896,67 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
 
         color, size = get_color_and_size(max_scale)
 
-        # 震源地をマーク（×印と円で強調）
-        ax.scatter(lon, lat, marker='x', c='darkred', s=size * 2,
-                   linewidths=5, zorder=11, transform=ccrs.Geodetic())
-        ax.scatter(lon, lat, c=color, s=size, alpha=0.75,
-                   edgecolors='darkred', linewidths=3, zorder=10,
+        # 震源地をマーク
+        ax.scatter(lon, lat, marker='x', c='white', s=size * 2,
+                   linewidths=6, zorder=11, transform=ccrs.Geodetic())
+        ax.scatter(lon, lat, c=color, s=size, alpha=0.8,
+                   edgecolors='white', linewidths=3, zorder=10,
                    transform=ccrs.Geodetic(), label='震源')
 
-        # 震源地情報のテキストボックス
+        # 震源地情報
         info_text = f'震度: {self.scale_to_japanese(max_scale)}\n'
         if quake['magnitude'] != -1:
             info_text += f'M{quake["magnitude"]:.1f}\n'
         if quake['depth'] != -1:
             info_text += f'深さ: {quake["depth"]}km'
 
-        # テキストボックスの位置を動的に調整（スマート範囲計算に対応）
         zoom_range = (lon_max - lon_min) / 2
         text_offset = zoom_range * 0.6
         text_y = lat - text_offset
 
-        # 表示範囲から外れる場合は上に配置
-        if text_y < lat_min + 0.3:
+        if text_y < lat_min + 0.5:
             text_y = lat + text_offset
 
-        # 左右にはみ出す場合も調整
         text_x = lon
         if lon < lon_min + 1:
-            text_x = lon_min + 1
+            text_x = lon_min + 1.5
         elif lon > lon_max - 1:
-            text_x = lon_max - 1
+            text_x = lon_max - 1.5
 
         ax.text(text_x, text_y, info_text,
-                fontsize=12, ha='center', va='top',
-                bbox=dict(boxstyle='round,pad=0.7', facecolor='white',
-                          edgecolor='red', linewidth=2.5, alpha=0.95),
+                fontsize=13, ha='center', va='top', color='white',
+                bbox=dict(boxstyle='round,pad=0.7', facecolor='black',
+                          edgecolor='red', linewidth=2.5, alpha=0.9),
                 transform=ccrs.Geodetic(), zorder=12, fontweight='bold')
 
         # 凡例
         ax.legend(loc='upper left', frameon=True, fontsize=12,
                   fancybox=True, shadow=True, framealpha=0.9,
-                  bbox_to_anchor=(0.02, 0.92))
+                  bbox_to_anchor=(0.02, 0.92), facecolor='black',
+                  edgecolor='white', labelcolor='white')
 
         # 画像として保存
         buffer = io.BytesIO()
         plt.savefig(buffer, format='png', dpi=150, bbox_inches='tight',
-                    pad_inches=0, facecolor='white', edgecolor='none')
+                    pad_inches=0, facecolor='#2c3e50', edgecolor='none')
         buffer.seek(0)
         plt.close(fig)
 
         return buffer
 
     def _generate_map_sync(self, quakes: list, min_scale: Optional[str], hours: Optional[int]) -> io.BytesIO:
-        """複数の地震マップ画像を同期的に生成（Natural Earthで日本地図表示）"""
-        fig = plt.figure(figsize=(16, 16), dpi=150)
-        ax = fig.add_axes([0, 0, 1, 1], projection=ccrs.PlateCarree())
+        """複数の地震マップ画像を生成（台風風デザイン）"""
+        fig = plt.figure(figsize=(16, 16), dpi=150, facecolor='#2c3e50')
+        ax = fig.add_axes([0, 0, 1, 1], projection=ccrs.PlateCarree(), facecolor='#2c3e50')
 
         # 日本周辺に範囲を限定
         ax.set_extent([128, 146, 30, 46], crs=ccrs.PlateCarree())
 
-        # Natural Earthの詳細な地形データを追加
-        ax.add_feature(cfeature.LAND, facecolor='#f5f5dc', edgecolor='none', zorder=1)
-        ax.add_feature(cfeature.OCEAN, facecolor='#e6f2ff', zorder=0)
-        ax.add_feature(cfeature.COASTLINE, edgecolor='#404040', linewidth=1.2, zorder=3)
+        ax.add_feature(cfeature.OCEAN, facecolor='#2c3e50', zorder=0)
+        ax.add_feature(cfeature.LAND, facecolor='#95a5a6', edgecolor='none', zorder=1)
+        ax.add_feature(cfeature.COASTLINE, edgecolor='white', linewidth=1.5, zorder=3)
 
-        # 都道府県境界を追加
+        # 都道府県境界
         try:
             states = cfeature.NaturalEarthFeature(
                 category='cultural',
@@ -1018,13 +964,13 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
                 scale='10m',
                 facecolor='none'
             )
-            ax.add_feature(states, edgecolor='#808080', linewidth=0.5, zorder=2)
+            ax.add_feature(states, edgecolor='white', linewidth=0.6, alpha=0.5, zorder=2)
         except:
             logger.debug("都道府県境界の追加をスキップ")
 
-        # グリッド線（座標ラベルなし）
+        # グリッド線
         ax.gridlines(crs=ccrs.PlateCarree(), draw_labels=False,
-                     linewidth=0.5, color='gray', alpha=0.5, linestyle='--')
+                     linewidth=0.5, color='white', alpha=0.3, linestyle='--')
 
         # タイトル
         if hours is not None:
@@ -1034,11 +980,11 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
         if min_scale:
             title += f'\n最小震度: {min_scale}'
         ax.text(0.5, 0.98, title, transform=ax.transAxes,
-                fontsize=18, fontweight='bold', ha='center', va='top',
-                bbox=dict(boxstyle='round,pad=0.8', facecolor='white',
-                          edgecolor='black', alpha=0.95, linewidth=2))
+                fontsize=18, fontweight='bold', ha='center', va='top', color='white',
+                bbox=dict(boxstyle='round,pad=0.8', facecolor='black',
+                          edgecolor='white', alpha=0.9, linewidth=2))
 
-        # 震度に応じた色とサイズを取得
+        # 震度に応じた色とサイズ
         def get_color_and_size(max_scale):
             if max_scale >= 70:
                 return '#8B0000', 350, '震度7'
@@ -1064,25 +1010,28 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
         # 各地震をプロット
         for quake in quakes:
             color, size, label = get_color_and_size(quake['max_scale'])
-            ax.scatter(quake['lon'], quake['lat'], c=color, s=size, alpha=0.65,
-                       edgecolors='black', linewidths=1.5, zorder=5,
+            ax.scatter(quake['lon'], quake['lat'], c=color, s=size, alpha=0.7,
+                       edgecolors='white', linewidths=1.5, zorder=5,
                        transform=ccrs.Geodetic())
             if label not in legend_elements:
                 legend_elements[label] = plt.scatter([], [], c=color, s=120,
-                                                     edgecolors='black', linewidths=1.5, alpha=0.65)
+                                                     edgecolors='white', linewidths=1.5, alpha=0.7)
 
-        # 凡例を震度順に並べる
+        # 凡例
         scale_order = ['震度7', '震度6強', '震度6弱', '震度5強', '震度5弱', '震度4', '震度3', '震度2', '震度1']
         legend_items = [legend_elements[s] for s in scale_order if s in legend_elements]
         legend_labels = [s for s in scale_order if s in legend_elements]
 
         if legend_items:
-            ax.legend(legend_items, legend_labels, loc='upper right', frameon=True,
-                      fontsize=11, title='震度', title_fontsize=12,
-                      fancybox=True, shadow=True, framealpha=0.9,
-                      bbox_to_anchor=(0.98, 0.92))
+            legend = ax.legend(legend_items, legend_labels, loc='upper right', frameon=True,
+                               fontsize=11, title='震度', title_fontsize=12,
+                               fancybox=True, shadow=True, framealpha=0.9,
+                               bbox_to_anchor=(0.98, 0.92), facecolor='black',
+                               edgecolor='white')
+            plt.setp(legend.get_texts(), color='white')
+            plt.setp(legend.get_title(), color='white')
 
-        # 主要都市のマーカー
+        # 主要都市
         cities = {
             '札幌': (141.35, 43.06), '東京': (139.69, 35.69),
             '名古屋': (136.91, 35.18), '大阪': (135.50, 34.69),
@@ -1090,18 +1039,18 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
         }
 
         for city, (lon, lat) in cities.items():
-            ax.plot(lon, lat, marker='^', color='black', markersize=6,
+            ax.plot(lon, lat, marker='^', color='yellow', markersize=7,
                     zorder=4, transform=ccrs.Geodetic(),
-                    markeredgecolor='white', markeredgewidth=1)
-            ax.text(lon, lat + 0.35, city, fontsize=8, ha='center',
-                    bbox=dict(boxstyle='round,pad=0.3', facecolor='white',
-                              edgecolor='black', alpha=0.85, linewidth=0.6),
-                    transform=ccrs.Geodetic(), zorder=4)
+                    markeredgecolor='black', markeredgewidth=1.2)
+            ax.text(lon, lat + 0.35, city, fontsize=9, ha='center', color='white',
+                    bbox=dict(boxstyle='round,pad=0.3', facecolor='black',
+                              edgecolor='yellow', alpha=0.85, linewidth=0.8),
+                    transform=ccrs.Geodetic(), zorder=4, fontweight='bold')
 
         # 画像として保存
         buffer = io.BytesIO()
         plt.savefig(buffer, format='png', dpi=150, bbox_inches='tight',
-                    pad_inches=0, facecolor='white', edgecolor='none')
+                    pad_inches=0, facecolor='#2c3e50', edgecolor='none')
         buffer.seek(0)
         plt.close(fig)
 
