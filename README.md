@@ -253,25 +253,6 @@ Messages sent to PLANA may be used for debugging after the following anonymizati
 
 - **会話履歴 / Conversation History:** セッション中のみ（Bot再起動で削除）/ Session only (deleted on bot restart)
 - **ユーザー設定 / User Settings:** 明示的に削除されるまで / Until explicitly deleted
-
-### 🗑️ データの削除 / Data Deletion
-
-以下のコマンドでいつでもデータを削除できます：
-
-You can delete your data at any time using the following commands:
-
-- `/reset-user-bio` - ユーザー情報の削除 / Delete user information
-- `/memory-delete <キー>` - メモリの削除 / Delete memory entries
-
-### 🤝 第三者への提供 / Third-Party Disclosure
-
-収集したデータは以下の場合を除き第三者に提供しません：
-
-Collected data will not be provided to third parties except in the following cases:
-
-- ユーザーの同意がある場合 / When user consent is obtained
-- 法令に基づく開示が必要な場合 / When disclosure is required by law
-
 ---
 
 ## ⚙️ インストールと設定 (セルフホスト) / Installation and Setup (Self-Hosting)
