@@ -12,7 +12,7 @@
 
 <div align="center">
 
-###  [日本語](README_ja.md) | [English](README_en.md) | [中文](README_zh.md) | [繁體中文](README_zh-TW.md) | [한국어](README_ko.md)
+### **Languages:** [日本語](README_ja.md) | [English](README_en.md) | [中文](README_zh.md) | [繁體中文](README_zh-TW.md) | [한국어](README_ko.md)
 
 [![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)](https://www.python.org/)
 [![Discord.py](https://img.shields.io/badge/discord.py-2.0+-blue.svg)](https://github.com/Rapptz/discord.py)
@@ -22,9 +22,7 @@
 </div>
 
 ---
-
 ## 🚀 Quick Start
-
 ### Invite PLANA to Your Server
 
 <h3 align="center">
@@ -35,22 +33,52 @@
 
 ### Self-Hosting
 
+#### Prerequisites
+*   Python 3.8 or higher
+*   Git
+*   FFmpeg (Required for music features)
+*   Docker & Docker Compose (Optional, Recommended)
+
+#### Step 1: Basic Setup
+
+1.  **Clone the repository:**
+    ```bash
+    git clone https://github.com/coffin399/llmcord-JP-plana
+    cd llmcord-JP-plana
+    ```
+
+2.  **Configure `config.yaml`:**
+    
+    Copy `config.default.yaml` to create `config.yaml`.
+    
+    ```bash
+    cp config.default.yaml config.yaml
+    ```
+    
+    Open the generated `config.yaml` and **configure at least the following settings:**
+
+    *   `token`: **Required.** Discord Bot Token
+    *   `llm:` section: `model`, `providers` (API keys, etc.)
+
+#### Step 2: Start the Bot
+
+**🚀 Windows (Easy)**
 ```bash
-# Clone the repository
-git clone https://github.com/coffin399/llmcord-JP-plana
-cd llmcord-JP-plana
+# Double-click startPLANA.bat
+```
 
-# Configure
-cp config.default.yaml config.yaml
-# Edit config.yaml with your settings
-
-# Run with Docker (Recommended)
-docker compose up --build -d
-
-# Or run directly
+**💻 Standard Method**
+```bash
 pip install -r requirements.txt
 python main.py
 ```
+
+**🐳 Docker (Recommended)**
+```bash
+docker compose up --build -d
+```
+
+> For additional features (Twitch notifications, Media downloader), please refer to the language-specific documentation.
 
 ---
 
