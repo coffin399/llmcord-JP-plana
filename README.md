@@ -15,7 +15,7 @@
 [![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)](https://www.python.org/)
 [![Discord.py](https://img.shields.io/badge/discord.py-2.0+-blue.svg)](https://github.com/Rapptz/discord.py)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Server Count](https://coffin399.github.io/coffin299page/assets/badge.svg)](Server Count)
+![](https://coffin399.github.io/coffin299page/assets/badge.svg)
 
 [概要-overview-](#-概要--overview) • [機能 / Features](#-主な機能--main-features) • [セットアップ / Setup](#️-インストールと設定-セルフホスト--installation-and-setup-self-hosting)
 
