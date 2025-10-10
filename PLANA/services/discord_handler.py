@@ -234,6 +234,12 @@ class DiscordLogHandler(logging.Handler):
             message
         )
 
+        # on_guild_join/on_guild_remove形式: 'サーバー名' (ID: X****) -> 'サ****' (ID: X****)
+        message = re.sub(
+            r"'([^']+)' \(ID: (\d+\*+)\)",
+            lambda m: f"'{self._get_display_chars(m.group(1), 1)}****' (ID: {m.group(2)})",
+            message
+        )
         return message
 
     async def _process_queue(self):
