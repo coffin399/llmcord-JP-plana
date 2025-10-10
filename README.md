@@ -253,7 +253,6 @@ Messages sent to PLANA may be used for debugging after the following anonymizati
 
 - **会話履歴 / Conversation History:** セッション中のみ（Bot再起動で削除）/ Session only (deleted on bot restart)
 - **ユーザー設定 / User Settings:** 明示的に削除されるまで / Until explicitly deleted
-- **ログファイル / Log Files:** 最大30日間 / Maximum 30 days
 
 ### 🗑️ データの削除 / Data Deletion
 
