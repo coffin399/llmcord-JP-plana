@@ -16,7 +16,7 @@
 [![Discord.py](https://img.shields.io/badge/discord.py-2.0+-blue.svg)](https://github.com/Rapptz/discord.py)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-[概要-Overview-](#-overview--概要) • [機能 / Features](#-主な機能--main-features) • [セットアップ / Setup](#️-インストールと設定-セルフホスト--installation-and-setup-self-hosting)
+[概要-overview-](#-概要--overview) • [機能 / Features](#-主な機能--main-features) • [セットアップ / Setup](#️-インストールと設定-セルフホスト--installation-and-setup-self-hosting)
 
 </div>
 
