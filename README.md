@@ -12,7 +12,7 @@
 
 <div align="center">
 
-### [日本語](README_ja.md) | [English](README_en.md) | [中文](README_zh.md) | [繁體中文](README_zh-TW.md) | [한국어](README_ko.md)
+### [日本語](README_ja.md) | [English](README_en.md) | [中文](README_zh.md) | [繁體中文](README-zh-TW.md) | [한국어](README_ko.md)
 
 [![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)](https://www.python.org/)
 [![Discord.py](https://img.shields.io/badge/discord.py-2.0+-blue.svg)](https://github.com/Rapptz/discord.py)
