@@ -335,8 +335,8 @@ Collected data will not be provided to third parties except in the following cas
 
 #### 🚀 Windows (簡単) / Windows (Easy)
 ```bash
-# start_plana.bat をダブルクリック
-# Double-click start_plana.bat
+# startPLANA.bat をダブルクリック
+# Double-click startPLANA.bat
 ```
 
 #### 💻 標準的な方法 / Standard Method
