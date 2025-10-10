@@ -86,9 +86,41 @@ class DiscordLogHandler(logging.Handler):
         except asyncio.QueueFull:
             print("DiscordLogHandler: Log queue is full, dropping message.")
 
-    def _get_display_chars(self, text: str, count: int = 2) -> str:
+    def _get_display_chars(self, text: str, count: int = 1) -> str:
+        """
+        テキストから先頭の記号・絵文字・空白を除去し、指定文字数を返す。
+        絵文字も1文字としてカウントする。
+        """
+        # 先頭の引用符、括弧、空白を除去
         cleaned = re.sub(r'^[「『"\'『»«‹›〈〉《》【】〔〕［］｛｝（）()［］\s]+', '', text)
-        return cleaned[:count] if len(cleaned) >= count else text[:count]
+
+        # 絵文字パターン（Unicode絵文字の範囲）
+        emoji_pattern = re.compile(
+            "["
+            "\U0001F1E0-\U0001F1FF"  # flags (iOS)
+            "\U0001F300-\U0001F5FF"  # symbols & pictographs
+            "\U0001F600-\U0001F64F"  # emoticons
+            "\U0001F680-\U0001F6FF"  # transport & map symbols
+            "\U0001F700-\U0001F77F"  # alchemical symbols
+            "\U0001F780-\U0001F7FF"  # Geometric Shapes Extended
+            "\U0001F800-\U0001F8FF"  # Supplemental Arrows-C
+            "\U0001F900-\U0001F9FF"  # Supplemental Symbols and Pictographs
+            "\U0001FA00-\U0001FA6F"  # Chess Symbols
+            "\U0001FA70-\U0001FAFF"  # Symbols and Pictographs Extended-A
+            "\U00002702-\U000027B0"  # Dingbats
+            "\U000024C2-\U0001F251"
+            "]+", flags=re.UNICODE
+        )
+
+        # 絵文字を除去してから文字数を取得
+        chars_without_emoji = emoji_pattern.sub('', cleaned)
+
+        if len(chars_without_emoji) >= count:
+            return chars_without_emoji[:count]
+        elif len(cleaned) >= count:
+            return cleaned[:count]
+        else:
+            return text[:count] if text else ''
 
     def _sanitize_log_message(self, message: str) -> str:
         # (このメソッドの中身は変更ありません)
@@ -191,6 +223,14 @@ class DiscordLogHandler(logging.Handler):
         message = re.sub(
             r"\bby ([^\s.]+)",
             lambda m: f"by {m.group(1)[:1]}****",
+            message
+        )
+
+        # send_embed_to_channels形式: 'hoge' の '📗-fuga' -> 'h****' の '📗****'
+        # または: 'ギルド名' の 'チャンネル名' -> 'ギ****' の 'チ****'
+        message = re.sub(
+            r"'([^']+)' の '([^']+)'",
+            lambda m: f"'{self._get_display_chars(m.group(1), 1)}****' の '{self._get_display_chars(m.group(2), 1)}****'",
             message
         )
 
