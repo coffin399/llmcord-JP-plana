@@ -899,7 +899,7 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
         # 震源地をマーク
         ax.scatter(lon, lat, marker='x', c='red', s=size * 2,
                    linewidths=6, zorder=11, transform=ccrs.Geodetic())
-        ax.scatter(lon, lat, c=color, s=size, alpha=0.8,
+        ax.scatter(lon, lat, c='red', s=size, alpha=0.8,
                    edgecolors='white', linewidths=3, zorder=10,
                    transform=ccrs.Geodetic(), label='震源')
 
