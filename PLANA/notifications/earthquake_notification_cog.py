@@ -1358,6 +1358,74 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
         embed.set_thumbnail(url="https://www.p2pquake.net/images/QuakeLogo_100x100.png")
         return embed
 
+    @app_commands.command(name="earthquake_remove", description="地震・津波情報の通知設定を削除します")
+    @app_commands.describe(info_type="削除したい通知設定")
+    async def remove_channel(
+            self,
+            interaction: discord.Interaction,
+            info_type: Literal["緊急地震速報", "地震情報", "津波予報", "すべて"]
+    ):
+        try:
+            guild_id = str(interaction.guild.id)
+
+            if guild_id not in self.config:
+                await interaction.response.send_message("❌ このサーバーには通知設定がありません。", ephemeral=False)
+                return
+
+            type_map = {
+                "緊急地震速報": InfoType.EEW.value,
+                "地震情報": InfoType.QUAKE.value,
+                "津波予報": InfoType.TSUNAMI.value
+            }
+
+            removed_types = []
+
+            if info_type == "すべて":
+                # すべての設定を削除
+                if guild_id in self.config:
+                    del self.config[guild_id]
+                    removed_types = ["緊急地震速報", "地震情報", "津波予報"]
+                    self.save_config()
+                    await interaction.response.send_message(
+                        "✅ **すべての通知設定** を削除しました。",
+                        ephemeral=False
+                    )
+                else:
+                    await interaction.response.send_message(
+                        "❌ このサーバーには通知設定がありません。",
+                        ephemeral=False
+                    )
+                return
+            else:
+                # 個別の設定を削除
+                config_key = type_map[info_type]
+                if config_key in self.config[guild_id]:
+                    del self.config[guild_id][config_key]
+                    removed_types.append(info_type)
+
+                    # 設定が空になった場合はギルド設定自体も削除
+                    if not self.config[guild_id]:
+                        del self.config[guild_id]
+                        logger.info(f"ギルド '{interaction.guild.name}' の設定が空になったため削除しました")
+
+                    self.save_config()
+                    await interaction.response.send_message(
+                        f"✅ **{info_type}** の通知設定を削除しました。",
+                        ephemeral=False
+                    )
+                else:
+                    await interaction.response.send_message(
+                        f"❌ **{info_type}** の通知設定は存在しません。",
+                        ephemeral=False
+                    )
+
+        except Exception as e:
+            self.exception_handler.log_generic_error(e, "通知削除コマンド")
+            await interaction.response.send_message(
+                self.exception_handler.get_user_friendly_message(e),
+                ephemeral=False
+            )
+
     @app_commands.command(name="earthquake_help", description="このシステムのヘルプを表示します")
     async def help_system(self, interaction: discord.Interaction):
         embed = discord.Embed(
@@ -1371,6 +1439,7 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
             value=(
                 "**🔧 設定コマンド**\n"
                 "`/earthquake_channel` - 通知チャンネルを設定\n"
+                "`/earthquake_remove` - 通知設定を削除\n"
                 "`/earthquake_test` - テスト通知を送信\n\n"
                 "**📊 情報表示コマンド**\n"
                 "`/earthquake_status` - システム状態を確認\n"
@@ -1382,36 +1451,6 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
             ),
             inline=False
         )
-        embed.add_field(
-            name="📡 通知される情報",
-            value=(
-                "**🚨 緊急地震速報（EEW）** - 地震発生直後の速報（WebSocketでリアルタイム受信）\n"
-                "**📊 地震情報** - 確定した地震の詳細情報\n"
-                "**🌊 津波予報** - 津波注意報・警報・大津波警報"
-            ),
-            inline=False
-        )
-        embed.add_field(
-            name="⚡ 初回セットアップ",
-            value=(
-                "1. `/earthquake_channel` でチャンネルを設定\n"
-                "2. `/earthquake_test` で動作確認\n"
-                "3. `/earthquake_status` でシステム状態確認"
-            ),
-            inline=False
-        )
-        embed.add_field(
-            name="🔌 WebSocket接続について",
-            value=(
-                "このBotはP2P地震情報のWebSocket APIに常時接続し、\n"
-                "リアルタイムで地震情報を受信します。\n"
-                "接続が切れた場合は自動的に再接続を試みます。"
-            ),
-            inline=False
-        )
-        embed.set_footer(text="データ提供: P2P地震情報 | 気象庁 | PLANA by coffin299")
-        embed.set_thumbnail(url="https://www.p2pquake.net/images/QuakeLogo_100x100.png")
-        await interaction.response.send_message(embed=embed, ephemeral=False)
 
     @app_commands.command(name="earthquake_map", description="最近の地震を日本地図上に表示します")
     @app_commands.describe(
