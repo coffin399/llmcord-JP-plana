@@ -335,6 +335,4 @@ docker compose up --build -d
 
 **Dev by ごみぃ(coffin299) & えんじょ(Autmn134F)**
 
-[⬆ 返回顶部](#plana)
-
 </div>

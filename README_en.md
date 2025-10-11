@@ -335,6 +335,5 @@ Pull requests are welcome! For major changes, please open an issue first to disc
 
 **Dev by ごみぃ(coffin299) & えんじょ(Autmn134F)**
 
-[⬆ Back to Top](#plana)
 
 </div>

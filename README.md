@@ -131,6 +131,4 @@ Based on [llmcord](https://github.com/jakobdylanc/llmcord)
 
 **For detailed documentation, please select your language above.**
 
-[⬆ Back to Top](#plana)
-
 </div>
