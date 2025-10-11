@@ -1063,6 +1063,7 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
 
         logger.info(f"📤 {info_type}通知送信開始 - 設定ギルド数: {len(self.config)}")
         sent_count, failed_count, skipped_count = 0, 0, 0
+        config_modified = False
 
         for guild_id, guild_config in self.config.copy().items():
             try:
@@ -1078,13 +1079,25 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
 
                 guild = self.bot.get_guild(int(guild_id))
                 if not guild:
-                    logger.warning(f"送信スキップ ({info_type}): ギルド {guild_id} が見つかりません")
+                    logger.warning(f"送信スキップ ({info_type}): ギルド {guild_id} が見つかりません (Bot退出済みの可能性)")
+                    # ギルド自体が見つからない場合は設定全体を削除
+                    del self.config[guild_id]
+                    config_modified = True
+                    logger.info(f"🗑️ ギルド {guild_id} の設定を削除しました")
                     failed_count += 1
                     continue
 
                 channel = guild.get_channel(channel_id)
                 if not channel:
-                    logger.warning(f"送信スキップ ({info_type}): チャンネル {channel_id} が見つかりません")
+                    logger.warning(f"送信スキップ ({info_type}): チャンネル {channel_id} が見つかりません (削除済み)")
+                    # チャンネルが見つからない場合は該当の通知設定のみを削除
+                    del self.config[guild_id][info_type]
+                    config_modified = True
+                    logger.info(f"🗑️ ギルド '{guild.name}' の {info_type} チャンネル設定を削除しました")
+                    # 設定が空になった場合はギルド設定自体も削除
+                    if not self.config[guild_id]:
+                        del self.config[guild_id]
+                        logger.info(f"🗑️ ギルド '{guild.name}' の設定が空になったため削除しました")
                     failed_count += 1
                     continue
 
@@ -1113,6 +1126,14 @@ class EarthquakeTsunamiCog(commands.Cog, name="EarthquakeNotifications"):
             except Exception as e:
                 logger.error(f"予期せぬ送信失敗 ({info_type}): ギルド {guild_id}", exc_info=True)
                 failed_count += 1
+
+        # 設定が変更された場合は保存
+        if config_modified:
+            try:
+                self.save_config()
+                logger.info("💾 無効なチャンネル設定を削除し、設定ファイルを更新しました")
+            except Exception as e:
+                logger.error(f"設定ファイルの保存に失敗: {e}")
 
         logger.info(
             f"📊 {info_type}通知送信完了: 成功 {sent_count}件, 失敗 {failed_count}件, スキップ {skipped_count}件")
