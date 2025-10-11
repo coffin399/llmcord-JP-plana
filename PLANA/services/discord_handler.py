@@ -165,7 +165,7 @@ class DiscordLogHandler(logging.Handler):
         # MusicCog形式: Guild ID (サーバー名): -> Guild ****(サー****):
         message = re.sub(
             r"Guild (\d+) \(([^)]+)\):",
-            lambda m: f"Guild ****({m.group(2)[:2]}****):",
+            lambda m: f"Guild ****({m.group(2)[:1]}****):",
             message
         )
         # IDのみなので完全匿名化を維持
@@ -177,7 +177,7 @@ class DiscordLogHandler(logging.Handler):
         # MusicCog形式: Connected to チャンネル名 -> Connected to チャ****
         message = re.sub(
             r"Connected to (.+)",
-            lambda m: f"Connected to {m.group(1)[:2]}****",
+            lambda m: f"Connected to {m.group(1)[:1]}****",
             message
         )
         # BioManager形式: for user [ID] (ユーザー名) -> for user X**** (ユ****)
@@ -237,6 +237,13 @@ class DiscordLogHandler(logging.Handler):
         message = re.sub(
             r"'([^']+)' \(ID: (\d+\*+)\)",
             lambda m: f"'{self._get_display_chars(m.group(1), 1)}****' (ID: {m.group(2)})",
+            message
+        )
+
+        # cleanup_task_loop形式: guild: 1**** (サーバー名) -> guild: 1**** (サ****)
+        message = re.sub(
+            r"guild: (\d+\*+) \(([^)]+)\)",
+            lambda m: f"guild: {m.group(1)} ({self._get_display_chars(m.group(2), 1)}****)",
             message
         )
         return message
