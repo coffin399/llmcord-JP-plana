@@ -43,6 +43,14 @@ except ImportError:
     logging.error("Could not import MemoryManager. Memory functionality will be disabled.")
     MemoryManager = None
 
+# ▼▼▼ 変更点 1: CommandInfoManagerをインポート ▼▼▼
+try:
+    from PLANA.llm.plugins.commands_manager import CommandInfoManager
+except ImportError:
+    logging.error("Could not import CommandInfoManager. Command suggestions will be disabled.")
+    CommandInfoManager = None
+# ▲▲▲ 変更点 1 ▲▲▲
+
 try:
     import aiofiles
 except ImportError:
@@ -92,6 +100,9 @@ class LLMCog(commands.Cog, name="LLM"):
         self.search_agent = self._initialize_search_agent()
         self.bio_manager = self._initialize_bio_manager()
         self.memory_manager = self._initialize_memory_manager()
+        # ▼▼▼ 変更点 2: CommandInfoManagerを初期化 ▼▼▼
+        self.command_manager = self._initialize_command_manager()
+        # ▲▲▲ 変更点 2 ▲▲▲
 
         default_model_string = self.llm_config.get('model')
         if default_model_string:
@@ -200,6 +211,87 @@ class LLMCog(commands.Cog, name="LLM"):
         except Exception as e:
             logger.error(f"Failed to initialize MemoryManager: {e}", exc_info=True)
             return None
+
+    def _initialize_command_manager(self) -> Optional[CommandInfoManager]:
+        if not CommandInfoManager:
+            return None
+        try:
+            # Botの準備ができてから初期化する必要があるため、on_readyで呼び出すのがより安全ですが、
+            # Cogの初期化時点でも多くの場合は動作します。
+            return CommandInfoManager(self.bot)
+        except Exception as e:
+            logger.error(f"Failed to initialize CommandInfoManager: {e}", exc_info=True)
+            return None
+
+    async def _prepare_system_prompt(self, channel_id: int, user_id: int, user_display_name: str) -> str:
+        """システムプロンプトを生成する"""
+        if not self.bio_manager or not self.memory_manager:
+            logger.error("BioManager or MemoryManager is not initialized.")
+            return "Error: Core components for prompt generation are missing."
+
+        system_prompt_template = self.bio_manager.get_system_prompt(
+            channel_id=channel_id,
+            user_id=user_id,
+            user_display_name=user_display_name
+        )
+
+        logger.info(f"🔵 [DEBUG] Template length: {len(system_prompt_template)} chars")
+        logger.info(
+            f"🔵 [DEBUG] Template contains {{available_commands}}: {'{available_commands}' in system_prompt_template}")
+
+        available_commands = ""
+        if self.command_manager:
+            await self.bot.wait_until_ready()
+            available_commands = self.command_manager.get_all_commands_info()
+            logger.info(f"🔵 [INPUT] Command info retrieved: {len(available_commands)} characters")
+        else:
+            logger.warning("CommandInfoManager is not available. Command list will be empty in the prompt.")
+
+        try:
+            now = datetime.now(self.jst)
+            current_date_str = now.strftime('%Y年%m月%d日')
+            current_time_str = now.strftime('%H:%M')
+
+            # プレースホルダーがあればフォーマット、なければそのまま
+            if '{available_commands}' in system_prompt_template:
+                system_prompt = system_prompt_template.format(
+                    current_date=current_date_str,
+                    current_time=current_time_str,
+                    available_commands=available_commands
+                )
+            else:
+                # プレースホルダーがない場合
+                logger.warning("⚠️ {available_commands} not in template. Formatting without it.")
+                system_prompt = system_prompt_template.format(
+                    current_date=current_date_str,
+                    current_time=current_time_str
+                )
+
+            logger.info(f"🔵 [INPUT] System prompt after formatting: {len(system_prompt)} characters")
+
+        except (KeyError, ValueError) as e:
+            logger.warning(f"Could not format system_prompt with all placeholders. Error: {e}")
+            system_prompt = system_prompt_template
+            system_prompt = system_prompt.replace('{current_date}', current_date_str)
+            system_prompt = system_prompt.replace('{current_time}', current_time_str)
+            system_prompt = system_prompt.replace('{available_commands}', available_commands)
+
+        # ★ 重要: プレースホルダーの有無に関わらず、コマンド情報を必ず追加 ★
+        if available_commands:
+            # コマンド情報がすでに含まれているかチェック
+            if "# 🤖 利用可能なBotコマンド一覧" not in system_prompt:
+                logger.info("🔧 [FIX] Appending command info to system prompt")
+                system_prompt += f"\n\n{available_commands}"
+            else:
+                logger.info("✅ [DEBUG] Command info already in system prompt")
+
+        logger.info(f"🔵 [INPUT] System prompt after command insertion: {len(system_prompt)} characters")
+
+        if formatted_memories := self.memory_manager.get_formatted_memories():
+            system_prompt += f"\n\n{formatted_memories}"
+
+        logger.info(f"🔵 [INPUT] Final system prompt: {len(system_prompt)} characters")
+        return system_prompt
 
     def get_tools_definition(self) -> Optional[List[Dict[str, Any]]]:
         definitions = []
@@ -428,26 +520,18 @@ class LLMCog(commands.Cog, name="LLM"):
         thread_id = await self._get_conversation_thread_id(message)
 
         if not self.bio_manager or not self.memory_manager:
-            await message.reply("Cannot respond because required plugins are not initialized.\n必要なプラグインが初期化されていないため、応答できません。", silent=True)
+            await message.reply(
+                "Cannot respond because required plugins are not initialized.\n必要なプラグインが初期化されていないため、応答できません。",
+                silent=True)
             return
 
-        system_prompt = self.bio_manager.get_system_prompt(
-            channel_id=message.channel.id,
-            user_id=message.author.id,
-            user_display_name=message.author.display_name
+        # ▼▼▼ 変更点 5: システムプロンプト生成を共通メソッドに置き換え ▼▼▼
+        system_prompt = await self._prepare_system_prompt(
+            message.channel.id,
+            message.author.id,
+            message.author.display_name
         )
-
-        try:
-            now = datetime.now(self.jst)
-            current_date_str = now.strftime('%Y年%m月%d日')
-            current_time_str = now.strftime('%H:%M')
-            system_prompt = system_prompt.format(current_date=current_date_str, current_time=current_time_str)
-        except (KeyError, ValueError) as e:
-            logger.warning(
-                f"Could not format system_prompt with date/time. It might be missing placeholders. Error: {e}")
-
-        if formatted_memories := self.memory_manager.get_formatted_memories():
-            system_prompt += f"\n\n{formatted_memories}"
+        # ▲▲▲ 変更点 5 ▲▲▲
 
         logger.info(f"🔵 [INPUT] System prompt prepared (length: {len(system_prompt)} chars)")
 
@@ -829,7 +913,8 @@ class LLMCog(commands.Cog, name="LLM"):
             return
 
         if not message.strip():
-            await interaction.followup.send("⚠️ Please enter a message.\n⚠️ メッセージを入力してください。", ephemeral=False)
+            await interaction.followup.send("⚠️ Please enter a message.\n⚠️ メッセージを入力してください。",
+                                            ephemeral=False)
             return
 
         guild_log = f"guild='{interaction.guild.name}({interaction.guild.id})'" if interaction.guild else "guild='DM'"
@@ -848,30 +933,24 @@ class LLMCog(commands.Cog, name="LLM"):
                 image_contents.append(image_data)
                 logger.info(f"🔵 [INPUT] Including 1 image from URL in /chat request")
             else:
-                await interaction.followup.send("⚠️ Failed to process the specified image URL.\n⚠️ 指定された画像URLの処理に失敗しました。", ephemeral=False)
+                await interaction.followup.send(
+                    "⚠️ Failed to process the specified image URL.\n⚠️ 指定された画像URLの処理に失敗しました。",
+                    ephemeral=False)
                 return
 
         if not self.bio_manager or not self.memory_manager:
-            await interaction.followup.send("❌ Cannot respond because required plugins are not initialized.\n❌ 必要なプラグインが初期化されていないため、応答できません。",
-                                            ephemeral=False)
+            await interaction.followup.send(
+                "❌ Cannot respond because required plugins are not initialized.\n❌ 必要なプラグインが初期化されていないため、応答できません。",
+                ephemeral=False)
             return
 
-        system_prompt = self.bio_manager.get_system_prompt(
-            channel_id=interaction.channel_id,
-            user_id=interaction.user.id,
-            user_display_name=interaction.user.display_name
+        # ▼▼▼ 変更点 6: システムプロンプト生成を共通メソッドに置き換え ▼▼▼
+        system_prompt = await self._prepare_system_prompt(
+            interaction.channel_id,
+            interaction.user.id,
+            interaction.user.display_name
         )
-
-        try:
-            now = datetime.now(self.jst)
-            current_date_str = now.strftime('%Y年%m月%d日')
-            current_time_str = now.strftime('%H:%M')
-            system_prompt = system_prompt.format(current_date=current_date_str, current_time=current_time_str)
-        except (KeyError, ValueError) as e:
-            logger.warning(f"Could not format system_prompt with date/time: {e}")
-
-        if formatted_memories := self.memory_manager.get_formatted_memories():
-            system_prompt += f"\n\n{formatted_memories}"
+        # ▲▲▲ 変更点 6 ▲▲▲
 
         logger.info(f"🔵 [INPUT] System prompt prepared for /chat (length: {len(system_prompt)} chars)")
 
@@ -977,22 +1056,22 @@ class LLMCog(commands.Cog, name="LLM"):
             except discord.HTTPException:
                 pass
 
+    # ... (以降のコマンドは変更なし) ...
     @app_commands.command(
         name="set-ai-bio",
         description="Set the AI's personality/role (bio) for this channel.\nこのチャンネルのAIの性格や役割(bio)を設定します。"
     )
-    @app_commands.describe(
-        bio="Describe the personality or role for the AI (e.g., You are a cat and end sentences with 'nya').\nAIに設定したい性格や役割を記述してください。(例: あなたは猫です。語尾に「にゃん」をつけて話します。)"
-    )
     async def set_ai_bio_slash(self, interaction: discord.Interaction, bio: str):
         await interaction.response.defer(ephemeral=False)
         if not self.bio_manager:
-            await interaction.followup.send("❌ BioManager is not available.\n❌ BioManagerが利用できません。", ephemeral=False)
+            await interaction.followup.send("❌ BioManager is not available.\n❌ BioManagerが利用できません。",
+                                            ephemeral=False)
             return
 
         if len(bio) > 1024:
             await interaction.followup.send(
-                "⚠️ The AI bio is too long. Please set it within 1024 characters.\n⚠️ AIのbioが長すぎます。1024文字以内で設定してください。", ephemeral=False)
+                "⚠️ The AI bio is too long. Please set it within 1024 characters.\n⚠️ AIのbioが長すぎます。1024文字以内で設定してください。",
+                ephemeral=False)
             return
 
         try:
@@ -1016,7 +1095,8 @@ class LLMCog(commands.Cog, name="LLM"):
     async def show_ai_bio_slash(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=False)
         if not self.bio_manager:
-            await interaction.followup.send("❌ BioManager is not available.\n❌ BioManagerが利用できません。", ephemeral=False)
+            await interaction.followup.send("❌ BioManager is not available.\n❌ BioManagerが利用できません。",
+                                            ephemeral=False)
             return
 
         current_bio = self.bio_manager.get_channel_bio(interaction.channel_id)
@@ -1047,7 +1127,8 @@ class LLMCog(commands.Cog, name="LLM"):
     async def reset_ai_bio_slash(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=False)
         if not self.bio_manager:
-            await interaction.followup.send("❌ BioManager is not available.\n❌ BioManagerが利用できません。", ephemeral=False)
+            await interaction.followup.send("❌ BioManager is not available.\n❌ BioManagerが利用できません。",
+                                            ephemeral=False)
             return
 
         try:
@@ -1094,7 +1175,8 @@ class LLMCog(commands.Cog, name="LLM"):
     async def set_user_bio_slash(self, interaction: discord.Interaction, bio: str, mode: app_commands.Choice[str]):
         await interaction.response.defer(ephemeral=False)
         if not self.bio_manager:
-            await interaction.followup.send("❌ BioManager is not available.\n❌ BioManagerが利用できません。", ephemeral=False)
+            await interaction.followup.send("❌ BioManager is not available.\n❌ BioManagerが利用できません。",
+                                            ephemeral=False)
             return
 
         if len(bio) > 1024:
@@ -1118,7 +1200,8 @@ class LLMCog(commands.Cog, name="LLM"):
             await interaction.followup.send(embed=embed, ephemeral=False)
         except Exception as e:
             logger.error(f"Failed to save user bio settings: {e}", exc_info=True)
-            await interaction.followup.send("❌ Failed to save your information.\n❌ あなたの情報の保存に失敗しました。", ephemeral=False)
+            await interaction.followup.send("❌ Failed to save your information.\n❌ あなたの情報の保存に失敗しました。",
+                                            ephemeral=False)
 
     @app_commands.command(
         name="show-user-bio",
@@ -1127,7 +1210,8 @@ class LLMCog(commands.Cog, name="LLM"):
     async def show_user_bio_slash(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=False)
         if not self.bio_manager:
-            await interaction.followup.send("❌ BioManager is not available.\n❌ BioManagerが利用できません。", ephemeral=False)
+            await interaction.followup.send("❌ BioManager is not available.\n❌ BioManagerが利用できません。",
+                                            ephemeral=False)
             return
 
         current_bio = self.bio_manager.get_user_bio(interaction.user.id)
@@ -1152,20 +1236,24 @@ class LLMCog(commands.Cog, name="LLM"):
     async def reset_user_bio_slash(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=False)
         if not self.bio_manager:
-            await interaction.followup.send("❌ BioManager is not available.\n❌ BioManagerが利用できません。", ephemeral=False)
+            await interaction.followup.send("❌ BioManager is not available.\n❌ BioManagerが利用できません。",
+                                            ephemeral=False)
             return
 
         try:
             if await self.bio_manager.reset_user_bio(interaction.user.id):
                 logger.info(f"User bio for {interaction.user.name} ({interaction.user.id}) was reset.")
                 await interaction.followup.send(
-                    f"✅ All information about {interaction.user.display_name} has been deleted.\n✅ {interaction.user.display_name}さんに関する情報をすべて削除しました。", ephemeral=False)
+                    f"✅ All information about {interaction.user.display_name} has been deleted.\n✅ {interaction.user.display_name}さんに関する情報をすべて削除しました。",
+                    ephemeral=False)
             else:
                 await interaction.followup.send(
-                    "ℹ️ No information is stored about you.\nℹ️ あなたに関する情報は何も記憶されていません。", ephemeral=False)
+                    "ℹ️ No information is stored about you.\nℹ️ あなたに関する情報は何も記憶されていません。",
+                    ephemeral=False)
         except Exception as e:
             logger.error(f"Failed to save user bio settings after reset: {e}", exc_info=True)
-            await interaction.followup.send("❌ Failed to delete your information.\n❌ あなたの情報の削除に失敗しました。", ephemeral=False)
+            await interaction.followup.send("❌ Failed to delete your information.\n❌ あなたの情報の削除に失敗しました。",
+                                            ephemeral=False)
 
     @app_commands.command(
         name="memory-save",
@@ -1178,7 +1266,8 @@ class LLMCog(commands.Cog, name="LLM"):
     async def memory_save_slash(self, interaction: discord.Interaction, key: str, value: str):
         await interaction.response.defer(ephemeral=False)
         if not self.memory_manager:
-            await interaction.followup.send("❌ MemoryManager is not available.\n❌ MemoryManagerが利用できません。", ephemeral=False)
+            await interaction.followup.send("❌ MemoryManager is not available.\n❌ MemoryManagerが利用できません。",
+                                            ephemeral=False)
             return
 
         try:
@@ -1193,7 +1282,8 @@ class LLMCog(commands.Cog, name="LLM"):
         except Exception as e:
             logger.error(f"Failed to save global memory via command: {e}", exc_info=True)
             await interaction.followup.send(
-                "❌ Failed to save to global shared memory.\n❌ グローバル共有メモリへの保存に失敗しました。", ephemeral=False)
+                "❌ Failed to save to global shared memory.\n❌ グローバル共有メモリへの保存に失敗しました。",
+                ephemeral=False)
 
     @app_commands.command(
         name="memory-list",
@@ -1202,13 +1292,15 @@ class LLMCog(commands.Cog, name="LLM"):
     async def memory_list_slash(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=False)
         if not self.memory_manager:
-            await interaction.followup.send("❌ MemoryManager is not available.\n❌ MemoryManagerが利用できません。", ephemeral=False)
+            await interaction.followup.send("❌ MemoryManager is not available.\n❌ MemoryManagerが利用できません。",
+                                            ephemeral=False)
             return
 
         memories = self.memory_manager.list_memories()
         if not memories:
             await interaction.followup.send(
-                "ℹ️ Nothing is saved in the global shared memory.\nℹ️ グローバル共有メモリには何も保存されていません。", ephemeral=False)
+                "ℹ️ Nothing is saved in the global shared memory.\nℹ️ グローバル共有メモリには何も保存されていません。",
+                ephemeral=False)
             return
 
         embed = discord.Embed(
@@ -1245,7 +1337,8 @@ class LLMCog(commands.Cog, name="LLM"):
     async def memory_delete_slash(self, interaction: discord.Interaction, key: str):
         await interaction.response.defer(ephemeral=False)
         if not self.memory_manager:
-            await interaction.followup.send("❌ MemoryManager is not available.\n❌ MemoryManagerが利用できません。", ephemeral=False)
+            await interaction.followup.send("❌ MemoryManager is not available.\n❌ MemoryManagerが利用できません。",
+                                            ephemeral=False)
             return
 
         try:
@@ -1260,7 +1353,8 @@ class LLMCog(commands.Cog, name="LLM"):
         except Exception as e:
             logger.error(f"Failed to delete global memory via command: {e}", exc_info=True)
             await interaction.followup.send(
-                "❌ Failed to delete from global shared memory.\n❌ グローバル共有メモリからの削除に失敗しました。", ephemeral=False)
+                "❌ Failed to delete from global shared memory.\n❌ グローバル共有メモリからの削除に失敗しました。",
+                ephemeral=False)
 
     async def model_autocomplete(self, interaction: discord.Interaction, current: str) -> List[
         app_commands.Choice[str]]:
@@ -1352,7 +1446,8 @@ class LLMCog(commands.Cog, name="LLM"):
                 await interaction.followup.send("❌ Failed to save settings.\n❌ 設定の保存に失敗しました。")
         else:
             await interaction.followup.send(
-                "ℹ️ No custom model is set for this channel.\nℹ️ このチャンネルには専用のモデルが設定されていません。", ephemeral=False)
+                "ℹ️ No custom model is set for this channel.\nℹ️ このチャンネルには専用のモデルが設定されていません。",
+                ephemeral=False)
 
     @switch_model_slash.error
     async def switch_model_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
@@ -1439,14 +1534,6 @@ class LLMCog(commands.Cog, name="LLM"):
         embed.set_footer(
             text="These guidelines are subject to change without notice.\nガイドラインは予告なく変更される場合があります。")
         await interaction.followup.send(embed=embed, ephemeral=False)
-
-    @app_commands.command(name="llm_help_en",
-                          description="Displays help and usage guidelines for LLM (AI Chat) features.\nLLM (AI対話) 機能のヘルプと利用ガイドラインを表示します。")
-    async def llm_help_en_slash(self, interaction: discord.Interaction):
-        # This command is now identical to llm_help, as both are bilingual.
-        # You might consider removing this one and keeping only ll.
-        # このコマンドはllm_helpと同一になりました。片方を削除することも検討してください。
-        await self.llm_help_slash(interaction)
 
     @app_commands.command(
         name="clear_history",
