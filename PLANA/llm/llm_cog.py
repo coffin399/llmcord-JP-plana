@@ -43,13 +43,11 @@ except ImportError:
     logging.error("Could not import MemoryManager. Memory functionality will be disabled.")
     MemoryManager = None
 
-# ▼▼▼ 変更点 1: CommandInfoManagerをインポート ▼▼▼
 try:
     from PLANA.llm.plugins.commands_manager import CommandInfoManager
 except ImportError:
     logging.error("Could not import CommandInfoManager. Command suggestions will be disabled.")
     CommandInfoManager = None
-# ▲▲▲ 変更点 1 ▲▲▲
 
 try:
     import aiofiles
@@ -66,7 +64,101 @@ IMAGE_URL_PATTERN = re.compile(
     r'https?://[^\s]+\.(?:' + '|'.join(ext.lstrip('.') for ext in SUPPORTED_IMAGE_EXTENSIONS) + r')(?:\?[^\s]*)?',
     re.IGNORECASE
 )
-DISCORD_MESSAGE_MAX_LENGTH = 1990
+DISCORD_MESSAGE_MAX_LENGTH = 2000
+SAFE_MESSAGE_LENGTH = 1990  # 安全マージン
+
+
+def _split_message_smartly(text: str, max_length: int) -> List[str]:
+    """
+    テキストを賢く分割（改行やセンテンスを考慮）
+
+    優先順位:
+    1. コードブロック境界
+    2. 段落（\n\n）
+    3. 改行（\n）
+    4. 句点（。！？）
+    5. カンマ（、,）
+    6. スペース
+    7. 強制分割
+    """
+    if len(text) <= max_length:
+        return [text]
+
+    chunks = []
+    remaining = text
+
+    while remaining:
+        if len(remaining) <= max_length:
+            chunks.append(remaining)
+            break
+
+        # 分割ポイントを探す
+        chunk = remaining[:max_length]
+        split_point = _find_best_split_point(chunk)
+
+        if split_point == -1:
+            # 見つからない場合は強制分割
+            split_point = max_length - 20  # 少し余裕を持たせる
+
+        # チャンクを追加
+        chunk_text = remaining[:split_point].rstrip()
+        if chunk_text:
+            chunks.append(chunk_text)
+
+        # 残りを更新
+        remaining = remaining[split_point:].lstrip()
+
+    return chunks
+
+
+def _find_best_split_point(chunk: str) -> int:
+    """
+    最適な分割ポイントを見つける
+    """
+    # 1. コードブロックの境界を優先
+    code_block_end = chunk.rfind('```\n')
+    if code_block_end > len(chunk) * 0.5:  # 後半にあれば
+        return code_block_end + 4
+
+    # 2. 段落区切り（\n\n）
+    paragraph_break = chunk.rfind('\n\n')
+    if paragraph_break > len(chunk) * 0.5:
+        return paragraph_break + 2
+
+    # 3. 改行
+    newline = chunk.rfind('\n')
+    if newline > len(chunk) * 0.6:
+        return newline + 1
+
+    # 4. 日本語の句点
+    japanese_period = max(
+        chunk.rfind('。'),
+        chunk.rfind('！'),
+        chunk.rfind('？')
+    )
+    if japanese_period > len(chunk) * 0.7:
+        return japanese_period + 1
+
+    # 5. 英語のピリオド
+    english_period = max(
+        chunk.rfind('. '),
+        chunk.rfind('! '),
+        chunk.rfind('? ')
+    )
+    if english_period > len(chunk) * 0.7:
+        return english_period + 2
+
+    # 6. 読点・カンマ
+    comma = max(chunk.rfind('、'), chunk.rfind(', '))
+    if comma > len(chunk) * 0.7:
+        return comma + 1
+
+    # 7. スペース
+    space = chunk.rfind(' ')
+    if space > len(chunk) * 0.7:
+        return space + 1
+
+    return -1  # 見つからない
 
 
 class LLMCog(commands.Cog, name="LLM"):
@@ -100,9 +192,7 @@ class LLMCog(commands.Cog, name="LLM"):
         self.search_agent = self._initialize_search_agent()
         self.bio_manager = self._initialize_bio_manager()
         self.memory_manager = self._initialize_memory_manager()
-        # ▼▼▼ 変更点 2: CommandInfoManagerを初期化 ▼▼▼
         self.command_manager = self._initialize_command_manager()
-        # ▲▲▲ 変更点 2 ▲▲▲
 
         default_model_string = self.llm_config.get('model')
         if default_model_string:
@@ -216,8 +306,6 @@ class LLMCog(commands.Cog, name="LLM"):
         if not CommandInfoManager:
             return None
         try:
-            # Botの準備ができてから初期化する必要があるため、on_readyで呼び出すのがより安全ですが、
-            # Cogの初期化時点でも多くの場合は動作します。
             return CommandInfoManager(self.bot)
         except Exception as e:
             logger.error(f"Failed to initialize CommandInfoManager: {e}", exc_info=True)
@@ -252,7 +340,6 @@ class LLMCog(commands.Cog, name="LLM"):
             current_date_str = now.strftime('%Y年%m月%d日')
             current_time_str = now.strftime('%H:%M')
 
-            # プレースホルダーがあればフォーマット、なければそのまま
             if '{available_commands}' in system_prompt_template:
                 system_prompt = system_prompt_template.format(
                     current_date=current_date_str,
@@ -260,7 +347,6 @@ class LLMCog(commands.Cog, name="LLM"):
                     available_commands=available_commands
                 )
             else:
-                # プレースホルダーがない場合
                 logger.warning("⚠️ {available_commands} not in template. Formatting without it.")
                 system_prompt = system_prompt_template.format(
                     current_date=current_date_str,
@@ -276,9 +362,7 @@ class LLMCog(commands.Cog, name="LLM"):
             system_prompt = system_prompt.replace('{current_time}', current_time_str)
             system_prompt = system_prompt.replace('{available_commands}', available_commands)
 
-        # ★ 重要: プレースホルダーの有無に関わらず、コマンド情報を必ず追加 ★
         if available_commands:
-            # コマンド情報がすでに含まれているかチェック
             if "# 🤖 利用可能なBotコマンド一覧" not in system_prompt:
                 logger.info("🔧 [FIX] Appending command info to system prompt")
                 system_prompt += f"\n\n{available_commands}"
@@ -525,13 +609,11 @@ class LLMCog(commands.Cog, name="LLM"):
                 silent=True)
             return
 
-        # ▼▼▼ 変更点 5: システムプロンプト生成を共通メソッドに置き換え ▼▼▼
         system_prompt = await self._prepare_system_prompt(
             message.channel.id,
             message.author.id,
             message.author.display_name
         )
-        # ▲▲▲ 変更点 5 ▲▲▲
 
         logger.info(f"🔵 [INPUT] System prompt prepared (length: {len(system_prompt)} chars)")
 
@@ -556,11 +638,11 @@ class LLMCog(commands.Cog, name="LLM"):
         logger.info(f"🔵 [INPUT] Total messages for API: {len(messages_for_api)} (system + history + user)")
 
         try:
-            sent_message, llm_response = await self._handle_llm_streaming_response(
+            sent_messages, llm_response = await self._handle_llm_streaming_response(
                 message, messages_for_api, llm_client, log_context
             )
 
-            if sent_message and llm_response:
+            if sent_messages and llm_response:
                 logger.info(f"🟢 [OUTPUT] LLM final response (length: {len(llm_response)} chars):\n{llm_response}")
                 logger.info(f"✅ LLM stream finished | {log_context} | model='{model_in_use}'")
 
@@ -568,9 +650,14 @@ class LLMCog(commands.Cog, name="LLM"):
                     self.conversation_threads[thread_id] = []
                 self.conversation_threads[thread_id].append(user_message_for_api)
 
-                assistant_message = {"role": "assistant", "content": llm_response, "message_id": sent_message.id}
+                # 最初のメッセージIDを記録
+                assistant_message = {"role": "assistant", "content": llm_response, "message_id": sent_messages[0].id}
                 self.conversation_threads[thread_id].append(assistant_message)
-                self.message_to_thread[sent_message.id] = thread_id
+
+                # 全メッセージをマッピングに追加
+                for msg in sent_messages:
+                    self.message_to_thread[msg.id] = thread_id
+
                 self._cleanup_old_threads()
 
         except Exception as e:
@@ -584,15 +671,15 @@ class LLMCog(commands.Cog, name="LLM"):
                 del self.conversation_threads[thread_id]
                 self.message_to_thread = {k: v for k, v in self.message_to_thread.items() if v != thread_id}
 
-    async def _handle_llm_streaming_response_robust(
+    async def _handle_llm_streaming_response(
             self,
             message: discord.Message,
             initial_messages: List[Dict[str, Any]],
             client: openai.AsyncOpenAI,
             log_context: str
-    ) -> Tuple[Optional[discord.Message], str]:
+    ) -> Tuple[Optional[List[discord.Message]], str]:
         """
-        回線不安定時にも最終出力を保証する改善版
+        ストリーミング + 長文分割対応版
         """
         sent_message = None
         full_response_text = ""
@@ -601,6 +688,7 @@ class LLMCog(commands.Cog, name="LLM"):
         chunk_count = 0
         update_interval = 0.5
         min_update_chars = 15
+        retry_sleep_time = 2.0
         placeholder = ":incoming_envelope: Thinking...:incoming_envelope:"
         emoji_prefix = ":incoming_envelope: "
         emoji_suffix = " :incoming_envelope:"
@@ -638,8 +726,21 @@ class LLMCog(commands.Cog, name="LLM"):
                 )
 
                 if should_update and full_response_text:
-                    max_content_length = DISCORD_MESSAGE_MAX_LENGTH - len(emoji_prefix) - len(emoji_suffix)
-                    display_text = emoji_prefix + full_response_text[:max_content_length] + emoji_suffix
+                    # 2000文字に近づいたら警告を追加
+                    display_length = len(full_response_text)
+
+                    if display_length > SAFE_MESSAGE_LENGTH:
+                        # 制限を超えた場合、末尾に通知を追加
+                        max_content_length = SAFE_MESSAGE_LENGTH - len(emoji_prefix) - len(emoji_suffix) - 100
+                        display_text = (
+                                emoji_prefix +
+                                full_response_text[:max_content_length] +
+                                "\n\n⚠️ (Output is long, will be split...)\n⚠️ (出力が長いため分割します...)" +
+                                emoji_suffix
+                        )
+                    else:
+                        max_content_length = SAFE_MESSAGE_LENGTH - len(emoji_prefix) - len(emoji_suffix)
+                        display_text = emoji_prefix + full_response_text[:max_content_length] + emoji_suffix
 
                     if display_text != sent_message.content:
                         try:
@@ -656,65 +757,109 @@ class LLMCog(commands.Cog, name="LLM"):
                             if e.status == 429:
                                 retry_after = (e.retry_after or 1.0) + 0.5
                                 logger.warning(
-                                    f"⚠️ Rate limited on message edit. Waiting {retry_after:.2f}s"
+                                    f"⚠️ Rate limited on message edit (ID: {sent_message.id}). "
+                                    f"Waiting {retry_after:.2f}s"
                                 )
                                 await asyncio.sleep(retry_after)
                                 last_update = time.time()
                             else:
-                                # その他のエラーは警告だけ出して続行
                                 logger.warning(
-                                    f"⚠️ Failed to edit message during stream: {e.status} - {getattr(e, 'text', str(e))}"
+                                    f"⚠️ Failed to edit message (ID: {sent_message.id}): "
+                                    f"{e.status} - {getattr(e, 'text', str(e))}"
                                 )
-                                # 次の更新まで少し待つ
-                                await asyncio.sleep(1.0)
+                                await asyncio.sleep(retry_sleep_time)
 
             logger.info(
                 f"🟢 [STREAMING] Stream completed | Total chunks: {chunk_count} | Final length: {len(full_response_text)} chars")
 
-            #最終出力の確実な更新（リトライ付き）
+            # ★★★ 最終出力：長文の場合は分割送信 ★★★
             if full_response_text:
-                final_text = full_response_text[:DISCORD_MESSAGE_MAX_LENGTH]
-
-                for attempt in range(max_final_retries):
-                    try:
-                        if final_text != sent_message.content:
-                            await sent_message.edit(content=final_text)
-                            logger.info(f"🟢 [STREAMING] Final message updated successfully (attempt {attempt + 1})")
-                        break  # 成功したらループを抜ける
-
-                    except discord.NotFound:
-                        logger.error(f"❌ Message was deleted before final update")
-                        return None, ""
-
-                    except discord.HTTPException as e:
-                        if e.status == 429:
-                            # レート制限の場合
-                            retry_after = (e.retry_after or 1.0) + 0.5
-                            logger.warning(
-                                f"⚠️ Rate limited on final update (attempt {attempt + 1}/{max_final_retries}). "
-                                f"Waiting {retry_after:.2f}s"
-                            )
-                            await asyncio.sleep(retry_after)
-                        else:
-                            # その他のHTTPエラー
-                            logger.warning(
-                                f"⚠️ Failed to update final message (attempt {attempt + 1}/{max_final_retries}): "
-                                f"{e.status} - {getattr(e, 'text', str(e))}"
-                            )
+                if len(full_response_text) <= SAFE_MESSAGE_LENGTH:
+                    # 短い場合は通常の更新（リトライ付き）
+                    for attempt in range(max_final_retries):
+                        try:
+                            if full_response_text != sent_message.content:
+                                await sent_message.edit(content=full_response_text)
+                                logger.info(f"🟢 [STREAMING] Final message updated successfully (attempt {attempt + 1})")
+                            break
+                        except discord.NotFound:
+                            logger.error(f"❌ Message was deleted before final update")
+                            return None, ""
+                        except discord.HTTPException as e:
+                            if e.status == 429:
+                                retry_after = (e.retry_after or 1.0) + 0.5
+                                logger.warning(
+                                    f"⚠️ Rate limited on final update (attempt {attempt + 1}/{max_final_retries}). "
+                                    f"Waiting {retry_after:.2f}s"
+                                )
+                                await asyncio.sleep(retry_after)
+                            else:
+                                logger.warning(
+                                    f"⚠️ Failed to update final message (attempt {attempt + 1}/{max_final_retries}): "
+                                    f"{e.status} - {getattr(e, 'text', str(e))}"
+                                )
+                                if attempt < max_final_retries - 1:
+                                    await asyncio.sleep(final_retry_delay)
+                                else:
+                                    logger.error(
+                                        f"❌ Failed to update final message after {max_final_retries} attempts. "
+                                        f"Message ID: {sent_message.id}"
+                                    )
+                        except Exception as e:
+                            logger.error(f"❌ Unexpected error during final update: {e}", exc_info=True)
                             if attempt < max_final_retries - 1:
                                 await asyncio.sleep(final_retry_delay)
-                            else:
-                                # 最終試行でも失敗した場合はログに記録
-                                logger.error(
-                                    f"❌ Failed to update final message after {max_final_retries} attempts. "
-                                    f"Message ID: {sent_message.id}"
-                                )
-                                # それでもデータは保持されているので処理は続行
 
-                    except Exception as e:
-                        logger.error(f"❌ Unexpected error during final update: {e}", exc_info=True)
-                        if attempt < max_final_retries - 1:
-                            await asyncio.sleep(final_retry_delay)
+                    return [sent_message], full_response_text
+
+                else:
+                    # 長い場合は分割送信
+                    logger.info(
+                        f"📄 [SPLIT] Response is {len(full_response_text)} chars, splitting into multiple messages")
+
+                    chunks = _split_message_smartly(full_response_text, SAFE_MESSAGE_LENGTH)
+                    all_messages = []
+
+                    # 最初のメッセージを更新（リトライ付き）
+                    first_chunk = chunks[0]
+                    for attempt in range(max_final_retries):
+                        try:
+                            await sent_message.edit(content=first_chunk)
+                            all_messages.append(sent_message)
+                            logger.info(f"📄 [SPLIT] Updated first message (1/{len(chunks)})")
+                            break
+                        except discord.HTTPException as e:
+                            if e.status == 429:
+                                retry_after = (e.retry_after or 1.0) + 0.5
+                                logger.warning(f"⚠️ Rate limited on first chunk update, waiting {retry_after:.2f}s")
+                                await asyncio.sleep(retry_after)
+                            else:
+                                logger.error(f"❌ Failed to update first message: {e}")
+                                if attempt < max_final_retries - 1:
+                                    await asyncio.sleep(final_retry_delay)
+
+                    # 残りを追加送信
+                    for i, chunk in enumerate(chunks[1:], start=2):
+                        for attempt in range(max_final_retries):
+                            try:
+                                continuation_msg = await message.channel.send(chunk)
+                                all_messages.append(continuation_msg)
+                                logger.info(f"📄 [SPLIT] Sent continuation message {i}/{len(chunks)}")
+                                break
+                            except discord.HTTPException as e:
+                                if e.status == 429:
+                                    retry_after = (e.retry_after or 1.0) + 0.5
+                                    logger.warning(f"⚠️ Rate limited on continuation {i}, waiting {retry_after:.2f}s")
+                                    await asyncio.sleep(retry_after)
+                                else:
+                                    logger.error(f"❌ Failed to send continuation message {i}: {e}")
+                                    if attempt < max_final_retries - 1:
+                                        await asyncio.sleep(final_retry_delay)
+                                    else:
+                                        # 失敗しても続行
+                                        break
+
+                    return all_messages, full_response_text
             else:
                 error_msg = self.llm_config.get('error_msg', {}).get(
                     'general_error', "There was no response from the AI.\nAIから応答がありませんでした。"
@@ -722,8 +867,6 @@ class LLMCog(commands.Cog, name="LLM"):
                 logger.warning(f"⚠️ Empty response from LLM")
                 await sent_message.edit(content=error_msg)
                 return None, ""
-
-            return sent_message, full_response_text
 
         except Exception as e:
             logger.error(f"❌ Error during LLM streaming response: {e}", exc_info=True)
@@ -985,13 +1128,11 @@ class LLMCog(commands.Cog, name="LLM"):
                 ephemeral=False)
             return
 
-        # ▼▼▼ 変更点 6: システムプロンプト生成を共通メソッドに置き換え ▼▼▼
         system_prompt = await self._prepare_system_prompt(
             interaction.channel_id,
             interaction.user.id,
             interaction.user.display_name
         )
-        # ▲▲▲ 変更点 6 ▲▲▲
 
         logger.info(f"🔵 [INPUT] System prompt prepared for /chat (length: {len(system_prompt)} chars)")
 
@@ -1009,11 +1150,30 @@ class LLMCog(commands.Cog, name="LLM"):
         logger.info(f"🔵 [INPUT] Total messages for API: {len(messages_for_api)} (system + user)")
 
         try:
+            # 仮のメッセージオブジェクトを作成（分割送信用）
             temp_message = await interaction.followup.send(
                 ":incoming_envelope: Thinking...:incoming_envelope:",
                 ephemeral=False,
                 wait=True
             )
+
+            # メッセージオブジェクトにchannel属性を追加（_handle_llm_streaming_response用）
+            class DummyMessage:
+                def __init__(self, msg, channel):
+                    self.id = msg.id
+                    self.content = msg.content
+                    self.channel = channel
+                    self.author = msg.author
+                    self.created_at = msg.created_at
+                    self._real_message = msg
+
+                async def reply(self, *args, **kwargs):
+                    return await self.channel.send(*args, **kwargs)
+
+                async def edit(self, *args, **kwargs):
+                    return await self._real_message.edit(*args, **kwargs)
+
+            dummy_msg = DummyMessage(temp_message, interaction.channel)
 
             full_response_text = ""
             last_update = 0.0
@@ -1023,6 +1183,8 @@ class LLMCog(commands.Cog, name="LLM"):
             min_update_chars = 15
             emoji_prefix = ":incoming_envelope: "
             emoji_suffix = " :incoming_envelope:"
+            max_final_retries = 3
+            final_retry_delay = 2.0
 
             logger.info(f"🔵 [STREAMING] Starting LLM stream for /chat | {log_context}")
 
@@ -1047,8 +1209,19 @@ class LLMCog(commands.Cog, name="LLM"):
                 )
 
                 if should_update and full_response_text:
-                    max_content_length = DISCORD_MESSAGE_MAX_LENGTH - len(emoji_prefix) - len(emoji_suffix)
-                    display_text = emoji_prefix + full_response_text[:max_content_length] + emoji_suffix
+                    display_length = len(full_response_text)
+
+                    if display_length > SAFE_MESSAGE_LENGTH:
+                        max_content_length = SAFE_MESSAGE_LENGTH - len(emoji_prefix) - len(emoji_suffix) - 100
+                        display_text = (
+                                emoji_prefix +
+                                full_response_text[:max_content_length] +
+                                "\n\n⚠️ (Output is long, will be split...)\n⚠️ (出力が長いため分割します...)" +
+                                emoji_suffix
+                        )
+                    else:
+                        max_content_length = SAFE_MESSAGE_LENGTH - len(emoji_prefix) - len(emoji_suffix)
+                        display_text = emoji_prefix + full_response_text[:max_content_length] + emoji_suffix
 
                     if display_text != temp_message.content:
                         try:
@@ -1073,16 +1246,70 @@ class LLMCog(commands.Cog, name="LLM"):
             logger.info(
                 f"🟢 [STREAMING] Stream completed | Total chunks: {chunk_count} | Final length: {len(full_response_text)} chars")
 
+            # 最終出力処理
             if full_response_text:
-                final_text = full_response_text[:DISCORD_MESSAGE_MAX_LENGTH]
-                if final_text != temp_message.content:
-                    try:
-                        await temp_message.edit(content=final_text)
-                        logger.info(
-                            f"🟢 [OUTPUT] LLM final response for /chat (length: {len(full_response_text)} chars):\n{full_response_text}")
-                        logger.info(f"✅ /chat LLM stream finished | {log_context} | model='{model_in_use}'")
-                    except discord.HTTPException as e:
-                        logger.error(f"❌ Failed to update final message: {e}")
+                if len(full_response_text) <= SAFE_MESSAGE_LENGTH:
+                    # 短い場合は通常の更新（リトライ付き）
+                    for attempt in range(max_final_retries):
+                        try:
+                            if full_response_text != temp_message.content:
+                                await temp_message.edit(content=full_response_text)
+                                logger.info(
+                                    f"🟢 [OUTPUT] LLM final response for /chat (length: {len(full_response_text)} chars):\n{full_response_text}")
+                                logger.info(f"✅ /chat LLM stream finished | {log_context} | model='{model_in_use}'")
+                            break
+                        except discord.HTTPException as e:
+                            if e.status == 429:
+                                retry_after = (e.retry_after or 1.0) + 0.5
+                                logger.warning(f"⚠️ Rate limited on final update, waiting {retry_after:.2f}s")
+                                await asyncio.sleep(retry_after)
+                            else:
+                                logger.error(f"❌ Failed to update final message: {e}")
+                                if attempt < max_final_retries - 1:
+                                    await asyncio.sleep(final_retry_delay)
+                else:
+                    # 長い場合は分割送信
+                    logger.info(f"📄 [SPLIT] /chat response is {len(full_response_text)} chars, splitting")
+
+                    chunks = _split_message_smartly(full_response_text, SAFE_MESSAGE_LENGTH)
+
+                    # 最初のメッセージを更新
+                    for attempt in range(max_final_retries):
+                        try:
+                            await temp_message.edit(content=chunks[0])
+                            logger.info(f"📄 [SPLIT] Updated first message (1/{len(chunks)})")
+                            break
+                        except discord.HTTPException as e:
+                            if e.status == 429:
+                                retry_after = (e.retry_after or 1.0) + 0.5
+                                logger.warning(f"⚠️ Rate limited, waiting {retry_after:.2f}s")
+                                await asyncio.sleep(retry_after)
+                            else:
+                                logger.error(f"❌ Failed to update first message: {e}")
+                                if attempt < max_final_retries - 1:
+                                    await asyncio.sleep(final_retry_delay)
+
+                    # 残りを追加送信
+                    for i, chunk in enumerate(chunks[1:], start=2):
+                        for attempt in range(max_final_retries):
+                            try:
+                                await interaction.channel.send(chunk)
+                                logger.info(f"📄 [SPLIT] Sent continuation message {i}/{len(chunks)}")
+                                break
+                            except discord.HTTPException as e:
+                                if e.status == 429:
+                                    retry_after = (e.retry_after or 1.0) + 0.5
+                                    logger.warning(f"⚠️ Rate limited, waiting {retry_after:.2f}s")
+                                    await asyncio.sleep(retry_after)
+                                else:
+                                    logger.error(f"❌ Failed to send continuation {i}: {e}")
+                                    if attempt < max_final_retries - 1:
+                                        await asyncio.sleep(final_retry_delay)
+                                    else:
+                                        break
+
+                    logger.info(f"🟢 [OUTPUT] /chat split response completed")
+                    logger.info(f"✅ /chat LLM stream finished | {log_context} | model='{model_in_use}'")
             else:
                 error_msg = self.llm_config.get('error_msg', {}).get('general_error',
                                                                      "There was no response from the AI.\nAIから応答がありませんでした。")
@@ -1097,7 +1324,6 @@ class LLMCog(commands.Cog, name="LLM"):
             except discord.HTTPException:
                 pass
 
-    # ... (以降のコマンドは変更なし) ...
     @app_commands.command(
         name="set-ai-bio",
         description="Set the AI's personality/role (bio) for this channel.\nこのチャンネルのAIの性格や役割(bio)を設定します。"
