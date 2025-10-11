@@ -96,7 +96,7 @@ class CommandInfoManager:
                     cmd_info = self._extract_slash_command_info(command)
                     if cmd_info:
                         commands_list.append(cmd_info)
-                        logger.info(f"  ✅ Collected: /{cmd_info['name']} from {cmd_info['cog']}")
+                        #logger.info(f"  ✅ Collected: /{cmd_info['name']} from {cmd_info['cog']}")
                 else:
                     logger.debug(f"  ❌ Skipped: {cog_name} doesn't match criteria")
             else:
