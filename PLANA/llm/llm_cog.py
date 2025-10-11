@@ -584,13 +584,16 @@ class LLMCog(commands.Cog, name="LLM"):
                 del self.conversation_threads[thread_id]
                 self.message_to_thread = {k: v for k, v in self.message_to_thread.items() if v != thread_id}
 
-    async def _handle_llm_streaming_response(
+    async def _handle_llm_streaming_response_robust(
             self,
             message: discord.Message,
             initial_messages: List[Dict[str, Any]],
             client: openai.AsyncOpenAI,
             log_context: str
     ) -> Tuple[Optional[discord.Message], str]:
+        """
+        回線不安定時にも最終出力を保証する改善版
+        """
         sent_message = None
         full_response_text = ""
         last_update = 0.0
@@ -598,10 +601,14 @@ class LLMCog(commands.Cog, name="LLM"):
         chunk_count = 0
         update_interval = 0.5
         min_update_chars = 15
-        retry_sleep_time = 2.0
         placeholder = ":incoming_envelope: Thinking...:incoming_envelope:"
         emoji_prefix = ":incoming_envelope: "
         emoji_suffix = " :incoming_envelope:"
+
+        # 最終更新のリトライ設定
+        max_final_retries = 3
+        final_retry_delay = 2.0
+
         logger.info(f"🔵 [STREAMING] Starting LLM stream | {log_context}")
 
         try:
@@ -649,31 +656,65 @@ class LLMCog(commands.Cog, name="LLM"):
                             if e.status == 429:
                                 retry_after = (e.retry_after or 1.0) + 0.5
                                 logger.warning(
-                                    f"⚠️ Rate limited on message edit (ID: {sent_message.id}). "
-                                    f"Waiting {retry_after:.2f}s"
+                                    f"⚠️ Rate limited on message edit. Waiting {retry_after:.2f}s"
                                 )
                                 await asyncio.sleep(retry_after)
                                 last_update = time.time()
                             else:
+                                # その他のエラーは警告だけ出して続行
                                 logger.warning(
-                                    f"⚠️ Failed to edit message (ID: {sent_message.id}): "
-                                    f"{e.status} - {getattr(e, 'text', str(e))}"
+                                    f"⚠️ Failed to edit message during stream: {e.status} - {getattr(e, 'text', str(e))}"
                                 )
-                                await asyncio.sleep(retry_sleep_time)
+                                # 次の更新まで少し待つ
+                                await asyncio.sleep(1.0)
 
             logger.info(
                 f"🟢 [STREAMING] Stream completed | Total chunks: {chunk_count} | Final length: {len(full_response_text)} chars")
 
+            #最終出力の確実な更新（リトライ付き）
             if full_response_text:
                 final_text = full_response_text[:DISCORD_MESSAGE_MAX_LENGTH]
-                if final_text != sent_message.content:
+
+                for attempt in range(max_final_retries):
                     try:
-                        await sent_message.edit(content=final_text)
-                        logger.info(f"🟢 [STREAMING] Final message updated successfully (emoji removed)")
+                        if final_text != sent_message.content:
+                            await sent_message.edit(content=final_text)
+                            logger.info(f"🟢 [STREAMING] Final message updated successfully (attempt {attempt + 1})")
+                        break  # 成功したらループを抜ける
+
+                    except discord.NotFound:
+                        logger.error(f"❌ Message was deleted before final update")
+                        return None, ""
+
                     except discord.HTTPException as e:
-                        logger.error(
-                            f"❌ Failed to update final message (ID: {sent_message.id}): {e}"
-                        )
+                        if e.status == 429:
+                            # レート制限の場合
+                            retry_after = (e.retry_after or 1.0) + 0.5
+                            logger.warning(
+                                f"⚠️ Rate limited on final update (attempt {attempt + 1}/{max_final_retries}). "
+                                f"Waiting {retry_after:.2f}s"
+                            )
+                            await asyncio.sleep(retry_after)
+                        else:
+                            # その他のHTTPエラー
+                            logger.warning(
+                                f"⚠️ Failed to update final message (attempt {attempt + 1}/{max_final_retries}): "
+                                f"{e.status} - {getattr(e, 'text', str(e))}"
+                            )
+                            if attempt < max_final_retries - 1:
+                                await asyncio.sleep(final_retry_delay)
+                            else:
+                                # 最終試行でも失敗した場合はログに記録
+                                logger.error(
+                                    f"❌ Failed to update final message after {max_final_retries} attempts. "
+                                    f"Message ID: {sent_message.id}"
+                                )
+                                # それでもデータは保持されているので処理は続行
+
+                    except Exception as e:
+                        logger.error(f"❌ Unexpected error during final update: {e}", exc_info=True)
+                        if attempt < max_final_retries - 1:
+                            await asyncio.sleep(final_retry_delay)
             else:
                 error_msg = self.llm_config.get('error_msg', {}).get(
                     'general_error', "There was no response from the AI.\nAIから応答がありませんでした。"
