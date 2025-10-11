@@ -264,17 +264,10 @@ class Shittim(commands.Bot):
         logging.info(f'{self.user.name} ({self.user.id}) としてDiscordにログインし、準備が完了しました！')
         logging.info(f"現在 {len(self.guilds)} サーバーに参加しています。")
         logging.info("📱 モバイルステータスで表示されています")
-        self.status_templates = self.config.get('status_rotation', ["/help",
+        self.status_templates = self.config.get('status_rotation', [
+                                                                    "Ask @PLANA for command help",
                                                                     "operating on {guild_count} servers",
-                                                                    "operating on {guild_count} servers",
-                                                                    "PLANA Ver.2025-10-09",
-                                                                    "PLANA Ver.2025-10-09",
-                                                                    "/llm_help",
-                                                                    "/llm_help_en",
-                                                                    "/ytdlp",
-                                                                    "/updates",
-                                                                    "/updates",
-                                                                    "/enable-logging"
+                                                                    "PLANA Ver.2025-10-11",
                                                                     ])
         self.rotate_status.start()
 
