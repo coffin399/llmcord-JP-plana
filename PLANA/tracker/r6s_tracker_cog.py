@@ -1,7 +1,6 @@
 import discord
 from discord import app_commands
 from discord.ext import commands
-from discord.ui import Button, View
 import aiohttp
 from typing import Optional, Literal, List, Dict
 import urllib.parse
@@ -25,59 +24,48 @@ from PLANA.tracker.error.errors import (
 PLATFORMS = Literal["uplay", "psn", "xbl"]
 
 
-class StatsPageView(View):
+class StatsPageView(discord.ui.View):
     """View for paginating through stats embeds"""
 
-    def __init__(self, embeds: List[discord.Embed], author_id: int):
+    def __init__(self, embeds: List[discord.Embed]):
         super().__init__(timeout=180)  # 3 minutes timeout
         self.embeds = embeds
         self.current_page = 0
-        self.author_id = author_id
         self.message = None
         self.update_buttons()
 
     def update_buttons(self):
         """Update button states based on current page"""
-        self.previous_button.disabled = self.current_page == 0
-        self.next_button.disabled = self.current_page == len(self.embeds) - 1
+        self.children[0].disabled = self.current_page == 0  # Previous button
+        self.children[2].disabled = self.current_page == len(self.embeds) - 1  # Next button
 
         # Update page indicator
-        self.page_indicator.label = f"Page {self.current_page + 1}/{len(self.embeds)}"
+        self.children[1].label = f"Page {self.current_page + 1}/{len(self.embeds)}"
 
     async def update_message(self, interaction: discord.Interaction):
         """Update the message with current page"""
         self.update_buttons()
         await interaction.response.edit_message(embed=self.embeds[self.current_page], view=self)
 
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        """Only allow the command author to use buttons"""
-        if interaction.user.id != self.author_id:
-            await interaction.response.send_message(
-                "❌ You cannot control this menu. Use `/r6s-stats` to view your own stats.",
-                ephemeral=True
-            )
-            return False
-        return True
-
-    @discord.ui.button(label="◀️ Previous", style=discord.ButtonStyle.primary, custom_id="previous")
-    async def previous_button(self, interaction: discord.Interaction, button: Button):
+    @discord.ui.button(label="◀️ Previous", style=discord.ButtonStyle.primary)
+    async def previous_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         """Go to previous page"""
         self.current_page = max(0, self.current_page - 1)
         await self.update_message(interaction)
 
-    @discord.ui.button(label="Page 1/3", style=discord.ButtonStyle.secondary, custom_id="page_indicator", disabled=True)
-    async def page_indicator(self, interaction: discord.Interaction, button: Button):
+    @discord.ui.button(label="Page 1/3", style=discord.ButtonStyle.secondary, disabled=True)
+    async def page_indicator(self, interaction: discord.Interaction, button: discord.ui.Button):
         """Page indicator (disabled button)"""
         pass
 
-    @discord.ui.button(label="Next ▶️", style=discord.ButtonStyle.primary, custom_id="next")
-    async def next_button(self, interaction: discord.Interaction, button: Button):
+    @discord.ui.button(label="Next ▶️", style=discord.ButtonStyle.primary)
+    async def next_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         """Go to next page"""
         self.current_page = min(len(self.embeds) - 1, self.current_page + 1)
         await self.update_message(interaction)
 
-    @discord.ui.button(label="🗑️ Close", style=discord.ButtonStyle.danger, custom_id="close")
-    async def close_button(self, interaction: discord.Interaction, button: Button):
+    @discord.ui.button(label="🗑️ Close", style=discord.ButtonStyle.danger)
+    async def close_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         """Close the stats view"""
         await interaction.response.edit_message(view=None)
         self.stop()
@@ -708,7 +696,7 @@ class R6SiegeTrackerExtended(commands.Cog):
             embeds = self.create_comprehensive_stats_embed(account_data, stats_data, username, platform)
 
             # Create view with pagination buttons
-            view = StatsPageView(embeds, interaction.user.id)
+            view = StatsPageView(embeds)
             message = await interaction.followup.send(embed=embeds[0], view=view)
             view.message = message
 
