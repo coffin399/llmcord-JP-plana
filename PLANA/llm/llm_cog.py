@@ -1,3 +1,4 @@
+# PLANA/llm/llm_cog.py
 from __future__ import annotations
 
 import asyncio
@@ -163,6 +164,27 @@ def _find_best_split_point(chunk: str) -> int:
 
 class LLMCog(commands.Cog, name="LLM"):
     """A cog for interacting with Large Language Models, with tool support."""
+
+    def _add_support_footer(self, embed: discord.Embed) -> None:
+        """embedにサポートサーバーへのフッターを追加"""
+        current_footer = embed.footer.text if embed.footer and embed.footer.text else ""
+        support_text = "\n問題がありますか？開発者にご連絡ください！ / Having issues? Contact the developer!"
+        # 既存のフッターがある場合は改行を追加
+        if current_footer:
+            embed.set_footer(text=current_footer + support_text)
+        else:
+            embed.set_footer(text=support_text.strip())
+
+    def _create_support_view(self) -> discord.ui.View:
+        """サポートサーバーへのリンクボタンを含むViewを作成"""
+        view = discord.ui.View()
+        view.add_item(discord.ui.Button(
+            label="サポートサーバー / Support Server",
+            style=discord.ButtonStyle.link,
+            url="https://discord.gg/8zz6nAvC6Q",
+            emoji="💬"
+        ))
+        return view
 
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -569,11 +591,16 @@ class LLMCog(commands.Cog, name="LLM"):
             if not llm_client:
                 error_msg = self.llm_config.get('error_msg', {}).get('general_error',
                                                                      "LLM client is not available for this channel.\nこのチャンネルではLLMクライアントが利用できません。")
-                await message.reply(error_msg, silent=True)
+                embed = discord.Embed(title="❌ Error / エラー", description=error_msg, color=discord.Color.red())
+                self._add_support_footer(embed)
+                await message.reply(embed=embed, view=self._create_support_view(), silent=True)
                 return
         except Exception as e:
             logger.error(f"Failed to get LLM client for channel {message.channel.id}: {e}", exc_info=True)
-            await message.reply(self.exception_handler.handle_exception(e), silent=True)
+            error_msg = self.exception_handler.handle_exception(e)
+            embed = discord.Embed(title="❌ Error / エラー", description=error_msg, color=discord.Color.red())
+            self._add_support_footer(embed)
+            await message.reply(embed=embed, view=self._create_support_view(), silent=True)
             return
 
         original_content = message.content.replace(f'<@!{self.bot.user.id}>', '').replace(f'<@{self.bot.user.id}>',
@@ -586,7 +613,10 @@ class LLMCog(commands.Cog, name="LLM"):
         if not text_content and not image_contents:
             error_key = 'empty_reply' if is_reply_to_bot and not is_mentioned else 'empty_mention_reply'
             default_msg = "Please say something.\n何かお話しください。" if error_key == 'empty_reply' else "Yes, how can I help you?\nはい、何か御用でしょうか?"
-            await message.reply(self.llm_config.get('error_msg', {}).get(error_key, default_msg), silent=True)
+            error_msg = self.llm_config.get('error_msg', {}).get(error_key, default_msg)
+            embed = discord.Embed(description=error_msg, color=discord.Color.gold())
+            self._add_support_footer(embed)
+            await message.reply(embed=embed, view=self._create_support_view(), silent=True)
             return
 
         guild_log = f"guild='{message.guild.name}({message.guild.id})'" if message.guild else "guild='DM'"
@@ -604,9 +634,10 @@ class LLMCog(commands.Cog, name="LLM"):
         thread_id = await self._get_conversation_thread_id(message)
 
         if not self.bio_manager or not self.memory_manager:
-            await message.reply(
-                "Cannot respond because required plugins are not initialized.\n必要なプラグインが初期化されていないため、応答できません。",
-                silent=True)
+            error_msg = "Cannot respond because required plugins are not initialized.\n必要なプラグインが初期化されていないため、応答できません。"
+            embed = discord.Embed(title="❌ Error / エラー", description=error_msg, color=discord.Color.red())
+            self._add_support_footer(embed)
+            await message.reply(embed=embed, view=self._create_support_view(), silent=True)
             return
 
         system_prompt = await self._prepare_system_prompt(
@@ -661,7 +692,10 @@ class LLMCog(commands.Cog, name="LLM"):
                 self._cleanup_old_threads()
 
         except Exception as e:
-            await message.reply(self.exception_handler.handle_exception(e), silent=True)
+            error_msg = self.exception_handler.handle_exception(e)
+            embed = discord.Embed(title="❌ Error / エラー", description=error_msg, color=discord.Color.red())
+            self._add_support_footer(embed)
+            await message.reply(embed=embed, view=self._create_support_view(), silent=True)
 
     def _cleanup_old_threads(self):
         max_threads = 100
@@ -779,7 +813,9 @@ class LLMCog(commands.Cog, name="LLM"):
                     for attempt in range(max_final_retries):
                         try:
                             if full_response_text != sent_message.content:
-                                await sent_message.edit(content=full_response_text)
+                                embed = discord.Embed(description=full_response_text, color=discord.Color.purple())
+                                self._add_support_footer(embed)
+                                await sent_message.edit(content=None, embed=embed, view=self._create_support_view())
                                 logger.info(f"🟢 [STREAMING] Final message updated successfully (attempt {attempt + 1})")
                             break
                         except discord.NotFound:
@@ -824,7 +860,9 @@ class LLMCog(commands.Cog, name="LLM"):
                     first_chunk = chunks[0]
                     for attempt in range(max_final_retries):
                         try:
-                            await sent_message.edit(content=first_chunk)
+                            embed = discord.Embed(description=first_chunk, color=discord.Color.purple())
+                            self._add_support_footer(embed)
+                            await sent_message.edit(content=None, embed=embed, view=self._create_support_view())
                             all_messages.append(sent_message)
                             logger.info(f"📄 [SPLIT] Updated first message (1/{len(chunks)})")
                             break
@@ -865,19 +903,23 @@ class LLMCog(commands.Cog, name="LLM"):
                     'general_error', "There was no response from the AI.\nAIから応答がありませんでした。"
                 )
                 logger.warning(f"⚠️ Empty response from LLM")
-                await sent_message.edit(content=error_msg)
+                embed = discord.Embed(title="❌ Error / エラー", description=error_msg, color=discord.Color.red())
+                self._add_support_footer(embed)
+                await sent_message.edit(content=None, embed=embed, view=self._create_support_view())
                 return None, ""
 
         except Exception as e:
             logger.error(f"❌ Error during LLM streaming response: {e}", exc_info=True)
             error_msg = self.exception_handler.handle_exception(e)
+            embed = discord.Embed(title="❌ Error / エラー", description=error_msg, color=discord.Color.red())
+            self._add_support_footer(embed)
             if sent_message:
                 try:
-                    await sent_message.edit(content=error_msg)
+                    await sent_message.edit(content=None, embed=embed, view=self._create_support_view())
                 except discord.HTTPException:
                     pass
             else:
-                await message.reply(error_msg, silent=True)
+                await message.reply(embed=embed, view=self._create_support_view(), silent=True)
             return None, ""
 
     async def _llm_stream_and_tool_handler(
@@ -1051,10 +1093,14 @@ class LLMCog(commands.Cog, name="LLM"):
                     channel = self.bot.get_channel(channel_id)
                     if channel and isinstance(channel, discord.TextChannel):
                         try:
-                            await channel.send(
-                                f"ℹ️ The AI model for this channel has been reset to the default (`{default_model}`) after 3 hours.\n"
-                                f"ℹ️ 3時間が経過したため、このチャンネルのAIモデルをデフォルト (`{default_model}`) に戻しました。"
+                            embed = discord.Embed(
+                                title="ℹ️ AI Model Reset / AIモデルをリセットしました",
+                                description=f"The AI model for this channel has been reset to the default (`{default_model}`) after 3 hours.\n"
+                                            f"3時間が経過したため、このチャンネルのAIモデルをデフォルト (`{default_model}`) に戻しました。",
+                                color=discord.Color.blue()
                             )
+                            self._add_support_footer(embed)
+                            await channel.send(embed=embed, view=self._create_support_view())
                         except discord.HTTPException as e:
                             logger.warning(f"Failed to send model reset notification to channel {channel_id}: {e}")
                 else:
@@ -1089,16 +1135,26 @@ class LLMCog(commands.Cog, name="LLM"):
             if not llm_client:
                 error_msg = self.llm_config.get('error_msg', {}).get('general_error',
                                                                      "LLM client is not available for this channel.\nこのチャンネルではLLMクライアントが利用できません。")
-                await interaction.followup.send(error_msg, ephemeral=False)
+                embed = discord.Embed(title="❌ Error / エラー", description=error_msg, color=discord.Color.red())
+                self._add_support_footer(embed)
+                await interaction.followup.send(embed=embed, view=self._create_support_view(), ephemeral=False)
                 return
         except Exception as e:
             logger.error(f"Failed to get LLM client for channel {interaction.channel_id}: {e}", exc_info=True)
-            await interaction.followup.send(self.exception_handler.handle_exception(e), ephemeral=False)
+            error_msg = self.exception_handler.handle_exception(e)
+            embed = discord.Embed(title="❌ Error / エラー", description=error_msg, color=discord.Color.red())
+            self._add_support_footer(embed)
+            await interaction.followup.send(embed=embed, view=self._create_support_view(), ephemeral=False)
             return
 
         if not message.strip():
-            await interaction.followup.send("⚠️ Please enter a message.\n⚠️ メッセージを入力してください。",
-                                            ephemeral=False)
+            embed = discord.Embed(
+                title="⚠️ Input Required / 入力が必要です",
+                description="Please enter a message.\nメッセージを入力してください。",
+                color=discord.Color.gold()
+            )
+            self._add_support_footer(embed)
+            await interaction.followup.send(embed=embed, view=self._create_support_view(), ephemeral=False)
             return
 
         guild_log = f"guild='{interaction.guild.name}({interaction.guild.id})'" if interaction.guild else "guild='DM'"
@@ -1117,15 +1173,23 @@ class LLMCog(commands.Cog, name="LLM"):
                 image_contents.append(image_data)
                 logger.info(f"🔵 [INPUT] Including 1 image from URL in /chat request")
             else:
-                await interaction.followup.send(
-                    "⚠️ Failed to process the specified image URL.\n⚠️ 指定された画像URLの処理に失敗しました。",
-                    ephemeral=False)
+                embed = discord.Embed(
+                    title="⚠️ Image Error / 画像エラー",
+                    description="Failed to process the specified image URL.\n指定された画像URLの処理に失敗しました。",
+                    color=discord.Color.gold()
+                )
+                self._add_support_footer(embed)
+                await interaction.followup.send(embed=embed, view=self._create_support_view(), ephemeral=False)
                 return
 
         if not self.bio_manager or not self.memory_manager:
-            await interaction.followup.send(
-                "❌ Cannot respond because required plugins are not initialized.\n❌ 必要なプラグインが初期化されていないため、応答できません。",
-                ephemeral=False)
+            embed = discord.Embed(
+                title="❌ Plugin Error / プラグインエラー",
+                description="Cannot respond because required plugins are not initialized.\n必要なプラグインが初期化されていないため、応答できません。",
+                color=discord.Color.red()
+            )
+            self._add_support_footer(embed)
+            await interaction.followup.send(embed=embed, view=self._create_support_view(), ephemeral=False)
             return
 
         system_prompt = await self._prepare_system_prompt(
@@ -1156,24 +1220,6 @@ class LLMCog(commands.Cog, name="LLM"):
                 ephemeral=False,
                 wait=True
             )
-
-            # メッセージオブジェクトにchannel属性を追加（_handle_llm_streaming_response用）
-            class DummyMessage:
-                def __init__(self, msg, channel):
-                    self.id = msg.id
-                    self.content = msg.content
-                    self.channel = channel
-                    self.author = msg.author
-                    self.created_at = msg.created_at
-                    self._real_message = msg
-
-                async def reply(self, *args, **kwargs):
-                    return await self.channel.send(*args, **kwargs)
-
-                async def edit(self, *args, **kwargs):
-                    return await self._real_message.edit(*args, **kwargs)
-
-            dummy_msg = DummyMessage(temp_message, interaction.channel)
 
             full_response_text = ""
             last_update = 0.0
@@ -1253,7 +1299,9 @@ class LLMCog(commands.Cog, name="LLM"):
                     for attempt in range(max_final_retries):
                         try:
                             if full_response_text != temp_message.content:
-                                await temp_message.edit(content=full_response_text)
+                                embed = discord.Embed(description=full_response_text, color=discord.Color.purple())
+                                self._add_support_footer(embed)
+                                await temp_message.edit(content=None, embed=embed, view=self._create_support_view())
                                 logger.info(
                                     f"🟢 [OUTPUT] LLM final response for /chat (length: {len(full_response_text)} chars):\n{full_response_text}")
                                 logger.info(f"✅ /chat LLM stream finished | {log_context} | model='{model_in_use}'")
@@ -1276,7 +1324,9 @@ class LLMCog(commands.Cog, name="LLM"):
                     # 最初のメッセージを更新
                     for attempt in range(max_final_retries):
                         try:
-                            await temp_message.edit(content=chunks[0])
+                            embed = discord.Embed(description=chunks[0], color=discord.Color.purple())
+                            self._add_support_footer(embed)
+                            await temp_message.edit(content=None, embed=embed, view=self._create_support_view())
                             logger.info(f"📄 [SPLIT] Updated first message (1/{len(chunks)})")
                             break
                         except discord.HTTPException as e:
@@ -1314,13 +1364,17 @@ class LLMCog(commands.Cog, name="LLM"):
                 error_msg = self.llm_config.get('error_msg', {}).get('general_error',
                                                                      "There was no response from the AI.\nAIから応答がありませんでした。")
                 logger.warning(f"⚠️ Empty response from LLM for /chat")
-                await temp_message.edit(content=error_msg)
+                embed = discord.Embed(title="❌ Error / エラー", description=error_msg, color=discord.Color.red())
+                self._add_support_footer(embed)
+                await temp_message.edit(content=None, embed=embed, view=self._create_support_view())
 
         except Exception as e:
             logger.error(f"❌ Error during /chat LLM streaming response: {e}", exc_info=True)
             error_msg = self.exception_handler.handle_exception(e)
+            embed = discord.Embed(title="❌ Error / エラー", description=error_msg, color=discord.Color.red())
+            self._add_support_footer(embed)
             try:
-                await interaction.followup.send(error_msg, ephemeral=False)
+                await interaction.followup.send(embed=embed, view=self._create_support_view(), ephemeral=False)
             except discord.HTTPException:
                 pass
 
@@ -1331,14 +1385,21 @@ class LLMCog(commands.Cog, name="LLM"):
     async def set_ai_bio_slash(self, interaction: discord.Interaction, bio: str):
         await interaction.response.defer(ephemeral=False)
         if not self.bio_manager:
-            await interaction.followup.send("❌ BioManager is not available.\n❌ BioManagerが利用できません。",
-                                            ephemeral=False)
+            embed = discord.Embed(title="❌ Plugin Error / プラグインエラー",
+                                  description="BioManager is not available.\nBioManagerが利用できません。",
+                                  color=discord.Color.red())
+            self._add_support_footer(embed)
+            await interaction.followup.send(embed=embed, view=self._create_support_view(), ephemeral=False)
             return
 
         if len(bio) > 1024:
-            await interaction.followup.send(
-                "⚠️ The AI bio is too long. Please set it within 1024 characters.\n⚠️ AIのbioが長すぎます。1024文字以内で設定してください。",
-                ephemeral=False)
+            embed = discord.Embed(
+                title="⚠️ Input Too Long / 入力が長すぎます",
+                description="The AI bio is too long. Please set it within 1024 characters.\nAIのbioが長すぎます。1024文字以内で設定してください。",
+                color=discord.Color.gold()
+            )
+            self._add_support_footer(embed)
+            await interaction.followup.send(embed=embed, view=self._create_support_view(), ephemeral=False)
             return
 
         try:
@@ -1349,11 +1410,15 @@ class LLMCog(commands.Cog, name="LLM"):
                 description=f"The AI's role in this channel has been set as follows.\nこのチャンネルでのAIの役割が以下のように設定されました。\n\n**New AI Bio / 新しいAIのbio:**\n```\n{bio}\n```",
                 color=discord.Color.green()
             )
-            await interaction.followup.send(embed=embed, ephemeral=False)
+            self._add_support_footer(embed)
+            await interaction.followup.send(embed=embed, view=self._create_support_view(), ephemeral=False)
         except Exception as e:
             logger.error(f"Failed to save channel AI bio settings: {e}", exc_info=True)
-            await interaction.followup.send(
-                "❌ Failed to save AI bio settings.\n❌ AIのbio設定の保存に失敗しました。", ephemeral=False)
+            embed = discord.Embed(title="❌ Save Error / 保存エラー",
+                                  description="Failed to save AI bio settings.\nAIのbio設定の保存に失敗しました。",
+                                  color=discord.Color.red())
+            self._add_support_footer(embed)
+            await interaction.followup.send(embed=embed, view=self._create_support_view(), ephemeral=False)
 
     @app_commands.command(
         name="show-ai-bio",
@@ -1362,8 +1427,11 @@ class LLMCog(commands.Cog, name="LLM"):
     async def show_ai_bio_slash(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=False)
         if not self.bio_manager:
-            await interaction.followup.send("❌ BioManager is not available.\n❌ BioManagerが利用できません。",
-                                            ephemeral=False)
+            embed = discord.Embed(title="❌ Plugin Error / プラグインエラー",
+                                  description="BioManager is not available.\nBioManagerが利用できません。",
+                                  color=discord.Color.red())
+            self._add_support_footer(embed)
+            await interaction.followup.send(embed=embed, view=self._create_support_view(), ephemeral=False)
             return
 
         current_bio = self.bio_manager.get_channel_bio(interaction.channel_id)
@@ -1385,7 +1453,8 @@ class LLMCog(commands.Cog, name="LLM"):
             description = f"No specific AI bio is set for this channel. The server's default setting is used.\nこのチャンネルには専用のAI bioが設定されていません。サーバーのデフォルト設定が使用されます。\n\n**Default Setting / デフォルト設定:**\n```\n{formatted_prompt}\n```"
             color = discord.Color.greyple()
         embed = discord.Embed(title=title, description=description, color=color)
-        await interaction.followup.send(embed=embed, ephemeral=False)
+        self._add_support_footer(embed)
+        await interaction.followup.send(embed=embed, view=self._create_support_view(), ephemeral=False)
 
     @app_commands.command(
         name="reset-ai-bio",
@@ -1394,8 +1463,11 @@ class LLMCog(commands.Cog, name="LLM"):
     async def reset_ai_bio_slash(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=False)
         if not self.bio_manager:
-            await interaction.followup.send("❌ BioManager is not available.\n❌ BioManagerが利用できません。",
-                                            ephemeral=False)
+            embed = discord.Embed(title="❌ Plugin Error / プラグインエラー",
+                                  description="BioManager is not available.\nBioManagerが利用できません。",
+                                  color=discord.Color.red())
+            self._add_support_footer(embed)
+            await interaction.followup.send(embed=embed, view=self._create_support_view(), ephemeral=False)
             return
 
         try:
@@ -1414,18 +1486,28 @@ class LLMCog(commands.Cog, name="LLM"):
                 display_prompt = (formatted_prompt[:100] + '...') if len(
                     formatted_prompt) > 103 else formatted_prompt
 
-                await interaction.followup.send(
-                    f"✅ The AI bio for this channel has been reset to the default.\n✅ このチャンネルのAIのbioをデフォルト設定に戻しました。\n> Current Default / 現在のデフォルト: `{display_prompt}`",
-                    ephemeral=False
+                embed = discord.Embed(
+                    title="✅ AI Bio Reset / AIのbioをリセットしました",
+                    description=f"The AI bio for this channel has been reset to the default.\nこのチャンネルのAIのbioをデフォルト設定に戻しました。\n> Current Default / 現在のデフォルト: `{display_prompt}`",
+                    color=discord.Color.green()
                 )
+                self._add_support_footer(embed)
+                await interaction.followup.send(embed=embed, view=self._create_support_view(), ephemeral=False)
             else:
-                await interaction.followup.send(
-                    "ℹ️ No custom AI bio is set for this channel.\nℹ️ このチャンネルには専用のAI bioが設定されていません。",
-                    ephemeral=False)
+                embed = discord.Embed(
+                    title="ℹ️ No Custom AI Bio / 専用のAI bioはありません",
+                    description="No custom AI bio is set for this channel.\nこのチャンネルには専用のAI bioが設定されていません。",
+                    color=discord.Color.blue()
+                )
+                self._add_support_footer(embed)
+                await interaction.followup.send(embed=embed, view=self._create_support_view(), ephemeral=False)
         except Exception as e:
             logger.error(f"Failed to save channel AI bio settings after reset: {e}", exc_info=True)
-            await interaction.followup.send(
-                "❌ Failed to save AI bio settings.\n❌ AIのbio設定の保存に失敗しました。", ephemeral=False)
+            embed = discord.Embed(title="❌ Save Error / 保存エラー",
+                                  description="Failed to save AI bio settings.\nAIのbio設定の保存に失敗しました。",
+                                  color=discord.Color.red())
+            self._add_support_footer(embed)
+            await interaction.followup.send(embed=embed, view=self._create_support_view(), ephemeral=False)
 
     @app_commands.command(
         name="set-user-bio",
@@ -1442,14 +1524,21 @@ class LLMCog(commands.Cog, name="LLM"):
     async def set_user_bio_slash(self, interaction: discord.Interaction, bio: str, mode: app_commands.Choice[str]):
         await interaction.response.defer(ephemeral=False)
         if not self.bio_manager:
-            await interaction.followup.send("❌ BioManager is not available.\n❌ BioManagerが利用できません。",
-                                            ephemeral=False)
+            embed = discord.Embed(title="❌ Plugin Error / プラグインエラー",
+                                  description="BioManager is not available.\nBioManagerが利用できません。",
+                                  color=discord.Color.red())
+            self._add_support_footer(embed)
+            await interaction.followup.send(embed=embed, view=self._create_support_view(), ephemeral=False)
             return
 
         if len(bio) > 1024:
-            await interaction.followup.send(
-                "⚠️ User bio is too long. Please set it within 1024 characters.\n⚠️ ユーザー情報(bio)が長すぎます。1024文字以内で設定してください。",
-                ephemeral=False)
+            embed = discord.Embed(
+                title="⚠️ Input Too Long / 入力が長すぎます",
+                description="User bio is too long. Please set it within 1024 characters.\nユーザー情報(bio)が長すぎます。1024文字以内で設定してください。",
+                color=discord.Color.gold()
+            )
+            self._add_support_footer(embed)
+            await interaction.followup.send(embed=embed, view=self._create_support_view(), ephemeral=False)
             return
 
         try:
@@ -1464,11 +1553,15 @@ class LLMCog(commands.Cog, name="LLM"):
                 description=f"The AI has stored your information as follows.\nAIはあなたの情報を以下のように記憶しました。\n\n**Your Bio / あなたのbio:**\n```\n{updated_bio}\n```",
                 color=discord.Color.green()
             )
-            await interaction.followup.send(embed=embed, ephemeral=False)
+            self._add_support_footer(embed)
+            await interaction.followup.send(embed=embed, view=self._create_support_view(), ephemeral=False)
         except Exception as e:
             logger.error(f"Failed to save user bio settings: {e}", exc_info=True)
-            await interaction.followup.send("❌ Failed to save your information.\n❌ あなたの情報の保存に失敗しました。",
-                                            ephemeral=False)
+            embed = discord.Embed(title="❌ Save Error / 保存エラー",
+                                  description="Failed to save your information.\nあなたの情報の保存に失敗しました。",
+                                  color=discord.Color.red())
+            self._add_support_footer(embed)
+            await interaction.followup.send(embed=embed, view=self._create_support_view(), ephemeral=False)
 
     @app_commands.command(
         name="show-user-bio",
@@ -1477,8 +1570,11 @@ class LLMCog(commands.Cog, name="LLM"):
     async def show_user_bio_slash(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=False)
         if not self.bio_manager:
-            await interaction.followup.send("❌ BioManager is not available.\n❌ BioManagerが利用できません。",
-                                            ephemeral=False)
+            embed = discord.Embed(title="❌ Plugin Error / プラグインエラー",
+                                  description="BioManager is not available.\nBioManagerが利用できません。",
+                                  color=discord.Color.red())
+            self._add_support_footer(embed)
+            await interaction.followup.send(embed=embed, view=self._create_support_view(), ephemeral=False)
             return
 
         current_bio = self.bio_manager.get_user_bio(interaction.user.id)
@@ -1494,7 +1590,8 @@ class LLMCog(commands.Cog, name="LLM"):
                 description="Currently, no information is stored about you.\nYou can set it using the `/set-user-bio` command or by asking the AI to remember it in conversation.\n現在、あなたに関する情報は何も記憶されていません。\n`/set-user-bio` コマンドか、会話の中でAIに記憶を頼むことで設定できます。",
                 color=discord.Color.greyple()
             )
-        await interaction.followup.send(embed=embed, ephemeral=False)
+        self._add_support_footer(embed)
+        await interaction.followup.send(embed=embed, view=self._create_support_view(), ephemeral=False)
 
     @app_commands.command(
         name="reset-user-bio",
@@ -1503,24 +1600,38 @@ class LLMCog(commands.Cog, name="LLM"):
     async def reset_user_bio_slash(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=False)
         if not self.bio_manager:
-            await interaction.followup.send("❌ BioManager is not available.\n❌ BioManagerが利用できません。",
-                                            ephemeral=False)
+            embed = discord.Embed(title="❌ Plugin Error / プラグインエラー",
+                                  description="BioManager is not available.\nBioManagerが利用できません。",
+                                  color=discord.Color.red())
+            self._add_support_footer(embed)
+            await interaction.followup.send(embed=embed, view=self._create_support_view(), ephemeral=False)
             return
 
         try:
             if await self.bio_manager.reset_user_bio(interaction.user.id):
                 logger.info(f"User bio for {interaction.user.name} ({interaction.user.id}) was reset.")
-                await interaction.followup.send(
-                    f"✅ All information about {interaction.user.display_name} has been deleted.\n✅ {interaction.user.display_name}さんに関する情報をすべて削除しました。",
-                    ephemeral=False)
+                embed = discord.Embed(
+                    title="✅ Information Deleted / 情報を削除しました",
+                    description=f"All information about {interaction.user.display_name} has been deleted.\n{interaction.user.display_name}さんに関する情報をすべて削除しました。",
+                    color=discord.Color.green()
+                )
+                self._add_support_footer(embed)
+                await interaction.followup.send(embed=embed, view=self._create_support_view(), ephemeral=False)
             else:
-                await interaction.followup.send(
-                    "ℹ️ No information is stored about you.\nℹ️ あなたに関する情報は何も記憶されていません。",
-                    ephemeral=False)
+                embed = discord.Embed(
+                    title="ℹ️ No Information Stored / 情報はありません",
+                    description="No information is stored about you.\nあなたに関する情報は何も記憶されていません。",
+                    color=discord.Color.blue()
+                )
+                self._add_support_footer(embed)
+                await interaction.followup.send(embed=embed, view=self._create_support_view(), ephemeral=False)
         except Exception as e:
             logger.error(f"Failed to save user bio settings after reset: {e}", exc_info=True)
-            await interaction.followup.send("❌ Failed to delete your information.\n❌ あなたの情報の削除に失敗しました。",
-                                            ephemeral=False)
+            embed = discord.Embed(title="❌ Deletion Error / 削除エラー",
+                                  description="Failed to delete your information.\nあなたの情報の削除に失敗しました。",
+                                  color=discord.Color.red())
+            self._add_support_footer(embed)
+            await interaction.followup.send(embed=embed, view=self._create_support_view(), ephemeral=False)
 
     @app_commands.command(
         name="memory-save",
@@ -1533,8 +1644,11 @@ class LLMCog(commands.Cog, name="LLM"):
     async def memory_save_slash(self, interaction: discord.Interaction, key: str, value: str):
         await interaction.response.defer(ephemeral=False)
         if not self.memory_manager:
-            await interaction.followup.send("❌ MemoryManager is not available.\n❌ MemoryManagerが利用できません。",
-                                            ephemeral=False)
+            embed = discord.Embed(title="❌ Plugin Error / プラグインエラー",
+                                  description="MemoryManager is not available.\nMemoryManagerが利用できません。",
+                                  color=discord.Color.red())
+            self._add_support_footer(embed)
+            await interaction.followup.send(embed=embed, view=self._create_support_view(), ephemeral=False)
             return
 
         try:
@@ -1545,12 +1659,17 @@ class LLMCog(commands.Cog, name="LLM"):
             )
             embed.add_field(name="Key / キー", value=f"```{key}```", inline=False)
             embed.add_field(name="Value / 値", value=f"```{value}```", inline=False)
-            await interaction.followup.send(embed=embed, ephemeral=False)
+            self._add_support_footer(embed)
+            await interaction.followup.send(embed=embed, view=self._create_support_view(), ephemeral=False)
         except Exception as e:
             logger.error(f"Failed to save global memory via command: {e}", exc_info=True)
-            await interaction.followup.send(
-                "❌ Failed to save to global shared memory.\n❌ グローバル共有メモリへの保存に失敗しました。",
-                ephemeral=False)
+            embed = discord.Embed(
+                title="❌ Save Error / 保存エラー",
+                description="Failed to save to global shared memory.\nグローバル共有メモリへの保存に失敗しました。",
+                color=discord.Color.red()
+            )
+            self._add_support_footer(embed)
+            await interaction.followup.send(embed=embed, view=self._create_support_view(), ephemeral=False)
 
     @app_commands.command(
         name="memory-list",
@@ -1559,15 +1678,22 @@ class LLMCog(commands.Cog, name="LLM"):
     async def memory_list_slash(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=False)
         if not self.memory_manager:
-            await interaction.followup.send("❌ MemoryManager is not available.\n❌ MemoryManagerが利用できません。",
-                                            ephemeral=False)
+            embed = discord.Embed(title="❌ Plugin Error / プラグインエラー",
+                                  description="MemoryManager is not available.\nMemoryManagerが利用できません。",
+                                  color=discord.Color.red())
+            self._add_support_footer(embed)
+            await interaction.followup.send(embed=embed, view=self._create_support_view(), ephemeral=False)
             return
 
         memories = self.memory_manager.list_memories()
         if not memories:
-            await interaction.followup.send(
-                "ℹ️ Nothing is saved in the global shared memory.\nℹ️ グローバル共有メモリには何も保存されていません。",
-                ephemeral=False)
+            embed = discord.Embed(
+                title="ℹ️ No Memories / メモリに情報はありません",
+                description="Nothing is saved in the global shared memory.\nグローバル共有メモリには何も保存されていません。",
+                color=discord.Color.blue()
+            )
+            self._add_support_footer(embed)
+            await interaction.followup.send(embed=embed, view=self._create_support_view(), ephemeral=False)
             return
 
         embed = discord.Embed(
@@ -1583,7 +1709,8 @@ class LLMCog(commands.Cog, name="LLM"):
             description += field_text
 
         embed.description = description
-        await interaction.followup.send(embed=embed, ephemeral=False)
+        self._add_support_footer(embed)
+        await interaction.followup.send(embed=embed, view=self._create_support_view(), ephemeral=False)
 
     async def memory_key_autocomplete(self, interaction: discord.Interaction, current: str) -> List[
         app_commands.Choice[str]]:
@@ -1604,24 +1731,39 @@ class LLMCog(commands.Cog, name="LLM"):
     async def memory_delete_slash(self, interaction: discord.Interaction, key: str):
         await interaction.response.defer(ephemeral=False)
         if not self.memory_manager:
-            await interaction.followup.send("❌ MemoryManager is not available.\n❌ MemoryManagerが利用できません。",
-                                            ephemeral=False)
+            embed = discord.Embed(title="❌ Plugin Error / プラグインエラー",
+                                  description="MemoryManager is not available.\nMemoryManagerが利用できません。",
+                                  color=discord.Color.red())
+            self._add_support_footer(embed)
+            await interaction.followup.send(embed=embed, view=self._create_support_view(), ephemeral=False)
             return
 
         try:
             if await self.memory_manager.delete_memory(key):
-                await interaction.followup.send(
-                    f"✅ Deleted key '{key}' from global shared memory.\n✅ グローバル共有メモリからキー '{key}' を削除しました。",
-                    ephemeral=False)
+                embed = discord.Embed(
+                    title="✅ Memory Deleted / メモリを削除しました",
+                    description=f"Deleted key '{key}' from global shared memory.\nグローバル共有メモリからキー '{key}' を削除しました。",
+                    color=discord.Color.green()
+                )
+                self._add_support_footer(embed)
+                await interaction.followup.send(embed=embed, view=self._create_support_view(), ephemeral=False)
             else:
-                await interaction.followup.send(
-                    f"⚠️ Key '{key}' does not exist in global shared memory.\n⚠️ キー '{key}' はグローバル共有メモリに存在しません。",
-                    ephemeral=False)
+                embed = discord.Embed(
+                    title="⚠️ Key Not Found / キーが見つかりません",
+                    description=f"Key '{key}' does not exist in global shared memory.\nキー '{key}' はグローバル共有メモリに存在しません。",
+                    color=discord.Color.gold()
+                )
+                self._add_support_footer(embed)
+                await interaction.followup.send(embed=embed, view=self._create_support_view(), ephemeral=False)
         except Exception as e:
             logger.error(f"Failed to delete global memory via command: {e}", exc_info=True)
-            await interaction.followup.send(
-                "❌ Failed to delete from global shared memory.\n❌ グローバル共有メモリからの削除に失敗しました。",
-                ephemeral=False)
+            embed = discord.Embed(
+                title="❌ Deletion Error / 削除エラー",
+                description="Failed to delete from global shared memory.\nグローバル共有メモリからの削除に失敗しました。",
+                color=discord.Color.red()
+            )
+            self._add_support_footer(embed)
+            await interaction.followup.send(embed=embed, view=self._create_support_view(), ephemeral=False)
 
     async def model_autocomplete(self, interaction: discord.Interaction, current: str) -> List[
         app_commands.Choice[str]]:
@@ -1643,8 +1785,13 @@ class LLMCog(commands.Cog, name="LLM"):
         await interaction.response.defer(ephemeral=False)
         available_models = self.llm_config.get('available_models', [])
         if model not in available_models:
-            await interaction.followup.send(
-                f"⚠️ The specified model '{model}' is not available.\n⚠️ 指定されたモデル '{model}' は利用できません。")
+            embed = discord.Embed(
+                title="⚠️ Invalid Model / 無効なモデル",
+                description=f"The specified model '{model}' is not available.\n指定されたモデル '{model}' は利用できません。",
+                color=discord.Color.gold()
+            )
+            self._add_support_footer(embed)
+            await interaction.followup.send(embed=embed, view=self._create_support_view())
             return
 
         channel_id = interaction.channel_id
@@ -1666,24 +1813,35 @@ class LLMCog(commands.Cog, name="LLM"):
                 task = asyncio.create_task(self._schedule_model_reset(channel_id))
                 self.model_reset_tasks[channel_id] = task
 
-                await interaction.followup.send(
-                    f"✅ The AI model for this channel has been switched to `{model}`.\n"
-                    f"It will automatically revert to the default model (`{default_model}`) **after 3 hours**.\n"
-                    f"✅ このチャンネルのAIモデルが `{model}` に切り替えられました。\n"
-                    f"**3時間後**にデフォルトモデル (`{default_model}`) に自動的に戻ります。",
-                    ephemeral=False
+                embed = discord.Embed(
+                    title="✅ Model Switched / モデルを切り替えました",
+                    description=f"The AI model for this channel has been switched to `{model}`.\n"
+                                f"It will automatically revert to the default model (`{default_model}`) **after 3 hours**.\n"
+                                f"このチャンネルのAIモデルが `{model}` に切り替えられました。\n"
+                                f"**3時間後**にデフォルトモデル (`{default_model}`) に自動的に戻ります。",
+                    color=discord.Color.green()
                 )
+                self._add_support_footer(embed)
+                await interaction.followup.send(embed=embed, view=self._create_support_view(), ephemeral=False)
                 logger.info(f"Model for channel {channel_id} switched to '{model}' by {interaction.user.name}. "
                             f"Reset scheduled in 3 hours.")
             else:
-                await interaction.followup.send(
-                    f"✅ The AI model for this channel has been reset to the default `{model}`.\n✅ このチャンネルのAIモデルがデフォルトの `{model}` に戻されました。",
-                    ephemeral=False)
+                embed = discord.Embed(
+                    title="✅ Model Reset to Default / モデルをデフォルトに戻しました",
+                    description=f"The AI model for this channel has been reset to the default `{model}`.\nこのチャンネルのAIモデルがデフォルトの `{model}` に戻されました。",
+                    color=discord.Color.green()
+                )
+                self._add_support_footer(embed)
+                await interaction.followup.send(embed=embed, view=self._create_support_view(), ephemeral=False)
                 logger.info(f"Model for channel {channel_id} switched to default '{model}' by {interaction.user.name}.")
 
         except Exception as e:
             logger.error(f"Failed to save channel model settings: {e}", exc_info=True)
-            await interaction.followup.send("❌ Failed to save settings.\n❌ 設定の保存に失敗しました。")
+            embed = discord.Embed(title="❌ Save Error / 保存エラー",
+                                  description="Failed to save settings.\n設定の保存に失敗しました。",
+                                  color=discord.Color.red())
+            self._add_support_footer(embed)
+            await interaction.followup.send(embed=embed, view=self._create_support_view())
 
     @app_commands.command(
         name="switch-models-default-server",
@@ -1704,26 +1862,42 @@ class LLMCog(commands.Cog, name="LLM"):
             try:
                 await self._save_channel_models()
                 default_model = self.llm_config.get('model', 'Not set / 未設定')
-                await interaction.followup.send(
-                    f"✅ The AI model for this channel has been reset to the default (`{default_model}`).\n✅ このチャンネルのAIモデルをデフォルト (`{default_model}`) に戻しました。",
-                    ephemeral=False)
+                embed = discord.Embed(
+                    title="✅ Model Reset to Default / モデルをデフォルトに戻しました",
+                    description=f"The AI model for this channel has been reset to the default (`{default_model}`).\nこのチャンネルのAIモデルをデフォルト (`{default_model}`) に戻しました。",
+                    color=discord.Color.green()
+                )
+                self._add_support_footer(embed)
+                await interaction.followup.send(embed=embed, view=self._create_support_view(), ephemeral=False)
                 logger.info(f"Model for channel {interaction.channel_id} reset to default by {interaction.user.name}")
             except Exception as e:
                 logger.error(f"Failed to save channel model settings after reset: {e}", exc_info=True)
-                await interaction.followup.send("❌ Failed to save settings.\n❌ 設定の保存に失敗しました。")
+                embed = discord.Embed(title="❌ Save Error / 保存エラー",
+                                      description="Failed to save settings.\n設定の保存に失敗しました。",
+                                      color=discord.Color.red())
+                self._add_support_footer(embed)
+                await interaction.followup.send(embed=embed, view=self._create_support_view())
         else:
-            await interaction.followup.send(
-                "ℹ️ No custom model is set for this channel.\nℹ️ このチャンネルには専用のモデルが設定されていません。",
-                ephemeral=False)
+            embed = discord.Embed(
+                title="ℹ️ No Custom Model Set / 専用モデルはありません",
+                description="No custom model is set for this channel.\nこのチャンネルには専用のモデルが設定されていません。",
+                color=discord.Color.blue()
+            )
+            self._add_support_footer(embed)
+            await interaction.followup.send(embed=embed, view=self._create_support_view(), ephemeral=False)
 
     @switch_model_slash.error
     async def switch_model_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
         logger.error(f"Error in /switch-model command: {error}", exc_info=True)
         error_message = f"An unexpected error occurred: {error}\n予期せぬエラーが発生しました: {error}"
+        embed = discord.Embed(title="❌ Unexpected Error / 予期せぬエラー", description=error_message,
+                              color=discord.Color.red())
+        self._add_support_footer(embed)
+        view = self._create_support_view()
         if not interaction.response.is_done():
-            await interaction.response.send_message(error_message, ephemeral=False)
+            await interaction.response.send_message(embed=embed, view=view, ephemeral=False)
         else:
-            await interaction.followup.send(error_message, ephemeral=False)
+            await interaction.followup.send(embed=embed, view=view, ephemeral=False)
 
     @app_commands.command(name="llm_help",
                           description="Displays help and usage guidelines for LLM (AI Chat) features.\nLLM (AI対話) 機能のヘルプと利用ガイドラインを表示します。")
@@ -1800,7 +1974,8 @@ class LLMCog(commands.Cog, name="LLM"):
                         inline=False)
         embed.set_footer(
             text="These guidelines are subject to change without notice.\nガイドラインは予告なく変更される場合があります。")
-        await interaction.followup.send(embed=embed, ephemeral=False)
+        self._add_support_footer(embed)
+        await interaction.followup.send(embed=embed, view=self._create_support_view(), ephemeral=False)
 
     @app_commands.command(
         name="clear_history",
@@ -1815,8 +1990,13 @@ class LLMCog(commands.Cog, name="LLM"):
                 if msg.id in self.message_to_thread:
                     threads_to_clear.add(self.message_to_thread[msg.id])
         except (discord.Forbidden, discord.HTTPException):
-            await interaction.followup.send(
-                "⚠️ Could not read the channel's message history.\n⚠️ チャンネルのメッセージ履歴を読み取れませんでした。")
+            embed = discord.Embed(
+                title="⚠️ Permission Error / 権限エラー",
+                description="Could not read the channel's message history.\nチャンネルのメッセージ履歴を読み取れませんでした。",
+                color=discord.Color.gold()
+            )
+            self._add_support_footer(embed)
+            await interaction.followup.send(embed=embed, view=self._create_support_view())
             return
         for thread_id in threads_to_clear:
             if thread_id in self.conversation_threads:
@@ -1824,11 +2004,21 @@ class LLMCog(commands.Cog, name="LLM"):
                 self.message_to_thread = {k: v for k, v in self.message_to_thread.items() if v != thread_id}
                 cleared_count += 1
         if cleared_count > 0:
-            await interaction.followup.send(
-                f"✅ Cleared the history of {cleared_count} conversation thread(s) related to this channel.\n✅ このチャンネルに関連する {cleared_count} 個の会話スレッドの履歴をクリアしました。")
+            embed = discord.Embed(
+                title="✅ History Cleared / 履歴をクリアしました",
+                description=f"Cleared the history of {cleared_count} conversation thread(s) related to this channel.\nこのチャンネルに関連する {cleared_count} 個の会話スレッドの履歴をクリアしました。",
+                color=discord.Color.green()
+            )
+            self._add_support_footer(embed)
+            await interaction.followup.send(embed=embed, view=self._create_support_view())
         else:
-            await interaction.followup.send(
-                "ℹ️ No conversation history to clear was found.\nℹ️ クリア対象の会話履歴が見つかりませんでした。")
+            embed = discord.Embed(
+                title="ℹ️ No History Found / 履歴がありません",
+                description="No conversation history to clear was found.\nクリア対象の会話履歴が見つかりませんでした。",
+                color=discord.Color.blue()
+            )
+            self._add_support_footer(embed)
+            await interaction.followup.send(embed=embed, view=self._create_support_view())
 
 
 async def setup(bot: commands.Bot):

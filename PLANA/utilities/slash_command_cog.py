@@ -84,6 +84,23 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
                 prefix = cfg_prefix
         return prefix
 
+    def _add_support_footer(self, embed: discord.Embed) -> None:
+        """embedにサポートサーバーへのフッターを追加"""
+        current_footer = embed.footer.text if embed.footer else ""
+        support_text = "\n問題がありますか？開発者にご連絡ください！ / Having issues? Contact the developer!"
+        embed.set_footer(text=current_footer + support_text if current_footer else support_text.strip())
+
+    def _create_support_view(self) -> discord.ui.View:
+        """サポートサーバーへのリンクボタンを含むViewを作成"""
+        view = discord.ui.View()
+        view.add_item(discord.ui.Button(
+            label="サポートサーバー / Support Server",
+            style=discord.ButtonStyle.link,
+            url="https://discord.gg/8zz6nAvC6Q",
+            emoji="💬"
+        ))
+        return view
+
     def _get_single_recruit(self, guaranteed_star2: bool = False) -> int:
         if guaranteed_star2:
             population = [3, 2]
@@ -129,7 +146,8 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
                               color=embed_color)
         embed.add_field(name="結果 / Results", value=result_text, inline=False)
         embed.set_footer(text="提供割合: 🟪(☆3): 3.0%, 🟨(☆2): 18.5%, 🟦(☆1): 78.5%")
-        await interaction.followup.send(embed=embed)
+        self._add_support_footer(embed)
+        await interaction.followup.send(embed=embed, view=self._create_support_view())
         logger.info(f"/gacha ({num_rolls}回) が実行されました。 (User: {interaction.user.id})")
 
     @app_commands.command(name="diceroll",
@@ -147,7 +165,8 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
         embed.add_field(name="指定範囲 / Range", value=f"`{min_value}` ～ `{max_value}`", inline=False)
         embed.add_field(name="出た目 / Result", value=f"**{result}**", inline=False)
         embed.timestamp = datetime.datetime.now(datetime.timezone.utc)
-        await interaction.response.send_message(embed=embed)
+        self._add_support_footer(embed)
+        await interaction.response.send_message(embed=embed, view=self._create_support_view())
         logger.info(
             f"/diceroll が実行されました。 (User: {interaction.user.id}, Range: {min_value}-{max_value}, Result: {result})")
 
@@ -194,7 +213,8 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
             result_str += details
         embed.add_field(name="最終結果 / Final Result", value=result_str, inline=False)
         embed.timestamp = datetime.datetime.now(datetime.timezone.utc)
-        await interaction.response.send_message(embed=embed)
+        self._add_support_footer(embed)
+        await interaction.response.send_message(embed=embed, view=self._create_support_view())
         logger.info(
             f"/roll が実行されました。 (User: {interaction.user.id}, Expression: {expression}, Result: {final_result})")
 
@@ -282,7 +302,8 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
                 result_str += details
             embed.add_field(name="最終結果 / Final Result", value=result_str, inline=False)
         embed.timestamp = datetime.datetime.now(datetime.timezone.utc)
-        await interaction.response.send_message(embed=embed)
+        self._add_support_footer(embed)
+        await interaction.response.send_message(embed=embed, view=self._create_support_view())
         log_message = f"/check が実行されました。 (User: {interaction.user.id}, Expression: {expression}{f' {condition} {target}' if is_check else ''}, Result: {final_result}{f', Success: {success}' if is_check else ''})"
         logger.info(log_message)
 
@@ -293,7 +314,8 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
         embed = discord.Embed(title="Pong! 🏓", description=f"現在のレイテンシ / Current Latency: `{latency_ms}ms`",
                               color=discord.Color.green() if latency_ms < 150 else (
                                   discord.Color.orange() if latency_ms < 300 else discord.Color.red()))
-        await interaction.response.send_message(embed=embed, ephemeral=False)
+        self._add_support_footer(embed)
+        await interaction.response.send_message(embed=embed, view=self._create_support_view(), ephemeral=False)
         logger.info(f"/ping が実行されました。レイテンシ: {latency_ms}ms (User: {interaction.user.id})")
 
     @app_commands.command(name="serverinfo",
@@ -332,7 +354,8 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
         if guild.features:
             features_str = ", ".join(f"`{f.replace('_', ' ').title()}`" for f in guild.features)
             embed.add_field(name="サーバー機能 / Server Features", value=features_str, inline=False)
-        await interaction.response.send_message(embed=embed, ephemeral=False)
+        self._add_support_footer(embed)
+        await interaction.response.send_message(embed=embed, view=self._create_support_view(), ephemeral=False)
         logger.info(f"/serverinfo が実行されました。 (Server: {guild.id}, User: {interaction.user.id})")
 
     @app_commands.command(name="userinfo",
@@ -394,7 +417,8 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
             if member.premium_since:
                 premium_text = discord.utils.format_dt(member.premium_since, style='R')
                 embed.add_field(name="サーバーブースト開始 / Server Boosting Since", value=premium_text, inline=True)
-        await interaction.response.send_message(embed=embed, ephemeral=False)
+        self._add_support_footer(embed)
+        await interaction.response.send_message(embed=embed, view=self._create_support_view(), ephemeral=False)
         logger.info(f"/userinfo が実行されました。 (TargetUser: {target_user.id}, Requester: {interaction.user.id})")
 
     @app_commands.command(name="avatar",
@@ -408,7 +432,8 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
                               color=target_user.accent_color or discord.Color.default())
         embed.set_image(url=avatar_url)
         embed.add_field(name="画像URL / Image URL", value=f"[リンク / Link]({avatar_url})")
-        await interaction.response.send_message(embed=embed, ephemeral=False)
+        self._add_support_footer(embed)
+        await interaction.response.send_message(embed=embed, view=self._create_support_view(), ephemeral=False)
         logger.info(f"/avatar が実行されました。 (TargetUser: {target_user.id}, Requester: {interaction.user.id})")
 
     @app_commands.command(name="arona",
@@ -450,21 +475,17 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
             color=discord.Color.blurple()
         )
 
-        # サポートサーバーのアイコンを設定（サーバーIDから取得を試みる）
-        # 注: サーバーアイコンを表示するには、Botがそのサーバーに参加している必要があります
-        support_server_id = 1176527382755864586  # 招待コードから推定されるサーバーID（実際のIDに置き換えてください）
+        support_server_id = 1176527382755864586
         support_guild = self.bot.get_guild(support_server_id)
         if support_guild and support_guild.icon:
             embed.set_thumbnail(url=support_guild.icon.url)
 
-        # サポートサーバー情報
         embed.add_field(
             name="🏠 公式サポートサーバー / Official Support Server",
             value=f"最も迅速なサポートを受けられます！\nGet the fastest support here!\n\n**サーバー参加は下のボタンから！**\n**Join the server using the button below!**",
             inline=False
         )
 
-        # その他の連絡方法
         embed.add_field(
             name="🐦 X (Twitter)",
             value=f"[**@coffin299**]({self.support_x_url})\nDMまたはメンションでお問い合わせください。\nContact via DM or mention.",
@@ -485,7 +506,6 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
 
         embed.set_footer(text="お気軽にお問い合わせください！ / Feel free to contact us!")
 
-        # ボタンを追加
         view = discord.ui.View()
         view.add_item(discord.ui.Button(
             label="サポートサーバーに参加 / Join Support Server",
@@ -580,7 +600,8 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
                             inline=False
                         )
 
-                    await interaction.followup.send(embed=embed)
+                    self._add_support_footer(embed)
+                    await interaction.followup.send(embed=embed, view=self._create_support_view())
                     logger.info(f"/updates が正常に実行されました。 (User: {interaction.user.id})")
 
                 else:
@@ -736,16 +757,21 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
         footer_ja = "<> は必須引数、[] は任意引数を表します。"
         footer_en = "<> denotes a required argument, [] denotes an optional argument."
         embed.set_footer(text=f"{footer_ja}\n{footer_en}")
+        self._add_support_footer(embed)
         view_items = []
         if self.bot_invite_url and self.bot_invite_url not in ["YOUR_BOT_INVITE_LINK_HERE", "HOGE_FUGA_PIYO"]:
             view_items.append(discord.ui.Button(label="Botを招待 / Invite Bot", style=discord.ButtonStyle.link,
                                                 url=self.bot_invite_url))
         if view_items:
             view = discord.ui.View()
-            for item in view_items: view.add_item(item)
+            for item in view_items:
+                view.add_item(item)
+            support_view = self._create_support_view()
+            for item in support_view.children:
+                view.add_item(item)
             await interaction.followup.send(embed=embed, view=view, ephemeral=False)
         else:
-            await interaction.followup.send(embed=embed, ephemeral=False)
+            await interaction.followup.send(embed=embed, view=self._create_support_view(), ephemeral=False)
         logger.info(f"/help が実行されました。 (User: {interaction.user.id})")
 
 
