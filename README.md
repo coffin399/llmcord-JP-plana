@@ -18,8 +18,7 @@
 [![Discord.py](https://img.shields.io/badge/discord.py-2.0+-blue.svg)](https://github.com/Rapptz/discord.py)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 ![](https://coffin399.github.io/coffin299page/assets/badge.svg)
-
-</div>
+[![Discord](https://img.shields.io/discord/1426762522974883953?logo=discord&logoColor=white&label=Discord&color=5865F2)](https://discord.gg/8zz6nAvC6Q)</div>
 
 ---
 ## 🚀 Quick Start
