@@ -442,22 +442,64 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
     @app_commands.command(name="support",
                           description="開発者へのお問い合わせ方法を表示します / Shows how to contact the developer")
     async def support_contact_slash(self, interaction: discord.Interaction) -> None:
-        embed = discord.Embed(title="💬 お問い合わせ / Contact Support",
-                              description="Botに関するご質問・ご要望・不具合報告などは、以下の方法でお気軽にお問い合わせください。\nFor questions, requests, or bug reports about the bot, please feel free to contact us using the methods below.",
-                              color=discord.Color.blue())
-        embed.add_field(name="🐦 X (Twitter)",
-                        value=f"DMまたはメンションでお問い合わせください。\nPlease contact via DM or mention.\n[**@coffin299**]({self.support_x_url})",
-                        inline=False)
-        embed.add_field(name="💬 Discord",
-                        value=f"DiscordのDMでお問い合わせください。\nPlease contact via Discord DM.\n**ユーザー名 / Username:** `{self.support_discord_id}`",
-                        inline=False)
-        embed.add_field(name="📝 ご連絡時のお願い / When Contacting",
-                        value="• Botを使用しているサーバー名をお知らせください。\n• 具体的な問題や要望をお書きください。\n• スクリーンショットがあれば添付してください。\n\n• Please mention the server name where you're using the bot.\n• Describe the specific issue or request.\n• Attach screenshots if available.",
-                        inline=False)
+        support_server_invite = "https://discord.gg/8zz6nAvC6Q"
+
+        embed = discord.Embed(
+            title="💬 サポート / Support",
+            description="Botに関するご質問・ご要望・不具合報告などは、公式サポートサーバーまたは以下の方法でお気軽にお問い合わせください。\n\nFor questions, requests, or bug reports about the bot, please join our official support server or contact us using the methods below.",
+            color=discord.Color.blurple()
+        )
+
+        # サポートサーバーのアイコンを設定（サーバーIDから取得を試みる）
+        # 注: サーバーアイコンを表示するには、Botがそのサーバーに参加している必要があります
+        support_server_id = 1176527382755864586  # 招待コードから推定されるサーバーID（実際のIDに置き換えてください）
+        support_guild = self.bot.get_guild(support_server_id)
+        if support_guild and support_guild.icon:
+            embed.set_thumbnail(url=support_guild.icon.url)
+
+        # サポートサーバー情報
+        embed.add_field(
+            name="🏠 公式サポートサーバー / Official Support Server",
+            value=f"最も迅速なサポートを受けられます！\nGet the fastest support here!\n\n**サーバー参加は下のボタンから！**\n**Join the server using the button below!**",
+            inline=False
+        )
+
+        # その他の連絡方法
+        embed.add_field(
+            name="🐦 X (Twitter)",
+            value=f"[**@coffin299**]({self.support_x_url})\nDMまたはメンションでお問い合わせください。\nContact via DM or mention.",
+            inline=True
+        )
+
+        embed.add_field(
+            name="💬 Discord DM",
+            value=f"**`{self.support_discord_id}`**\nDiscordのDMでお問い合わせください。\nContact via Discord DM.",
+            inline=True
+        )
+
+        embed.add_field(
+            name="📝 ご連絡時のお願い / When Contacting",
+            value="• Botを使用しているサーバー名\n• 具体的な問題や要望の内容\n• スクリーンショット（あれば）\n\n• Server name where you're using the bot\n• Specific issue or request details\n• Screenshots (if available)",
+            inline=False
+        )
+
         embed.set_footer(text="お気軽にお問い合わせください！ / Feel free to contact us!")
+
+        # ボタンを追加
         view = discord.ui.View()
-        view.add_item(discord.ui.Button(label="X (Twitter)で連絡 / Contact on X", style=discord.ButtonStyle.link,
-                                        url=self.support_x_url, emoji="🐦"))
+        view.add_item(discord.ui.Button(
+            label="サポートサーバーに参加 / Join Support Server",
+            style=discord.ButtonStyle.link,
+            url=support_server_invite,
+            emoji="🏠"
+        ))
+        view.add_item(discord.ui.Button(
+            label="X (Twitter)で連絡 / Contact on X",
+            style=discord.ButtonStyle.link,
+            url=self.support_x_url,
+            emoji="🐦"
+        ))
+
         await interaction.response.send_message(embed=embed, view=view, ephemeral=False)
         logger.info(f"/support が実行されました。 (User: {interaction.user.id})")
 
