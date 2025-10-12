@@ -1,11 +1,13 @@
 import discord
 from discord import app_commands
 from discord.ext import commands
+from discord.ui import Button, View
 import aiohttp
 from typing import Optional, Literal, List, Dict
 import urllib.parse
 from datetime import datetime
 import io
+import asyncio
 from PLANA.tracker.error.errors import (
     R6APIError,
     PlayerNotFoundError,
@@ -21,6 +23,72 @@ from PLANA.tracker.error.errors import (
 
 # Supported platforms
 PLATFORMS = Literal["uplay", "psn", "xbl"]
+
+
+class StatsPageView(View):
+    """View for paginating through stats embeds"""
+
+    def __init__(self, embeds: List[discord.Embed], author_id: int):
+        super().__init__(timeout=180)  # 3 minutes timeout
+        self.embeds = embeds
+        self.current_page = 0
+        self.author_id = author_id
+        self.message = None
+        self.update_buttons()
+
+    def update_buttons(self):
+        """Update button states based on current page"""
+        self.previous_button.disabled = self.current_page == 0
+        self.next_button.disabled = self.current_page == len(self.embeds) - 1
+
+        # Update page indicator
+        self.page_indicator.label = f"Page {self.current_page + 1}/{len(self.embeds)}"
+
+    async def update_message(self, interaction: discord.Interaction):
+        """Update the message with current page"""
+        self.update_buttons()
+        await interaction.response.edit_message(embed=self.embeds[self.current_page], view=self)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        """Only allow the command author to use buttons"""
+        if interaction.user.id != self.author_id:
+            await interaction.response.send_message(
+                "❌ You cannot control this menu. Use `/r6s-stats` to view your own stats.",
+                ephemeral=True
+            )
+            return False
+        return True
+
+    @discord.ui.button(label="◀️ Previous", style=discord.ButtonStyle.primary, custom_id="previous")
+    async def previous_button(self, interaction: discord.Interaction, button: Button):
+        """Go to previous page"""
+        self.current_page = max(0, self.current_page - 1)
+        await self.update_message(interaction)
+
+    @discord.ui.button(label="Page 1/3", style=discord.ButtonStyle.secondary, custom_id="page_indicator", disabled=True)
+    async def page_indicator(self, interaction: discord.Interaction, button: Button):
+        """Page indicator (disabled button)"""
+        pass
+
+    @discord.ui.button(label="Next ▶️", style=discord.ButtonStyle.primary, custom_id="next")
+    async def next_button(self, interaction: discord.Interaction, button: Button):
+        """Go to next page"""
+        self.current_page = min(len(self.embeds) - 1, self.current_page + 1)
+        await self.update_message(interaction)
+
+    @discord.ui.button(label="🗑️ Close", style=discord.ButtonStyle.danger, custom_id="close")
+    async def close_button(self, interaction: discord.Interaction, button: Button):
+        """Close the stats view"""
+        await interaction.response.edit_message(view=None)
+        self.stop()
+
+    async def on_timeout(self):
+        """Called when view times out"""
+        if self.message:
+            try:
+                await self.message.edit(view=None)
+            except:
+                pass
 
 
 class R6SiegeTrackerExtended(commands.Cog):
@@ -457,7 +525,7 @@ class R6SiegeTrackerExtended(commands.Cog):
             )
             embed1.add_field(name="🏆 Current Season (Ranked)", value=current_stats, inline=False)
 
-        embed1.set_footer(text="Page 1/3 • Powered by R6Data API")
+        embed1.set_footer(text="📄 Page 1 of 3 • Use buttons below to navigate")
         embeds.append(embed1)
 
         # === EMBED 2: MMR History & Season Progress ===
@@ -511,7 +579,7 @@ class R6SiegeTrackerExtended(commands.Cog):
                 inline=False
             )
 
-        embed2.set_footer(text="Page 2/3 • Showing up to 5 most recent seasons")
+        embed2.set_footer(text="📄 Page 2 of 3 • Use buttons below to navigate")
         embeds.append(embed2)
 
         # === EMBED 3: Detailed Game Mode Statistics ===
@@ -612,7 +680,7 @@ class R6SiegeTrackerExtended(commands.Cog):
             import traceback
             traceback.print_exc()
 
-        embed3.set_footer(text="Page 3/3 • Current Season Data")
+        embed3.set_footer(text="📄 Page 3 of 3 • Use buttons below to navigate")
         embeds.append(embed3)
 
         return embeds
@@ -638,7 +706,11 @@ class R6SiegeTrackerExtended(commands.Cog):
             stats_data = await self.fetch_player_stats(username, platform, platform_family)
 
             embeds = self.create_comprehensive_stats_embed(account_data, stats_data, username, platform)
-            await interaction.followup.send(embeds=embeds)
+
+            # Create view with pagination buttons
+            view = StatsPageView(embeds, interaction.user.id)
+            message = await interaction.followup.send(embed=embeds[0], view=view)
+            view.message = message
 
         except PlayerNotFoundError as e:
             await interaction.followup.send(f"❌ {str(e)}", ephemeral=True)
