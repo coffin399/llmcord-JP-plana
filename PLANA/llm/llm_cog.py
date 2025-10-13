@@ -485,19 +485,50 @@ class LLMCog(commands.Cog, name="LLM"):
         return history[-max_history_entries:] if len(history) > max_history_entries else history
 
     async def _process_image_url(self, url: str) -> Optional[Dict[str, Any]]:
+        """画像URLを処理してBase64エンコードされた画像データを返す（修正版）"""
         try:
-            async with self.http_session.get(url) as response:
+            async with self.http_session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as response:
                 if response.status == 200:
                     image_bytes = await response.read()
+
+                    # 画像サイズチェック（20MB制限）
+                    if len(image_bytes) > 20 * 1024 * 1024:
+                        logger.warning(f"Image too large ({len(image_bytes)} bytes): {url}")
+                        return None
+
                     encoded_image = base64.b64encode(image_bytes).decode('utf-8')
+
+                    # MIME typeの正確な判定
                     mime_type = response.content_type
                     if not mime_type or not mime_type.startswith('image/'):
+                        # Content-Typeが不正確な場合、拡張子から推測
                         ext = url.split('.')[-1].lower().split('?')[0]
-                        mime_type = f'image/{ext}' if ext in ('png', 'jpeg', 'gif', 'webp') else 'image/jpeg'
-                    return {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{encoded_image}"}}
+                        mime_mapping = {
+                            'png': 'image/png',
+                            'jpg': 'image/jpeg',
+                            'jpeg': 'image/jpeg',
+                            'gif': 'image/gif',
+                            'webp': 'image/webp'
+                        }
+                        mime_type = mime_mapping.get(ext, 'image/jpeg')
+
+                    logger.info(
+                        f"🖼️ [IMAGE] Successfully processed image: {url[:100]}... (MIME: {mime_type}, Size: {len(image_bytes)} bytes)")
+
+                    # OpenAI Vision API互換フォーマット
+                    return {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:{mime_type};base64,{encoded_image}",
+                            "detail": "auto"  # "low", "high", "auto" が選択可能
+                        }
+                    }
                 else:
                     logger.warning(f"Failed to download image from {url} (Status: {response.status})")
                     return None
+        except asyncio.TimeoutError:
+            logger.error(f"Timeout while downloading image: {url}")
+            return None
         except Exception as e:
             logger.error(f"Error processing image URL {url}: {e}", exc_info=True)
             return None
