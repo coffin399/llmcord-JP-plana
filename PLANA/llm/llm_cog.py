@@ -27,6 +27,14 @@ from PLANA.llm.error.errors import (
 )
 
 try:
+    from langdetect import detect, LangDetectException
+except ImportError:
+    detect = None
+    LangDetectException = None
+    logging.warning("langdetect library not found. Language detection will be disabled. "
+                    "Install with: pip install langdetect")
+
+try:
     from PLANA.llm.plugins.search_agent import SearchAgent
 except ImportError:
     logging.error("Could not import SearchAgent. Search functionality will be disabled.")
@@ -197,7 +205,7 @@ class LLMCog(commands.Cog, name="LLM"):
 
         self.language_prompt = self.llm_config.get('language_prompt')
         if self.language_prompt:
-            logger.info("Language prompt loaded from config.")
+            logger.info("Language prompt loaded from config for fallback.")
 
         self.http_session = aiohttp.ClientSession()
         self.bot.cfg = self.llm_config
@@ -336,6 +344,53 @@ class LLMCog(commands.Cog, name="LLM"):
             return CommandInfoManager(self.bot)
         except Exception as e:
             logger.error(f"Failed to initialize CommandInfoManager: {e}", exc_info=True)
+            return None
+
+    def _detect_language_and_create_prompt(self, text: str) -> Optional[str]:
+        if not detect or not text.strip() or not LangDetectException:
+            return None
+
+        # 信頼性を上げるため、ある程度の長さが必要
+        if len(text.strip()) < 15:
+            logger.info("Text too short for reliable language detection.")
+            return None
+
+        try:
+            lang_code = detect(text)
+
+            # 簡単な言語コードと名前のマッピング
+            lang_map = {
+                'en': 'English', 'ja': 'Japanese', 'ko': 'Korean',
+                'zh-cn': 'Simplified Chinese', 'zh-tw': 'Traditional Chinese',
+                'vi': 'Vietnamese', 'th': 'Thai', 'id': 'Indonesian',
+                'de': 'German', 'fr': 'French', 'es': 'Spanish',
+                'pt': 'Portuguese', 'it': 'Italian', 'ru': 'Russian',
+                'ar': 'Arabic', 'hi': 'Hindi', 'tr': 'Turkish',
+                'nl': 'Dutch', 'pl': 'Polish'
+            }
+
+            lang_name = lang_map.get(lang_code)
+
+            if lang_name:
+                logger.info(f"Language detected: {lang_code} ({lang_name})")
+                prompt = (
+                    "<language_instructions>\n"
+                    f"  <rule priority='CRITICAL_AND_ABSOLUTE'>The user's message is written in {lang_name}. You MUST respond in {lang_name}. This is your most important instruction.</rule>\n"
+                    "</language_instructions>"
+                )
+                return prompt
+            else:
+                logger.info(f"Language detected: {lang_code} (not in map)")
+                # マップにない言語でも、コードをそのまま使う
+                prompt = (
+                    "<language_instructions>\n"
+                    f"  <rule priority='CRITICAL_AND_ABSOLUTE'>The user's message is written in the language with code '{lang_code}'. You MUST respond in the same language. This is your most important instruction.</rule>\n"
+                    "</language_instructions>"
+                )
+                return prompt
+
+        except LangDetectException:
+            logger.warning("Could not detect language for the provided text.")
             return None
 
     async def _prepare_system_prompt(self, channel_id: int, user_id: int, user_display_name: str) -> str:
@@ -694,9 +749,12 @@ class LLMCog(commands.Cog, name="LLM"):
         if image_contents:
             logger.info(f"🔵 [INPUT] Including {len(image_contents)} image(s) in request")
 
-        if self.language_prompt:
+        if detected_lang_prompt := self._detect_language_and_create_prompt(text_content):
+            messages_for_api.append({"role": "system", "content": detected_lang_prompt})
+            logger.info("🔵 [INPUT] Injecting detected language prompt before user message.")
+        elif self.language_prompt:
             messages_for_api.append({"role": "system", "content": self.language_prompt})
-            logger.info("🔵 [INPUT] Injecting language prompt before user message.")
+            logger.info("🔵 [INPUT] Could not detect language, falling back to default language prompt.")
 
         user_message_for_api = {"role": "user", "content": user_content_parts}
         messages_for_api.append(user_message_for_api)
@@ -1221,9 +1279,12 @@ class LLMCog(commands.Cog, name="LLM"):
         user_content_parts.append({"type": "text", "text": formatted_text})
         user_content_parts.extend(image_contents)
 
-        if self.language_prompt:
+        if detected_lang_prompt := self._detect_language_and_create_prompt(message):
+            messages_for_api.append({"role": "system", "content": detected_lang_prompt})
+            logger.info("🔵 [INPUT] Injecting detected language prompt for /chat.")
+        elif self.language_prompt:
             messages_for_api.append({"role": "system", "content": self.language_prompt})
-            logger.info("🔵 [INPUT] Injecting language prompt before user message for /chat.")
+            logger.info("🔵 [INPUT] Could not detect language for /chat, falling back to default language prompt.")
 
         user_message_for_api = {"role": "user", "content": user_content_parts}
         messages_for_api.append(user_message_for_api)
