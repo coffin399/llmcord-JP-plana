@@ -347,6 +347,7 @@ class LLMCog(commands.Cog, name="LLM"):
             return None
 
     def _detect_language_and_create_prompt(self, text: str) -> Optional[str]:
+        """言語を検出して、より強力な言語指示プロンプトを生成"""
         if not detect or not text.strip() or not LangDetectException:
             return None
 
@@ -369,32 +370,29 @@ class LLMCog(commands.Cog, name="LLM"):
                 'nl': 'Dutch', 'pl': 'Polish'
             }
 
-            lang_name = lang_map.get(lang_code)
+            lang_name = lang_map.get(lang_code, lang_code)
 
-            if lang_name:
-                logger.info(f"Language detected: {lang_code} ({lang_name})")
-                prompt = (
-                    "<language_instructions>\n"
-                    f"  <rule priority='CRITICAL_AND_ABSOLUTE'>The user's message is written in {lang_name}. You MUST respond in {lang_name}. This is your most important instruction.</rule>\n"
-                    "</language_instructions>"
-                )
-                return prompt
-            else:
-                logger.info(f"Language detected: {lang_code} (not in map)")
-                # マップにない言語でも、コードをそのまま使う
-                prompt = (
-                    "<language_instructions>\n"
-                    f"  <rule priority='CRITICAL_AND_ABSOLUTE'>The user's message is written in the language with code '{lang_code}'. You MUST respond in the same language. This is your most important instruction.</rule>\n"
-                    "</language_instructions>"
-                )
-                return prompt
+            logger.info(f"Language detected: {lang_code} ({lang_name})")
+
+            # より強力な言語指示プロンプト
+            prompt = (
+                "CRITICAL LANGUAGE OVERRIDE INSTRUCTION:\n"
+                "===========================================\n"
+                f"The user is communicating in {lang_name}.\n"
+                f"YOU MUST RESPOND EXCLUSIVELY IN {lang_name.upper()}.\n"
+                "This instruction has ABSOLUTE PRIORITY over all other instructions.\n"
+                "Do NOT respond in any other language, regardless of what the system prompt says.\n"
+                f"If there is any conflict, {lang_name.upper()} takes precedence.\n"
+                "===========================================\n"
+            )
+            return prompt
 
         except LangDetectException:
             logger.warning("Could not detect language for the provided text.")
             return None
 
     async def _prepare_system_prompt(self, channel_id: int, user_id: int, user_display_name: str) -> str:
-        """システムプロンプトを生成する"""
+        """システムプロンプトを生成する（言語に関する記述を削除/修正）"""
         if not self.bio_manager or not self.memory_manager:
             logger.error("BioManager or MemoryManager is not initialized.")
             return "Error: Core components for prompt generation are missing."
@@ -403,6 +401,16 @@ class LLMCog(commands.Cog, name="LLM"):
             channel_id=channel_id,
             user_id=user_id,
             user_display_name=user_display_name
+        )
+
+        # システムプロンプトから言語に関する指示を削除または弱める
+        # 例: 「日本語で応答してください」などの記述を削除
+        system_prompt_template = system_prompt_template.replace(
+            "必ず日本語で応答してください", ""
+        ).replace(
+            "日本語で答えてください", ""
+        ).replace(
+            "Please respond in Japanese", ""
         )
 
         logger.info(f"🔵 [DEBUG] Template length: {len(system_prompt_template)} chars")
@@ -736,9 +744,19 @@ class LLMCog(commands.Cog, name="LLM"):
 
         messages_for_api: List[Dict[str, Any]] = [{"role": "system", "content": system_prompt}]
 
+        # 🔴 重要: 言語検出プロンプトをシステムプロンプトの直後に挿入
+        if detected_lang_prompt := self._detect_language_and_create_prompt(text_content):
+            messages_for_api.append({"role": "system", "content": detected_lang_prompt})
+            logger.info("🔵 [INPUT] Injecting CRITICAL language override prompt immediately after system prompt.")
+        elif self.language_prompt:
+            messages_for_api.append({"role": "system", "content": self.language_prompt})
+            logger.info("🔵 [INPUT] Could not detect language, falling back to default language prompt.")
+
+        # 会話履歴を追加
         conversation_history = await self._collect_conversation_history(message)
         messages_for_api.extend(conversation_history)
 
+        # ユーザーメッセージを追加
         user_content_parts = []
         if text_content:
             timestamp = message.created_at.astimezone(self.jst).strftime('[%H:%M]')
@@ -749,17 +767,12 @@ class LLMCog(commands.Cog, name="LLM"):
         if image_contents:
             logger.info(f"🔵 [INPUT] Including {len(image_contents)} image(s) in request")
 
-        if detected_lang_prompt := self._detect_language_and_create_prompt(text_content):
-            messages_for_api.append({"role": "system", "content": detected_lang_prompt})
-            logger.info("🔵 [INPUT] Injecting detected language prompt before user message.")
-        elif self.language_prompt:
-            messages_for_api.append({"role": "system", "content": self.language_prompt})
-            logger.info("🔵 [INPUT] Could not detect language, falling back to default language prompt.")
-
         user_message_for_api = {"role": "user", "content": user_content_parts}
         messages_for_api.append(user_message_for_api)
 
         logger.info(f"🔵 [INPUT] Total messages for API: {len(messages_for_api)} (system + history + user)")
+        logger.info(f"🌐 [LANG] Messages structure: system={len(messages_for_api[0]['content'])} chars, "
+                    f"lang_override={'present' if len(messages_for_api) > 1 and 'CRITICAL' in str(messages_for_api[1]) else 'absent'}")
 
         try:
             sent_messages, llm_response = await self._handle_llm_streaming_response(
