@@ -194,6 +194,11 @@ class LLMCog(commands.Cog, name="LLM"):
         self.llm_config = self.config.get('llm')
         if not isinstance(self.llm_config, dict):
             raise commands.ExtensionFailed(self.qualified_name, "The 'llm' section in config is missing or invalid.")
+
+        self.language_prompt = self.llm_config.get('language_prompt')
+        if self.language_prompt:
+            logger.info("Language prompt loaded from config.")
+
         self.http_session = aiohttp.ClientSession()
         self.bot.cfg = self.llm_config
         self.conversation_threads: Dict[int, List[Dict[str, Any]]] = {}
@@ -396,6 +401,12 @@ class LLMCog(commands.Cog, name="LLM"):
         if formatted_memories := self.memory_manager.get_formatted_memories():
             system_prompt += f"\n\n{formatted_memories}"
 
+        logger.info(f"🔵 [INPUT] System prompt before language instruction: {len(system_prompt)} characters")
+
+        if self.language_prompt:
+            system_prompt += f"\n\n{self.language_prompt}"
+            logger.info("🔵 [INPUT] Appended language prompt to system prompt.")
+
         logger.info(f"🔵 [INPUT] Final system prompt: {len(system_prompt)} characters")
         return system_prompt
 
@@ -591,16 +602,14 @@ class LLMCog(commands.Cog, name="LLM"):
             if not llm_client:
                 error_msg = self.llm_config.get('error_msg', {}).get('general_error',
                                                                      "LLM client is not available for this channel.\nこのチャンネルではLLMクライアントが利用できません。")
-                embed = discord.Embed(title="❌ Error / エラー", description=error_msg, color=discord.Color.red())
-                self._add_support_footer(embed)
-                await message.reply(embed=embed, view=self._create_support_view(), silent=True)
+                final_error_msg = f"❌ **Error / エラー** ❌\n\n{error_msg}"
+                await message.reply(content=final_error_msg, view=self._create_support_view(), silent=True)
                 return
         except Exception as e:
             logger.error(f"Failed to get LLM client for channel {message.channel.id}: {e}", exc_info=True)
             error_msg = self.exception_handler.handle_exception(e)
-            embed = discord.Embed(title="❌ Error / エラー", description=error_msg, color=discord.Color.red())
-            self._add_support_footer(embed)
-            await message.reply(embed=embed, view=self._create_support_view(), silent=True)
+            final_error_msg = f"❌ **Error / エラー** ❌\n\n{error_msg}"
+            await message.reply(content=final_error_msg, view=self._create_support_view(), silent=True)
             return
 
         original_content = message.content.replace(f'<@!{self.bot.user.id}>', '').replace(f'<@{self.bot.user.id}>',
@@ -614,9 +623,7 @@ class LLMCog(commands.Cog, name="LLM"):
             error_key = 'empty_reply' if is_reply_to_bot and not is_mentioned else 'empty_mention_reply'
             default_msg = "Please say something.\n何かお話しください。" if error_key == 'empty_reply' else "Yes, how can I help you?\nはい、何か御用でしょうか?"
             error_msg = self.llm_config.get('error_msg', {}).get(error_key, default_msg)
-            embed = discord.Embed(description=error_msg, color=discord.Color.gold())
-            self._add_support_footer(embed)
-            await message.reply(embed=embed, view=self._create_support_view(), silent=True)
+            await message.reply(content=error_msg, view=self._create_support_view(), silent=True)
             return
 
         guild_log = f"guild='{message.guild.name}({message.guild.id})'" if message.guild else "guild='DM'"
@@ -635,9 +642,8 @@ class LLMCog(commands.Cog, name="LLM"):
 
         if not self.bio_manager or not self.memory_manager:
             error_msg = "Cannot respond because required plugins are not initialized.\n必要なプラグインが初期化されていないため、応答できません。"
-            embed = discord.Embed(title="❌ Error / エラー", description=error_msg, color=discord.Color.red())
-            self._add_support_footer(embed)
-            await message.reply(embed=embed, view=self._create_support_view(), silent=True)
+            final_error_msg = f"❌ **Error / エラー** ❌\n\n{error_msg}"
+            await message.reply(content=final_error_msg, view=self._create_support_view(), silent=True)
             return
 
         system_prompt = await self._prepare_system_prompt(
@@ -693,9 +699,8 @@ class LLMCog(commands.Cog, name="LLM"):
 
         except Exception as e:
             error_msg = self.exception_handler.handle_exception(e)
-            embed = discord.Embed(title="❌ Error / エラー", description=error_msg, color=discord.Color.red())
-            self._add_support_footer(embed)
-            await message.reply(embed=embed, view=self._create_support_view(), silent=True)
+            final_error_msg = f"❌ **Error / エラー** ❌\n\n{error_msg}"
+            await message.reply(content=final_error_msg, view=self._create_support_view(), silent=True)
 
     def _cleanup_old_threads(self):
         max_threads = 100
@@ -813,9 +818,8 @@ class LLMCog(commands.Cog, name="LLM"):
                     for attempt in range(max_final_retries):
                         try:
                             if full_response_text != sent_message.content:
-                                embed = discord.Embed(description=full_response_text, color=discord.Color.purple())
-                                self._add_support_footer(embed)
-                                await sent_message.edit(content=None, embed=embed, view=self._create_support_view())
+                                await sent_message.edit(content=full_response_text, embed=None,
+                                                        view=self._create_support_view())
                                 logger.info(f"🟢 [STREAMING] Final message updated successfully (attempt {attempt + 1})")
                             break
                         except discord.NotFound:
@@ -860,9 +864,7 @@ class LLMCog(commands.Cog, name="LLM"):
                     first_chunk = chunks[0]
                     for attempt in range(max_final_retries):
                         try:
-                            embed = discord.Embed(description=first_chunk, color=discord.Color.purple())
-                            self._add_support_footer(embed)
-                            await sent_message.edit(content=None, embed=embed, view=self._create_support_view())
+                            await sent_message.edit(content=first_chunk, embed=None, view=self._create_support_view())
                             all_messages.append(sent_message)
                             logger.info(f"📄 [SPLIT] Updated first message (1/{len(chunks)})")
                             break
@@ -903,23 +905,21 @@ class LLMCog(commands.Cog, name="LLM"):
                     'general_error', "There was no response from the AI.\nAIから応答がありませんでした。"
                 )
                 logger.warning(f"⚠️ Empty response from LLM")
-                embed = discord.Embed(title="❌ Error / エラー", description=error_msg, color=discord.Color.red())
-                self._add_support_footer(embed)
-                await sent_message.edit(content=None, embed=embed, view=self._create_support_view())
+                final_error_msg = f"❌ **Error / エラー** ❌\n\n{error_msg}"
+                await sent_message.edit(content=final_error_msg, embed=None, view=self._create_support_view())
                 return None, ""
 
         except Exception as e:
             logger.error(f"❌ Error during LLM streaming response: {e}", exc_info=True)
             error_msg = self.exception_handler.handle_exception(e)
-            embed = discord.Embed(title="❌ Error / エラー", description=error_msg, color=discord.Color.red())
-            self._add_support_footer(embed)
+            final_error_msg = f"❌ **Error / エラー** ❌\n\n{error_msg}"
             if sent_message:
                 try:
-                    await sent_message.edit(content=None, embed=embed, view=self._create_support_view())
+                    await sent_message.edit(content=final_error_msg, embed=None, view=self._create_support_view())
                 except discord.HTTPException:
                     pass
             else:
-                await message.reply(embed=embed, view=self._create_support_view(), silent=True)
+                await message.reply(content=final_error_msg, view=self._create_support_view(), silent=True)
             return None, ""
 
     async def _llm_stream_and_tool_handler(
@@ -1135,26 +1135,20 @@ class LLMCog(commands.Cog, name="LLM"):
             if not llm_client:
                 error_msg = self.llm_config.get('error_msg', {}).get('general_error',
                                                                      "LLM client is not available for this channel.\nこのチャンネルではLLMクライアントが利用できません。")
-                embed = discord.Embed(title="❌ Error / エラー", description=error_msg, color=discord.Color.red())
-                self._add_support_footer(embed)
-                await interaction.followup.send(embed=embed, view=self._create_support_view(), ephemeral=False)
+                final_error_msg = f"❌ **Error / エラー** ❌\n\n{error_msg}"
+                await interaction.followup.send(content=final_error_msg, view=self._create_support_view(),
+                                                ephemeral=False)
                 return
         except Exception as e:
             logger.error(f"Failed to get LLM client for channel {interaction.channel_id}: {e}", exc_info=True)
             error_msg = self.exception_handler.handle_exception(e)
-            embed = discord.Embed(title="❌ Error / エラー", description=error_msg, color=discord.Color.red())
-            self._add_support_footer(embed)
-            await interaction.followup.send(embed=embed, view=self._create_support_view(), ephemeral=False)
+            final_error_msg = f"❌ **Error / エラー** ❌\n\n{error_msg}"
+            await interaction.followup.send(content=final_error_msg, view=self._create_support_view(), ephemeral=False)
             return
 
         if not message.strip():
-            embed = discord.Embed(
-                title="⚠️ Input Required / 入力が必要です",
-                description="Please enter a message.\nメッセージを入力してください。",
-                color=discord.Color.gold()
-            )
-            self._add_support_footer(embed)
-            await interaction.followup.send(embed=embed, view=self._create_support_view(), ephemeral=False)
+            error_msg = "⚠️ **Input Required / 入力が必要です** ⚠️\n\nPlease enter a message.\nメッセージを入力してください。"
+            await interaction.followup.send(content=error_msg, view=self._create_support_view(), ephemeral=False)
             return
 
         guild_log = f"guild='{interaction.guild.name}({interaction.guild.id})'" if interaction.guild else "guild='DM'"
@@ -1173,23 +1167,14 @@ class LLMCog(commands.Cog, name="LLM"):
                 image_contents.append(image_data)
                 logger.info(f"🔵 [INPUT] Including 1 image from URL in /chat request")
             else:
-                embed = discord.Embed(
-                    title="⚠️ Image Error / 画像エラー",
-                    description="Failed to process the specified image URL.\n指定された画像URLの処理に失敗しました。",
-                    color=discord.Color.gold()
-                )
-                self._add_support_footer(embed)
-                await interaction.followup.send(embed=embed, view=self._create_support_view(), ephemeral=False)
+                error_msg = "⚠️ **Image Error / 画像エラー** ⚠️\n\nFailed to process the specified image URL.\n指定された画像URLの処理に失敗しました。"
+                await interaction.followup.send(content=error_msg, view=self._create_support_view(), ephemeral=False)
                 return
 
         if not self.bio_manager or not self.memory_manager:
-            embed = discord.Embed(
-                title="❌ Plugin Error / プラグインエラー",
-                description="Cannot respond because required plugins are not initialized.\n必要なプラグインが初期化されていないため、応答できません。",
-                color=discord.Color.red()
-            )
-            self._add_support_footer(embed)
-            await interaction.followup.send(embed=embed, view=self._create_support_view(), ephemeral=False)
+            error_msg = "Cannot respond because required plugins are not initialized.\n必要なプラグインが初期化されていないため、応答できません。"
+            final_error_msg = f"❌ **Plugin Error / プラグインエラー** ❌\n\n{error_msg}"
+            await interaction.followup.send(content=final_error_msg, view=self._create_support_view(), ephemeral=False)
             return
 
         system_prompt = await self._prepare_system_prompt(
@@ -1299,9 +1284,8 @@ class LLMCog(commands.Cog, name="LLM"):
                     for attempt in range(max_final_retries):
                         try:
                             if full_response_text != temp_message.content:
-                                embed = discord.Embed(description=full_response_text, color=discord.Color.purple())
-                                self._add_support_footer(embed)
-                                await temp_message.edit(content=None, embed=embed, view=self._create_support_view())
+                                await temp_message.edit(content=full_response_text, embed=None,
+                                                        view=self._create_support_view())
                                 logger.info(
                                     f"🟢 [OUTPUT] LLM final response for /chat (length: {len(full_response_text)} chars):\n{full_response_text}")
                                 logger.info(f"✅ /chat LLM stream finished | {log_context} | model='{model_in_use}'")
@@ -1324,9 +1308,7 @@ class LLMCog(commands.Cog, name="LLM"):
                     # 最初のメッセージを更新
                     for attempt in range(max_final_retries):
                         try:
-                            embed = discord.Embed(description=chunks[0], color=discord.Color.purple())
-                            self._add_support_footer(embed)
-                            await temp_message.edit(content=None, embed=embed, view=self._create_support_view())
+                            await temp_message.edit(content=chunks[0], embed=None, view=self._create_support_view())
                             logger.info(f"📄 [SPLIT] Updated first message (1/{len(chunks)})")
                             break
                         except discord.HTTPException as e:
@@ -1364,17 +1346,20 @@ class LLMCog(commands.Cog, name="LLM"):
                 error_msg = self.llm_config.get('error_msg', {}).get('general_error',
                                                                      "There was no response from the AI.\nAIから応答がありませんでした。")
                 logger.warning(f"⚠️ Empty response from LLM for /chat")
-                embed = discord.Embed(title="❌ Error / エラー", description=error_msg, color=discord.Color.red())
-                self._add_support_footer(embed)
-                await temp_message.edit(content=None, embed=embed, view=self._create_support_view())
+                final_error_msg = f"❌ **Error / エラー** ❌\n\n{error_msg}"
+                await temp_message.edit(content=final_error_msg, embed=None, view=self._create_support_view())
 
         except Exception as e:
             logger.error(f"❌ Error during /chat LLM streaming response: {e}", exc_info=True)
             error_msg = self.exception_handler.handle_exception(e)
-            embed = discord.Embed(title="❌ Error / エラー", description=error_msg, color=discord.Color.red())
-            self._add_support_footer(embed)
+            final_error_msg = f"❌ **Error / エラー** ❌\n\n{error_msg}"
             try:
-                await interaction.followup.send(embed=embed, view=self._create_support_view(), ephemeral=False)
+                # If temp_message exists, edit it. Otherwise, send a new followup.
+                if 'temp_message' in locals() and temp_message:
+                    await temp_message.edit(content=final_error_msg, embed=None, view=self._create_support_view())
+                else:
+                    await interaction.followup.send(content=final_error_msg, view=self._create_support_view(),
+                                                    ephemeral=False)
             except discord.HTTPException:
                 pass
 
