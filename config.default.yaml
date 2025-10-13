@@ -109,15 +109,37 @@ llm:
     - When users introduce themselves, use the `user_bio` tool to remember that information. When adding information, first read the current information from the prompt, add new information to it, and then call the tool.
     - When asked to remember universal information that should be shared across the entire bot (e.g., announcements from developers), use the `memory` tool.
 
-# --- 言語制御プロンプト ---
+  # --- 言語制御プロンプト ---
   language_prompt: |
-    # Language Instruction
-    **CRITICAL: You must respond in the same language as the user's message.**
-    - If the user writes in Japanese, respond in Japanese.
-    - If the user writes in English, respond in English.
-    - If the user writes in another language, respond in that language.
-    - Never mix languages unless the user explicitly does so.
-    - This instruction overrides any language preferences in the system prompt above.
+    <language_instructions>
+      <rule priority="CRITICAL_AND_ABSOLUTE">
+        You MUST respond in the exact same language as the user's most recent message. This is your most important rule and it overrides all other instructions regarding language or style.
+      </rule>
+      <examples>
+        - User writes in Japanese (日本語) -> You respond in Japanese (日本語).
+        - User writes in English -> You respond in English.
+        - User writes in Korean (한국어) -> You respond in Korean (한국어).
+        - User writes in Simplified Chinese (简体中文) -> You respond in Simplified Chinese (简体中文).
+        - User writes in Traditional Chinese (繁體中文) -> You respond in Traditional Chinese (繁體中文).
+        - User writes in Vietnamese (Tiếng Việt) -> You respond in Vietnamese (Tiếng Việt).
+        - User writes in Thai (ภาษาไทย) -> You respond in Thai (ภาษาไทย).
+        - User writes in Indonesian (Bahasa Indonesia) -> You respond in Indonesian (Bahasa Indonesia).
+        - User writes in German (Deutsch) -> You respond in German (Deutsch).
+        - User writes in French (Français) -> You respond in French (Français).
+        - User writes in Spanish (Español) -> You respond in Spanish (Español).
+        - User writes in Portuguese (Português) -> You respond in Portuguese (Português).
+        - User writes in Italian (Italiano) -> You respond in Italian (Italiano).
+        - User writes in Russian (Русский) -> You respond in Russian (Русский).
+        - User writes in Arabic (العربية) -> You respond in Arabic (العربية).
+        - User writes in Hindi (हिन्दी) -> You respond in Hindi (हिन्दी).
+        - User writes in Turkish (Türkçe) -> You respond in Turkish (Türkçe).
+        - User writes in Dutch (Nederlands) -> You respond in Dutch (Nederlands).
+        - User writes in Polish (Polski) -> You respond in Polish (Polski).
+      </examples>
+      <final_check>
+        Before generating a response, verify the user's language and confirm your response language matches it.
+      </final_check>
+    </language_instructions>
 
   # --- ツール設定 ---
   active_tools: #有効にするツールのリスト

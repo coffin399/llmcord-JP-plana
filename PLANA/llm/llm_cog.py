@@ -401,12 +401,6 @@ class LLMCog(commands.Cog, name="LLM"):
         if formatted_memories := self.memory_manager.get_formatted_memories():
             system_prompt += f"\n\n{formatted_memories}"
 
-        logger.info(f"🔵 [INPUT] System prompt before language instruction: {len(system_prompt)} characters")
-
-        if self.language_prompt:
-            system_prompt += f"\n\n{self.language_prompt}"
-            logger.info("🔵 [INPUT] Appended language prompt to system prompt.")
-
         logger.info(f"🔵 [INPUT] Final system prompt: {len(system_prompt)} characters")
         return system_prompt
 
@@ -699,6 +693,10 @@ class LLMCog(commands.Cog, name="LLM"):
         user_content_parts.extend(image_contents)
         if image_contents:
             logger.info(f"🔵 [INPUT] Including {len(image_contents)} image(s) in request")
+
+        if self.language_prompt:
+            messages_for_api.append({"role": "system", "content": self.language_prompt})
+            logger.info("🔵 [INPUT] Injecting language prompt before user message.")
 
         user_message_for_api = {"role": "user", "content": user_content_parts}
         messages_for_api.append(user_message_for_api)
@@ -1222,6 +1220,10 @@ class LLMCog(commands.Cog, name="LLM"):
         formatted_text = f"{timestamp} {message}"
         user_content_parts.append({"type": "text", "text": formatted_text})
         user_content_parts.extend(image_contents)
+
+        if self.language_prompt:
+            messages_for_api.append({"role": "system", "content": self.language_prompt})
+            logger.info("🔵 [INPUT] Injecting language prompt before user message for /chat.")
 
         user_message_for_api = {"role": "user", "content": user_content_parts}
         messages_for_api.append(user_message_for_api)
