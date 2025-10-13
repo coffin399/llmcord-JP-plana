@@ -849,8 +849,7 @@ class LLMCog(commands.Cog, name="LLM"):
                     for attempt in range(max_final_retries):
                         try:
                             if full_response_text != sent_message.content:
-                                await sent_message.edit(content=full_response_text, embed=None,
-                                                        view=self._create_support_view())
+                                await sent_message.edit(content=full_response_text, embed=None, view=None)
                                 logger.info(f"🟢 [STREAMING] Final message updated successfully (attempt {attempt + 1})")
                             break
                         except discord.NotFound:
@@ -895,7 +894,7 @@ class LLMCog(commands.Cog, name="LLM"):
                     first_chunk = chunks[0]
                     for attempt in range(max_final_retries):
                         try:
-                            await sent_message.edit(content=first_chunk, embed=None, view=self._create_support_view())
+                            await sent_message.edit(content=first_chunk, embed=None, view=None)
                             all_messages.append(sent_message)
                             logger.info(f"📄 [SPLIT] Updated first message (1/{len(chunks)})")
                             break
@@ -1315,8 +1314,7 @@ class LLMCog(commands.Cog, name="LLM"):
                     for attempt in range(max_final_retries):
                         try:
                             if full_response_text != temp_message.content:
-                                await temp_message.edit(content=full_response_text, embed=None,
-                                                        view=self._create_support_view())
+                                await temp_message.edit(content=full_response_text, embed=None, view=None)
                                 logger.info(
                                     f"🟢 [OUTPUT] LLM final response for /chat (length: {len(full_response_text)} chars):\n{full_response_text}")
                                 logger.info(f"✅ /chat LLM stream finished | {log_context} | model='{model_in_use}'")
@@ -1339,7 +1337,7 @@ class LLMCog(commands.Cog, name="LLM"):
                     # 最初のメッセージを更新
                     for attempt in range(max_final_retries):
                         try:
-                            await temp_message.edit(content=chunks[0], embed=None, view=self._create_support_view())
+                            await temp_message.edit(content=chunks[0], embed=None, view=None)
                             logger.info(f"📄 [SPLIT] Updated first message (1/{len(chunks)})")
                             break
                         except discord.HTTPException as e:
