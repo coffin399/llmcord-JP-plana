@@ -96,7 +96,7 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
         view.add_item(discord.ui.Button(
             label="サポートサーバー / Support Server",
             style=discord.ButtonStyle.link,
-            url="https://discord.gg/8zz6nAvC6Q",
+            url="https://discord.gg/rc2kXs6Jk4",
             emoji="💬"
         ))
         return view
@@ -467,7 +467,7 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
     @app_commands.command(name="support",
                           description="開発者へのお問い合わせ方法を表示します / Shows how to contact the developer")
     async def support_contact_slash(self, interaction: discord.Interaction) -> None:
-        support_server_invite = "https://discord.gg/8zz6nAvC6Q"
+        support_server_invite = "https://discord.gg/rc2kXs6Jk4"
 
         embed = discord.Embed(
             title="💬 サポート / Support",
