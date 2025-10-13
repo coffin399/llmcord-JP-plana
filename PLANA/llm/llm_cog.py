@@ -181,7 +181,7 @@ class LLMCog(commands.Cog, name="LLM"):
         view.add_item(discord.ui.Button(
             label="サポートサーバー / Support Server",
             style=discord.ButtonStyle.link,
-            url="https://discord.gg/YyjyfXunaD",
+            url="https://discord.gg/H79HKKqx3s",
             emoji="💬"
         ))
         return view
