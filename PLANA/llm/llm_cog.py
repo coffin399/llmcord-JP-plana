@@ -2028,13 +2028,43 @@ class LLMCog(commands.Cog, name="LLM"):
             interaction: discord.Interaction,
             current: str
     ) -> List[app_commands.Choice[str]]:
-        """画像生成モデルのオートコンプリート"""
+        """画像生成モデルのオートコンプリート - プロバイダー名も検索対象"""
         if not self.image_generator:
             return []
+
         available_models = self.image_generator.get_available_models()
+
+        # 検索文字列を小文字化
+        current_lower = current.lower()
+
+        # フィルタリング: モデル名全体 or プロバイダー名が一致
+        filtered = [
+            model for model in available_models
+            if current_lower in model.lower()
+        ]
+
+        # 結果が多い場合は、プロバイダーごとにグループ化して表示
+        if len(filtered) > 25:
+            # プロバイダーで絞り込む
+            models_by_provider = self.image_generator.get_models_by_provider()
+            choices = []
+
+            for provider, models in sorted(models_by_provider.items()):
+                if current_lower in provider.lower():
+                    # プロバイダー名が一致する場合は、そのプロバイダーのモデルを優先
+                    for model in models[:5]:  # 各プロバイダー最大5個
+                        if len(choices) >= 25:
+                            break
+                        choices.append(app_commands.Choice(name=model, value=model))
+                    if len(choices) >= 25:
+                        break
+
+            return choices[:25]
+
+        # 通常のフィルタリング結果を返す
         return [
             app_commands.Choice(name=model, value=model)
-            for model in available_models if current.lower() in model.lower()
+            for model in filtered
         ][:25]
 
     @app_commands.command(
@@ -2062,7 +2092,7 @@ class LLMCog(commands.Cog, name="LLM"):
         if model not in available_models:
             embed = discord.Embed(
                 title="⚠️ Invalid Model / 無効なモデル",
-                description=f"The specified model '{model}' is not available.\n指定されたモデル '{model}' は利用できません。",
+                description=f"The specified model `{model}` is not available.\n指定されたモデル `{model}` は利用できません。",
                 color=discord.Color.gold()
             )
             self._add_support_footer(embed)
@@ -2074,28 +2104,46 @@ class LLMCog(commands.Cog, name="LLM"):
 
             default_model = self.image_generator.default_model
 
+            # モデル情報を解析
+            try:
+                provider, model_name = model.split('/', 1)
+            except ValueError:
+                provider, model_name = "unknown", model
+
             if model != default_model:
                 embed = discord.Embed(
                     title="✅ Image Model Switched / 画像生成モデルを切り替えました",
                     description=(
-                        f"The image generation model for this channel has been switched to `{model}`.\n"
-                        f"このチャンネルの画像生成モデルが `{model}` に切り替えられました。\n\n"
-                        f"💡 To reset to default (`{default_model}`), use `/reset-image-model`\n"
-                        f"💡 デフォルト (`{default_model}`) に戻すには `/reset-image-model` を使用してください"
+                        f"The image generation model for this channel has been switched.\n"
+                        f"このチャンネルの画像生成モデルを切り替えました。"
                     ),
                     color=discord.Color.green()
+                )
+                embed.add_field(
+                    name="New Model / 新しいモデル",
+                    value=f"```\n{model}\n```",
+                    inline=False
+                )
+                embed.add_field(name="Provider / プロバイダー", value=f"`{provider}`", inline=True)
+                embed.add_field(name="Model Name / モデル名", value=f"`{model_name}`", inline=True)
+                embed.add_field(
+                    name="💡 Tip / ヒント",
+                    value=f"To reset to default (`{default_model}`), use `/reset-image-model`\nデフォルト (`{default_model}`) に戻すには `/reset-image-model`",
+                    inline=False
                 )
             else:
                 embed = discord.Embed(
                     title="✅ Image Model Set to Default / 画像生成モデルをデフォルトに設定しました",
-                    description=f"The image generation model for this channel is now `{model}` (default).\nこのチャンネルの画像生成モデルが `{model}` (デフォルト) になりました。",
+                    description=f"The image generation model for this channel is now the default.\nこのチャンネルの画像生成モデルがデフォルトになりました。",
                     color=discord.Color.green()
                 )
+                embed.add_field(name="Model / モデル", value=f"```\n{model}\n```", inline=False)
 
             self._add_support_footer(embed)
             await interaction.followup.send(embed=embed, view=self._create_support_view(), ephemeral=False)
             logger.info(
-                f"Image model for channel {interaction.channel_id} switched to '{model}' by {interaction.user.name}")
+                f"Image model for channel {interaction.channel_id} switched to '{model}' by {interaction.user.name}"
+            )
 
         except Exception as e:
             logger.error(f"Failed to save channel image model settings: {e}", exc_info=True)
@@ -2129,13 +2177,19 @@ class LLMCog(commands.Cog, name="LLM"):
                 default_model = self.image_generator.default_model
                 embed = discord.Embed(
                     title="✅ Image Model Reset to Default / 画像生成モデルをデフォルトに戻しました",
-                    description=f"The image generation model for this channel has been reset to the default (`{default_model}`).\nこのチャンネルの画像生成モデルをデフォルト (`{default_model}`) に戻しました。",
+                    description=f"The image generation model for this channel has been reset to the default.\nこのチャンネルの画像生成モデルをデフォルトに戻しました。",
                     color=discord.Color.green()
+                )
+                embed.add_field(
+                    name="Default Model / デフォルトモデル",
+                    value=f"```\n{default_model}\n```",
+                    inline=False
                 )
                 self._add_support_footer(embed)
                 await interaction.followup.send(embed=embed, view=self._create_support_view(), ephemeral=False)
                 logger.info(
-                    f"Image model for channel {interaction.channel_id} reset to default by {interaction.user.name}")
+                    f"Image model for channel {interaction.channel_id} reset to default by {interaction.user.name}"
+                )
             else:
                 embed = discord.Embed(
                     title="ℹ️ No Custom Model Set / 専用モデルはありません",
@@ -2175,23 +2229,119 @@ class LLMCog(commands.Cog, name="LLM"):
         default_model = self.image_generator.default_model
         is_default = current_model == default_model
 
+        # モデル情報を解析
+        try:
+            provider, model_name = current_model.split('/', 1)
+        except ValueError:
+            provider, model_name = "unknown", current_model
+
         embed = discord.Embed(
             title="🎨 Current Image Generation Model / 現在の画像生成モデル",
-            description=(
-                f"**Current Model / 現在のモデル:** `{current_model}`\n"
-                f"**Status / 状態:** {'Default / デフォルト' if is_default else 'Custom / カスタム'}\n\n"
-                f"💡 Use `/switch-image-model` to change the model\n"
-                f"💡 モデルを変更するには `/switch-image-model` を使用してください"
-            ),
             color=discord.Color.blue() if is_default else discord.Color.purple()
         )
 
-        # 利用可能なモデル一覧を表示
-        available_models = self.image_generator.get_available_models()
-        models_list = "\n".join([f"• `{m}`" for m in available_models])
         embed.add_field(
-            name="Available Models / 利用可能なモデル",
-            value=models_list,
+            name="Current Model / 現在のモデル",
+            value=f"```\n{current_model}\n```",
+            inline=False
+        )
+        embed.add_field(name="Provider / プロバイダー", value=f"`{provider}`", inline=True)
+        embed.add_field(name="Status / 状態", value='`Default / デフォルト`' if is_default else '`Custom / カスタム`',
+                        inline=True)
+
+        # 利用可能なモデル一覧をプロバイダーごとに表示
+        models_by_provider = self.image_generator.get_models_by_provider()
+
+        for provider_name, models in sorted(models_by_provider.items()):
+            model_list = "\n".join([f"• `{m.split('/', 1)[1]}`" for m in models[:5]])  # 各プロバイダー最大5個表示
+
+            if len(models) > 5:
+                model_list += f"\n• ... and {len(models) - 5} more"
+
+            embed.add_field(
+                name=f"📦 {provider_name.title()} Models",
+                value=model_list or "None",
+                inline=True
+            )
+
+        embed.add_field(
+            name="💡 Commands / コマンド",
+            value=(
+                "• `/switch-image-model` - Change model / モデル変更\n"
+                "• `/reset-image-model` - Reset to default / デフォルトに戻す"
+            ),
+            inline=False
+        )
+
+        self._add_support_footer(embed)
+        await interaction.followup.send(embed=embed, view=self._create_support_view(), ephemeral=False)
+
+    @app_commands.command(
+        name="list-image-models",
+        description="List all available image generation models. / 利用可能な画像生成モデルの一覧を表示します。"
+    )
+    @app_commands.describe(
+        provider="Filter by provider (optional). / プロバイダーで絞り込み（オプション）"
+    )
+    async def list_image_models_slash(self, interaction: discord.Interaction, provider: str = None):
+        await interaction.response.defer(ephemeral=False)
+
+        if not self.image_generator:
+            embed = discord.Embed(
+                title="❌ Plugin Error / プラグインエラー",
+                description="ImageGenerator is not available.\nImageGeneratorが利用できません。",
+                color=discord.Color.red()
+            )
+            self._add_support_footer(embed)
+            await interaction.followup.send(embed=embed, view=self._create_support_view())
+            return
+
+        models_by_provider = self.image_generator.get_models_by_provider()
+
+        # プロバイダーフィルター
+        if provider:
+            provider_lower = provider.lower()
+            models_by_provider = {
+                k: v for k, v in models_by_provider.items()
+                if provider_lower in k.lower()
+            }
+
+            if not models_by_provider:
+                embed = discord.Embed(
+                    title="⚠️ No Models Found / モデルが見つかりません",
+                    description=f"No models found for provider: `{provider}`\nプロバイダー `{provider}` のモデルが見つかりません。",
+                    color=discord.Color.gold()
+                )
+                self._add_support_footer(embed)
+                await interaction.followup.send(embed=embed, view=self._create_support_view())
+                return
+
+        embed = discord.Embed(
+            title="🎨 Available Image Generation Models / 利用可能な画像生成モデル",
+            description=f"Total: {sum(len(models) for models in models_by_provider.values())} models across {len(models_by_provider)} provider(s)\n合計: {len(models_by_provider)}プロバイダー、{sum(len(models) for models in models_by_provider.values())}モデル",
+            color=discord.Color.blue()
+        )
+
+        for provider_name, models in sorted(models_by_provider.items()):
+            # モデル名からプロバイダープレフィックスを除去して表示
+            model_names = [m.split('/', 1)[1] for m in models]
+
+            # 長すぎる場合は分割
+            if len(model_names) > 10:
+                model_text = "\n".join([f"{i + 1}. `{m}`" for i, m in enumerate(model_names[:10])])
+                model_text += f"\n... and {len(model_names) - 10} more"
+            else:
+                model_text = "\n".join([f"{i + 1}. `{m}`" for i, m in enumerate(model_names)])
+
+            embed.add_field(
+                name=f"📦 {provider_name.title()} ({len(models)} models)",
+                value=model_text or "None",
+                inline=False
+            )
+
+        embed.add_field(
+            name="💡 How to Use / 使い方",
+            value="Use `/switch-image-model` to change the model for this channel.\n`/switch-image-model` でこのチャンネルのモデルを変更できます。",
             inline=False
         )
 

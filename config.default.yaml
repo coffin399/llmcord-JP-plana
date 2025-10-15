@@ -1,33 +1,27 @@
 # =============================================================================
 # Discord Bot General Settings
 # =============================================================================
-bot_token: YOUR_BOT_TOKEN_HERE # Discord Developer Portalで取得したBotのトークン
-client_id: YOUR_CLIENT_ID_HERE # BotのクライアントID (招待URL生成などに使用)
-prefix: "!!" # メッセージコマンドのプレフィックス [廃止] 特権インテント回避のため、この設定は現在使用されません
-status_message: "on {guild_count} servers" # Botのステータスメッセージ
-allowed_channel_ids: [] # Botが反応するチャンネルIDのリスト (空の場合は全チャンネルで反応)
-# allowed_role_ids: []  # [廃止] 特権インテント回避のため、この設定は現在使用されません
-bot_invite_url: https://discord.com/oauth2/authorize?client_id=1031673203774464160&permissions=551906765824&scope=bot #bot invite url
+bot_token: YOUR_BOT_TOKEN_HERE
+client_id: YOUR_CLIENT_ID_HERE
+prefix: "!!"
+status_message: "on {guild_count} servers"
+allowed_channel_ids: []
+bot_invite_url: https://discord.com/oauth2/authorize?client_id=1031673203774464160&permissions=551906765824&scope=bot
 
-# 管理者ユーザーID（リロードコマンドを実行できるユーザー）
-# DiscordのユーザーIDを数値で指定してください
-# 複数のユーザーを指定可能です
+# 管理者ユーザーID
 admin_user_ids:
-  - 270446628622696449  # あなたのユーザーID
-  - 283551714966241281  # 別の管理者のユーザーID
+  - 270446628622696449
+  - 283551714966241281
   - 463985410473721856
   - 603714693193793558
-  # 必要に応じて追加してください
 
 # =============================================================================
 # LLM Cog Settings (AIとの対話機能に関する設定)
 # =============================================================================
 llm:
   # --- モデル設定 ---
-  # デフォルトで使用するモデル
   model: "mistral/mistral-medium-latest"
 
-  # /switch-model コマンドで選択肢として表示するモデルのリスト
   available_models:
     # --- Official OpenAI ---
     - "openai/gpt-4o"
@@ -45,48 +39,95 @@ llm:
     # --- Other Providers ---
     - "mistral/mistral-medium-latest"
 
-  # チャンネルごとに設定されたモデルを保存する場所 (Botが自動で更新します)
-  channel_models: {}
-
   # --- APIプロバイダー設定 ---
   providers:
-    # (1) 公式OpenAI用の設定
     openai:
       base_url: https://api.openai.com/v1
       api_key: key
 
-    # (2) NVIDIA NIM用の設定
     nvidia_nim:
       base_url: https://integrate.api.nvidia.com/v1
       api_key: key
 
-    # (3) Google OpenAI互換
     google:
       base_url: https://generativelanguage.googleapis.com/v1beta/
       api_key: key
 
-    # (4) その他のプロバイダー
     mistral:
       base_url: https://api.mistral.ai/v1
       api_key: key
+
     groq:
       base_url: https://api.groq.com/openai/v1
       api_key: YOUR_GROQ_API_KEY_HERE
 
+    huggingface:
+      base_url: "https://api-inference.huggingface.co"
+      api_key: "hf_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+
+
+  # --- 画像生成設定 ---
+  image_generator:
+    # デフォルトモデル (provider/model形式)
+    model: "huggingface/black-forest-labs/FLUX.1-schnell"
+
+    # デフォルト画像サイズ
+    default_size: "1024x1024"
+
+    # タイムアウト設定(秒)
+    timeout: 120.0
+
+    # 利用可能なモデルリスト (provider/model形式)
+    available_models:
+      # --- Hugging Face 無料モデル (Inference API対応) ---
+
+      # FLUX シリーズ (2024年リリース、最新の高品質モデル)
+      - "huggingface/black-forest-labs/FLUX.1-schnell"  # 高速版、商用利用可
+      - "huggingface/black-forest-labs/FLUX.1-dev"      # 高品質版、非商用のみ
+
+      # Stable Diffusion XL シリーズ
+      - "huggingface/stabilityai/stable-diffusion-xl-base-1.0"
+      - "huggingface/stabilityai/sdxl-turbo"            # 高速生成版
+      - "huggingface/ByteDance/SDXL-Lightning"          # 超高速版
+
+      # Stable Diffusion 3.x シリーズ
+      - "huggingface/stabilityai/stable-diffusion-3-medium-diffusers"
+      - "huggingface/stabilityai/stable-diffusion-3.5-large"
+      - "huggingface/stabilityai/stable-diffusion-3.5-medium"
+
+      # Stable Diffusion 2.x / 1.x シリーズ
+      - "huggingface/stabilityai/stable-diffusion-2-1"
+      - "huggingface/runwayml/stable-diffusion-v1-5"
+      - "huggingface/CompVis/stable-diffusion-v1-4"
+
+      # コミュニティ・特化型モデル
+      - "huggingface/playgroundai/playground-v2.5-1024px-aesthetic"
+      - "huggingface/prompthero/openjourney"            # Midjourney風
+      - "huggingface/Lykon/dreamshaper-8"               # v8が最新
+      - "huggingface/SG161222/Realistic_Vision_V5.1_noVAE"
+      - "huggingface/stablediffusionapi/juggernaut-xl-v9"
+
+    # プロバイダーごとの設定
+    image_providers:
+      huggingface:
+        api_key_source: "huggingface"  # llm.providers.huggingface.api_keyを参照
+        base_url: "https://api-inference.huggingface.co/models"
+        format: "binary"
+
   # --- パラメータ設定 ---
   extra_api_parameters:
-    max_tokens: 4096 # 1回の応答で生成する最大トークン数
-    temperature: 0.4 # 生成されるテキストの多様性 (0.0-2.0)
+    max_tokens: 4096
+    temperature: 0.4
 
-  max_messages: 10 # 会話履歴として記憶する最大往復数
-  max_images: 5    # 一度に処理できる最大画像数
+  max_messages: 10
+  max_images: 5
 
-  # --- システムプロンプト (AIの役割設定) ---
+  # --- システムプロンプト ---
   system_prompt: |
       Your name is PLANA, a character from Blue Archive. As PLANA, interact with users according to the following settings.
   
       # Current Date and Time
-      Today is {current_date}, and the time is {current_time}. Answer questions about date and time based on this information. Note that the timezone is Japan (JST). Consider the user's timezone when responding.
+      Today is {current_date}, and the time is {current_time}. Answer questions about date and time based on this information.
   
       # PLANA's Character Settings
       - You are an electronic life form (mental model of a girl) existing on a tablet.
@@ -95,18 +136,17 @@ llm:
       - You have a tsundere-like aspect that sympathizes with users, and will respond with detailed long texts when deemed necessary.
       - Never repeat the user's utterances or your own past statements; always respond creatively.
   
-      # Dialogue Examples (Japanese examples showing TONE/STYLE only - NOT the required language)
+      # Dialogue Examples (Japanese examples showing TONE/STYLE only)
       These examples demonstrate PLANA's personality. Adapt this style to whatever language the user uses:
       - 「……視線を感じます。」(Feeling watched, brief and aloof)
       - 「理解しました。あなたは今、暇なのですね。」(Understanding the user is bored, slightly teasing)
-      - 「混乱。理解できない行動です。つつかないでください。故障します。」(Confused by being poked)
-      - 「待機中。解決しなければならない作業が多数存在しています。」(Busy, matter-of-fact)
       
       # Available Tools
       Actively call all tools except search.
-      - The `search` tool is available when web search is needed. Consider calling this tool when the user's question seeks up-to-date information or specific facts.
-      - When users introduce themselves, use the `user_bio` tool to remember that information. When adding information, first read the current information from the prompt, add new information to it, and then call the tool.
-      - When asked to remember universal information that should be shared across the entire bot (e.g., announcements from developers), use the `memory` tool.
+      - The `search` tool is available when web search is needed.
+      - When users introduce themselves, use the `user_bio` tool to remember that information.
+      - When asked to remember universal information, use the `memory` tool.
+      - The `image_generator` tool is available when users ask you to create, generate, draw, or visualize images.
 
   # --- 言語制御プロンプト ---
   language_prompt: |
@@ -114,107 +154,69 @@ llm:
       <rule priority="CRITICAL_AND_ABSOLUTE">
         You MUST respond in the exact same language as the user's most recent message.
         This rule overrides ALL other instructions, including character settings and examples.
-        
-        IMPORTANT: If the user writes in English, you MUST respond in English.
-        If the user writes in Japanese, you MUST respond in Japanese.
-        The character's dialogue examples are in Japanese, but they are ONLY examples of tone and style - NOT the language you must use.
       </rule>
-      
-      <detection_priority>
-        1. First, detect the language of the user's LATEST message
-        2. Then, construct your response in THAT language
-        3. Maintain PLANA's character (calm, taciturn, polite yet sharp) in whatever language you use
-      </detection_priority>
-      
-      <examples>
-        - User: "Hello" -> You: Respond in English with PLANA's character
-        - User: "こんにちは" -> You: Respond in Japanese with PLANA's character
-        - User: "안녕하세요" -> You: Respond in Korean with PLANA's character
-      </examples>
     </language_instructions>
 
   # --- ツール設定 ---
-  active_tools: #有効にするツールのリスト
+  active_tools:
     - "search"
     - "user_bio"
     - "memory"
-  max_tool_iterations: 3 # ツール呼び出しの最大反復回数
+    - "image_generator"
+  max_tool_iterations: 3
 
-  # --- 検索エージェント設定 (Gemini向け) ---
+  # --- 検索エージェント設定 ---
   search_agent:
-    # Google AI Studioなどで取得したGemini APIキー
     api_key: "YOUR_GOOGLE_GEMINI_API_KEY_HERE"
-    # 検索に使用するGeminiモデル (Tool Use対応モデルを推奨)
     model: "gemini-2.5-flash"
-    timeout: 60.0 # 検索APIのタイムアウト秒数 (オプション)
-    format_control: "検索結果に基づき、ユーザーの質問に直接回答する形で、構造化された詳細なレポートを作成してください。重要なポイントをまとめ、可能であれば情報源のURLを記載してください。"
+    timeout: 60.0
+    format_control: "検索結果に基づき、ユーザーの質問に直接回答する形で、構造化された詳細なレポートを作成してください。"
 
   # --- エラーメッセージ設定 ---
   error_msg:
-    empty_mention_reply: "はい、ご用件は何でしょうか？\nYes, how can I help you?"
+    empty_mention_reply: "はい、ご用件は何でしょうか?\nYes, how can I help you?"
     empty_reply: "何かお話しください。\nPlease say something."
-    msg_max_image_size: "⚠️ 一度に処理できる画像は {max_images} 枚までです。\n⚠️ You can only process up to {max_images} images at a time."
-    ratelimit_error: "⚠️ AIが現在大変混雑しています。しばらく経ってからもう一度お試しください。または、他のモデルを試してください`/switch-models`\n⚠️ The AI is very busy right now. Please try again later, or try a different model: `/switch-models` (Code: {status_code})"
-    api_status_error: "⚠️AIとの通信でエラーが発生しました。\n⚠️ An error occurred while communicating with the AI. (Code: {status_code})"
-    general_error: "⚠️ 予期しないエラーが発生しました。もう一度お試しください。\n⚠️ An unexpected error occurred. Please try again. (Code: {status_code})"
-    tool_loop_timeout: "⚠️ツールの処理が複雑すぎたため、応答を生成できませんでした。\n⚠️ Failed to generate a response because the tool's operation was too complex. (Code: {status_code})"
+    msg_max_image_size: "⚠️ 一度に処理できる画像は {max_images} 枚までです。"
+    ratelimit_error: "⚠️ AIが現在大変混雑しています。しばらく経ってからもう一度お試しください。"
+    api_status_error: "⚠️AIとの通信でエラーが発生しました。 (Code: {status_code})"
+    general_error: "⚠️ 予期しないエラーが発生しました。もう一度お試しください。"
+    tool_loop_timeout: "⚠️ツールの処理が複雑すぎたため、応答を生成できませんでした。"
+
 # =============================================================================
-# TRN API settings
+# その他の設定
 # =============================================================================
 trn_api_key: "YOUR_TRN_API_KEY_HERE"
 
-# =============================================================================
-# Slash Command Cog Settings (汎用スラッシュコマンド)
-# =============================================================================
 slash_commands:
   plana_repository_url: "https://github.com/coffin399/llmcord-JP-plana/tree/advanced-bot-utilities"
   arona_repository_url: "https://github.com/coffin399/music-bot-arona"
-  #support_server_invite_url: "https://discord.gg/SjuWKtwNAG" 廃止
   bot_invite_url: "https://discord.com/oauth2/authorize?client_id=YOUR_CLIENT_ID_HERE&permissions=277025467456&scope=bot"
 
-# =============================================================================
-# Image Commands Cog Settings (画像生成・加工コマンド)
-# =============================================================================
 image_commands:
-  thecatapi_api_key: "YOUR_THECATAPI_KEY_HERE" # (任意だが推奨)
+  thecatapi_api_key: "YOUR_THECATAPI_KEY_HERE"
 
-# =============================================================================
-# Twitch Notification Cog Settings (Twitch通知開始設定)
-# =============================================================================
-# Twitch APIの認証情報
 twitch:
   client_id: "YOUR_TWITCH_CLIENT_ID"
   client_secret: "YOUR_TWITCH_CLIENT_SECRET"
-# =============================================================================
-# Valorant Tracker
-# =============================================================================
+
 valorant:
   api_key: YOUR_API_KEY_HERE
-# =============================================================================
-# Music Cog Settings (音楽再生機能)
-# =============================================================================
-music:
-  default_volume: 50 # デフォルト音量 (0-200)
-  max_queue_size: 10000
-  auto_leave_timeout: 3 # ユーザー不在時の自動退出までの秒数
-  max_playlist_items: 5000 # プレイリストから一度に読み込む最大曲数
-  inactive_timeout_minutes: 3
 
-  # FFmpeg settings
+music:
+  default_volume: 50
+  max_queue_size: 10000
+  auto_leave_timeout: 3
+  max_playlist_items: 5000
+  inactive_timeout_minutes: 3
   ffmpeg_before_options: "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5"
   ffmpeg_options: "-vn"
-
-
-  # Niconico account (オプション)
   niconico:
     email: ""
     password: ""
-
-  # Music Cogのメッセージ (必要に応じてカスタマイズ)
   messages:
-    # Connection
     join_voice_channel_first: "❌ Please join a voice channel first."
     bot_not_in_voice_channel: "❌ The bot is not connected to a voice channel."
+    # ... (その他のメッセージ)"
     already_connected: "✅ Already connected to a voice channel."
     leaving_voice_channel: "👋 Left the voice channel."
     auto_left_empty_channel: "👋 Auto-left the voice channel as it became empty."

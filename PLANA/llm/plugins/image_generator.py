@@ -5,7 +5,7 @@ import asyncio
 import base64
 import io
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 
 import aiohttp
 import discord
@@ -14,43 +14,37 @@ logger = logging.getLogger(__name__)
 
 
 class ImageGenerator:
-    """NVIDIA NIM APIを使用して画像を生成するプラグイン"""
+    """画像生成プラグイン - Hugging Face / NVIDIA NIM対応"""
 
     def __init__(self, bot):
         self.bot = bot
         self.config = bot.config.get('llm', {})
-
-        # NVIDIA NIMの設定を取得
-        nvidia_config = self.config.get('providers', {}).get('nvidia_nim', {})
-        self.api_key = nvidia_config.get('api_key')
-
-        # 画像生成設定
         self.image_gen_config = self.config.get('image_generator', {})
-        self.default_model = self.image_gen_config.get('model', 'stabilityai/stable-diffusion-xl-base-1.0')
+
+        # デフォルト設定
+        self.default_model = self.image_gen_config.get('model', 'huggingface/stabilityai/stable-diffusion-xl-base-1.0')
         self.default_size = self.image_gen_config.get('default_size', '1024x1024')
         self.timeout = self.image_gen_config.get('timeout', 120.0)
 
-        # ✅ エンドポイント情報を読み込む
-        self.endpoints = self.image_gen_config.get('endpoints', {})
-
-        # 🔧 config.yamlから利用可能なモデルリストを取得
-        self.available_models = self.config.get('available_image_models', [self.default_model])
-
-        # デフォルトモデルがリストにない場合は追加
+        # 利用可能なモデルリスト
+        self.available_models = self.image_gen_config.get('available_models', [self.default_model])
         if self.default_model not in self.available_models:
             self.available_models.insert(0, self.default_model)
-            logger.warning(f"Default model '{self.default_model}' not in available_image_models, adding it")
+            logger.warning(f"Default model '{self.default_model}' not in available_models, adding it")
 
-        # チャンネルごとのモデル設定を管理
+        # プロバイダー設定
+        self.image_providers = self.image_gen_config.get('image_providers', {})
+        self.llm_providers = self.config.get('providers', {})
+
+        # チャンネルごとのモデル設定
         self.channel_models_path = "data/channel_image_models.json"
         self.channel_models: Dict[str, str] = self._load_channel_models()
 
-        if not self.api_key:
-            logger.error("NVIDIA NIM API key not found in config!")
-
         self.http_session = aiohttp.ClientSession()
+
         logger.info(f"ImageGenerator initialized with default model: {self.default_model}")
-        logger.info(f"Available image models: {', '.join(self.available_models)}")
+        logger.info(f"Available image models: {len(self.available_models)} models")
+        logger.info(f"Configured providers: {list(self.image_providers.keys())}")
 
     def _load_channel_models(self) -> Dict[str, str]:
         """チャンネルごとのモデル設定を読み込む"""
@@ -83,17 +77,27 @@ class ImageGenerator:
                 with open(self.channel_models_path, 'w', encoding='utf-8') as f:
                     json.dump(self.channel_models, f, indent=4, ensure_ascii=False)
 
-            logger.info(f"Saved channel image model settings to {self.channel_models_path}")
+            logger.info(f"Saved channel image model settings")
         except Exception as e:
             logger.error(f"Failed to save channel image models: {e}")
             raise
+
+    def _parse_model_string(self, model_string: str) -> tuple[str, str]:
+        """
+        モデル文字列をパースして (provider, model_name) を返す
+        例: "huggingface/stabilityai/stable-diffusion-xl" -> ("huggingface", "stabilityai/stable-diffusion-xl")
+        """
+        if '/' not in model_string:
+            raise ValueError(f"Invalid model format: {model_string}. Expected 'provider/model_name'")
+
+        parts = model_string.split('/', 1)
+        return parts[0], parts[1]
 
     def get_model_for_channel(self, channel_id: int) -> str:
         """指定されたチャンネルで使用するモデルを取得"""
         channel_id_str = str(channel_id)
         model = self.channel_models.get(channel_id_str, self.default_model)
 
-        # モデルが利用可能なリストにない場合はデフォルトに戻す
         if model not in self.available_models:
             logger.warning(f"Model '{model}' for channel {channel_id} not in available models, using default")
             return self.default_model
@@ -120,9 +124,22 @@ class ImageGenerator:
             return True
         return False
 
-    def get_available_models(self) -> list:
-        """利用可能なモデルのリストを取得（config.yamlから）"""
+    def get_available_models(self) -> List[str]:
+        """利用可能なモデルのリストを取得"""
         return self.available_models.copy()
+
+    def get_models_by_provider(self) -> Dict[str, List[str]]:
+        """プロバイダーごとにモデルを分類して返す"""
+        models_by_provider = {}
+        for model in self.available_models:
+            try:
+                provider, _ = self._parse_model_string(model)
+                if provider not in models_by_provider:
+                    models_by_provider[provider] = []
+                models_by_provider[provider].append(model)
+            except ValueError:
+                continue
+        return models_by_provider
 
     @property
     def name(self) -> str:
@@ -136,7 +153,7 @@ class ImageGenerator:
             "function": {
                 "name": self.name,
                 "description": (
-                    "Generate an image based on a text prompt using NVIDIA NIM API. "
+                    "Generate an image based on a text prompt using AI image generation. "
                     "Use this when the user asks you to create, generate, or draw an image. "
                     "ユーザーが画像の生成、作成、描画を依頼した時にこのツールを使用してください。"
                 ),
@@ -148,7 +165,7 @@ class ImageGenerator:
                             "description": (
                                 "A detailed description of the image to generate. "
                                 "Be specific and descriptive. Include style, mood, colors, etc. "
-                                "生成する画像の詳細な説明。具体的で詳細に。スタイル、雰囲気、色などを含める。"
+                                "生成する画像の詳細な説明。具体的で詳細に。"
                             )
                         },
                         "negative_prompt": {
@@ -162,7 +179,7 @@ class ImageGenerator:
                             "type": "string",
                             "description": (
                                 "Image size in format WIDTHxHEIGHT (e.g., '1024x1024', '512x768'). "
-                                "Default is 1024x1024. 画像サイズ（例: '1024x1024', '512x768'）。"
+                                "Default is 1024x1024."
                             ),
                             "enum": ["512x512", "768x768", "1024x1024", "512x768", "768x512"]
                         }
@@ -178,7 +195,7 @@ class ImageGenerator:
 
         Args:
             arguments: ツール呼び出しの引数
-            channel_id: Discordチャンネルid（画像送信用）
+            channel_id: Discordチャンネルid
 
         Returns:
             LLMに返すレスポンスメッセージ
@@ -190,32 +207,25 @@ class ImageGenerator:
         if not prompt:
             return "❌ Error: Empty prompt provided. / エラー: プロンプトが空です。"
 
-        # チャンネルごとのモデルを取得
         model = self.get_model_for_channel(channel_id)
 
-        logger.info(f"🎨 [IMAGE_GEN] Starting image generation with prompt: {prompt[:100]}...")
-        logger.info(f"🎨 [IMAGE_GEN] Using model: {model} for channel {channel_id}")
+        logger.info(f"🎨 [IMAGE_GEN] Starting image generation")
+        logger.info(f"🎨 [IMAGE_GEN] Model: {model}, Size: {size}")
+        logger.info(f"🎨 [IMAGE_GEN] Prompt: {prompt[:100]}...")
 
         try:
-            # 画像を生成
             image_data = await self._generate_image(prompt, negative_prompt, size, model)
 
             if not image_data:
                 return "❌ Failed to generate image. / 画像の生成に失敗しました。"
 
-            # Discordに画像を送信
             channel = self.bot.get_channel(channel_id)
             if not channel:
                 logger.error(f"Channel {channel_id} not found!")
-                return "❌ Error: Could not find channel to send image. / エラー: 画像を送信するチャンネルが見つかりません。"
+                return "❌ Error: Could not find channel to send image."
 
-            # 画像ファイルを作成
-            image_file = discord.File(
-                fp=io.BytesIO(image_data),
-                filename="generated_image.png"
-            )
+            image_file = discord.File(fp=io.BytesIO(image_data), filename="generated_image.png")
 
-            # 画像情報のembed
             embed = discord.Embed(
                 title="🎨 Generated Image / 生成された画像",
                 description=f"**Prompt:** {prompt[:200]}{'...' if len(prompt) > 200 else ''}",
@@ -227,11 +237,15 @@ class ImageGenerator:
                     value=negative_prompt[:100] + ('...' if len(negative_prompt) > 100 else ''),
                     inline=False
                 )
-            embed.add_field(name="Size / サイズ", value=size, inline=True)
-            embed.add_field(name="Model / モデル", value=model, inline=True)
-            embed.set_footer(text="Generated by NVIDIA NIM")
+            embed.add_field(name="Size", value=size, inline=True)
+            embed.add_field(name="Model", value=model, inline=True)
 
-            # 画像を送信
+            try:
+                provider, _ = self._parse_model_string(model)
+                embed.set_footer(text=f"Provider: {provider}")
+            except ValueError:
+                pass
+
             await channel.send(embed=embed, file=image_file)
 
             logger.info(f"✅ [IMAGE_GEN] Successfully generated and sent image")
@@ -241,15 +255,9 @@ class ImageGenerator:
                 f"The image has been sent to the channel. / 画像をチャンネルに送信しました。"
             )
 
-        except aiohttp.ClientError as e:
-            logger.error(f"❌ [IMAGE_GEN] Network error: {e}", exc_info=True)
-            return f"❌ Network error while generating image: {str(e)[:200]}"
-        except asyncio.TimeoutError:
-            logger.error(f"❌ [IMAGE_GEN] Timeout during image generation")
-            return "❌ Image generation timed out. Please try again. / タイムアウトしました。もう一度お試しください。"
         except Exception as e:
-            logger.error(f"❌ [IMAGE_GEN] Unexpected error: {e}", exc_info=True)
-            return f"❌ Unexpected error during image generation: {str(e)[:200]}"
+            logger.error(f"❌ [IMAGE_GEN] Error: {e}", exc_info=True)
+            return f"❌ Error during image generation: {str(e)[:200]}"
 
     async def _generate_image(
             self,
@@ -259,45 +267,132 @@ class ImageGenerator:
             model: str
     ) -> Optional[bytes]:
         """
-        NVIDIA NIM APIを使用して画像を生成
+        画像を生成（プロバイダーごとの処理分岐）
 
         Args:
             prompt: 生成する画像の説明
             negative_prompt: 除外する要素
-            size: 画像サイズ (e.g., "1024x1024")
-            model: 使用するモデル名
+            size: 画像サイズ
+            model: 使用するモデル（provider/model_name形式）
 
         Returns:
-            生成された画像データ（PNG形式）、失敗時はNone
+            生成された画像データ（PNG形式）
         """
+        try:
+            provider_name, model_name = self._parse_model_string(model)
+        except ValueError as e:
+            logger.error(f"❌ [IMAGE_GEN] {e}")
+            return None
+
+        provider_config = self.image_providers.get(provider_name)
+        if not provider_config:
+            logger.error(f"❌ [IMAGE_GEN] No configuration found for provider: {provider_name}")
+            return None
+
+        # APIキーを取得
+        api_key_source = provider_config.get('api_key_source')
+        if api_key_source:
+            llm_provider = self.llm_providers.get(api_key_source, {})
+            api_key = llm_provider.get('api_key')
+        else:
+            api_key = provider_config.get('api_key')
+
+        if not api_key:
+            logger.error(f"❌ [IMAGE_GEN] No API key found for provider: {provider_name}")
+            return None
+
+        # プロバイダーごとに処理を分岐
+        if provider_name == "huggingface":
+            return await self._generate_image_huggingface(
+                api_key, provider_config, model_name, prompt, negative_prompt, size
+            )
+        elif provider_name == "nvidia_nim":
+            return await self._generate_image_nvidia(
+                api_key, provider_config, model_name, prompt, negative_prompt, size
+            )
+        else:
+            logger.error(f"❌ [IMAGE_GEN] Unsupported provider: {provider_name}")
+            return None
+
+    async def _generate_image_huggingface(
+            self,
+            api_key: str,
+            provider_config: Dict,
+            model_name: str,
+            prompt: str,
+            negative_prompt: str,
+            size: str
+    ) -> Optional[bytes]:
+        """Hugging Face APIで画像を生成"""
         width, height = map(int, size.split('x'))
-
-        # ✅ モデルに対応するエンドポイント情報を取得
-        endpoint_info = self.endpoints.get(model)
-        if not endpoint_info:
-            logger.error(f"❌ [IMAGE_GEN] No endpoint configuration found for model: {model}")
-            logger.error(f"❌ [IMAGE_GEN] Available models in config: {list(self.endpoints.keys())}")
-            return None
-
-        url = endpoint_info.get('url')
-        if not url:
-            logger.error(f"❌ [IMAGE_GEN] No URL found for model: {model}")
-            return None
+        base_url = provider_config.get('base_url', 'https://api-inference.huggingface.co/models')
+        url = f"{base_url}/{model_name}"
 
         headers = {
-            "Authorization": f"Bearer {self.api_key}",
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
+
+        payload = {
+            "inputs": prompt,
+            "parameters": {
+                "width": width,
+                "height": height,
+                "num_inference_steps": 25
+            }
+        }
+
+        if negative_prompt:
+            payload["parameters"]["negative_prompt"] = negative_prompt
+
+        logger.info(f"🔵 [IMAGE_GEN] Calling Hugging Face API: {url}")
+
+        try:
+            async with self.http_session.post(
+                    url,
+                    headers=headers,
+                    json=payload,
+                    timeout=aiohttp.ClientTimeout(total=self.timeout)
+            ) as response:
+                if response.status == 200:
+                    # Hugging Faceはバイナリデータを直接返す
+                    image_bytes = await response.read()
+                    logger.info(f"✅ [IMAGE_GEN] Successfully received image ({len(image_bytes)} bytes)")
+                    return image_bytes
+                else:
+                    error_text = await response.text()
+                    logger.error(f"❌ [IMAGE_GEN] API error {response.status}: {error_text[:500]}")
+                    return None
+
+        except asyncio.TimeoutError:
+            logger.error(f"❌ [IMAGE_GEN] Request timed out after {self.timeout}s")
+            return None
+        except Exception as e:
+            logger.error(f"❌ [IMAGE_GEN] Exception: {e}", exc_info=True)
+            return None
+
+    async def _generate_image_nvidia(
+            self,
+            api_key: str,
+            provider_config: Dict,
+            model_name: str,
+            prompt: str,
+            negative_prompt: str,
+            size: str
+    ) -> Optional[bytes]:
+        """NVIDIA NIM APIで画像を生成"""
+        width, height = map(int, size.split('x'))
+        base_url = provider_config.get('base_url', 'https://integrate.api.nvidia.com/v1')
+        url = f"{base_url}/images/generations"
+
+        headers = {
+            "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
             "Accept": "application/json"
         }
 
-        # ✅ NVIDIA NIM API用のペイロード形式
         payload = {
-            "text_prompts": [
-                {
-                    "text": prompt,
-                    "weight": 1.0
-                }
-            ],
+            "text_prompts": [{"text": prompt, "weight": 1.0}],
             "cfg_scale": 5.0,
             "sampler": "K_DPM_2_ANCESTRAL",
             "seed": 0,
@@ -306,16 +401,10 @@ class ImageGenerator:
             "height": height
         }
 
-        # ネガティブプロンプトがある場合
         if negative_prompt:
-            payload["text_prompts"].append({
-                "text": negative_prompt,
-                "weight": -1.0
-            })
+            payload["text_prompts"].append({"text": negative_prompt, "weight": -1.0})
 
         logger.info(f"🔵 [IMAGE_GEN] Calling NVIDIA NIM API: {url}")
-        logger.info(f"🔵 [IMAGE_GEN] Model: {model}, Size: {width}x{height}")
-        logger.info(f"🔵 [IMAGE_GEN] Payload keys: {list(payload.keys())}")
 
         try:
             async with self.http_session.post(
@@ -327,7 +416,6 @@ class ImageGenerator:
                 if response.status == 200:
                     result = await response.json()
 
-                    # ✅ Base64データをデコード（NVIDIA NIM形式）
                     if result.get('artifacts') and len(result['artifacts']) > 0:
                         b64_image = result['artifacts'][0].get('base64')
                         if b64_image:
@@ -336,25 +424,7 @@ class ImageGenerator:
                             return image_bytes
 
                     logger.error(f"❌ [IMAGE_GEN] No image data in response")
-                    logger.error(f"❌ [IMAGE_GEN] Response keys: {list(result.keys())}")
                     return None
-
-                elif response.status == 404:
-                    error_text = await response.text()
-                    logger.error(f"❌ [IMAGE_GEN] 404 Not Found")
-                    logger.error(f"❌ [IMAGE_GEN] Endpoint: {url}")
-                    logger.error(f"❌ [IMAGE_GEN] Response: {error_text[:500]}")
-                    return None
-
-                elif response.status == 429:
-                    logger.warning(f"⚠️ [IMAGE_GEN] Rate limit hit (429)")
-                    return None
-
-                elif response.status == 401:
-                    logger.error(f"❌ [IMAGE_GEN] Authentication failed (401)")
-                    logger.error(f"❌ [IMAGE_GEN] Check your NVIDIA NIM API key")
-                    return None
-
                 else:
                     error_text = await response.text()
                     logger.error(f"❌ [IMAGE_GEN] API error {response.status}: {error_text[:500]}")
@@ -362,10 +432,10 @@ class ImageGenerator:
 
         except asyncio.TimeoutError:
             logger.error(f"❌ [IMAGE_GEN] Request timed out after {self.timeout}s")
-            raise
+            return None
         except Exception as e:
-            logger.error(f"❌ [IMAGE_GEN] Exception during API call: {e}", exc_info=True)
-            raise
+            logger.error(f"❌ [IMAGE_GEN] Exception: {e}", exc_info=True)
+            return None
 
     async def close(self):
         """HTTPセッションをクローズ"""
