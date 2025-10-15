@@ -84,6 +84,7 @@ docker compose up --build -d
 ## ✨ Key Features
 
 - 🗣️ **AI Chat (LLM)** - Conversation with advanced language models
+- 🎨 **Image Generation** - Generate images from text
 - 🎶 **Music Playback** - High-quality music streaming from YouTube, SoundCloud
 - 🖼️ **Image Recognition** - AI-powered image understanding
 - 📡 **Real-Time Notifications** - Earthquake alerts (Japan), Twitch streams
