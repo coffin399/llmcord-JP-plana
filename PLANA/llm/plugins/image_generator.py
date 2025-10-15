@@ -493,6 +493,16 @@ class ImageGenerator:
                 except Exception as e:
                     logger.warning(f"Failed to send progress message: {e}")
 
+        # プログレス監視タスクを起動
+        progress_task = None
+        if self.show_progress and progress_message:
+            import time
+            start_time = time.time()
+            progress_task = asyncio.create_task(
+                self._monitor_progress(progress_message, steps, prompt, model, start_time)
+            )
+            logger.info(f"🟢 [IMAGE_GEN] Progress monitoring task started")
+
         try:
             # 画像生成リクエストを送信
             import time
@@ -503,13 +513,6 @@ class ImageGenerator:
                     json=payload,
                     timeout=aiohttp.ClientTimeout(total=self.timeout)
             ) as response:
-
-                # プログレス監視タスクを起動
-                progress_task = None
-                if self.show_progress and progress_message:
-                    progress_task = asyncio.create_task(
-                        self._monitor_progress(progress_message, steps, prompt, model, start_time)
-                    )
 
                 logger.info(f"🟢 [IMAGE_GEN] Response status: {response.status}")
 
@@ -580,6 +583,8 @@ class ImageGenerator:
 
         except asyncio.TimeoutError:
             logger.error(f"❌ [IMAGE_GEN] Request timed out after {self.timeout}s")
+            if progress_task:
+                progress_task.cancel()
             if progress_message:
                 try:
                     await progress_message.delete()
@@ -589,6 +594,8 @@ class ImageGenerator:
         except aiohttp.ClientConnectorError as e:
             logger.error(f"❌ [IMAGE_GEN] Connection error: {e}")
             logger.error(f"❌ [IMAGE_GEN] Make sure Forge WebUI is running at {self.forge_url}")
+            if progress_task:
+                progress_task.cancel()
             if progress_message:
                 try:
                     await progress_message.delete()
@@ -597,6 +604,8 @@ class ImageGenerator:
             return None
         except Exception as e:
             logger.error(f"❌ [IMAGE_GEN] Exception during API call: {e}", exc_info=True)
+            if progress_task:
+                progress_task.cancel()
             if progress_message:
                 try:
                     await progress_message.delete()
@@ -617,11 +626,14 @@ class ImageGenerator:
 
         last_step = 0
         last_update_time = start_time
+        consecutive_errors = 0
+        max_consecutive_errors = 5
 
         try:
-            while True:
-                await asyncio.sleep(self.progress_update_interval)
+            # 少し待ってから監視開始（API起動待ち）
+            await asyncio.sleep(1.0)
 
+            while True:
                 try:
                     async with self.http_session.get(
                             progress_url,
@@ -630,38 +642,74 @@ class ImageGenerator:
                         if response.status == 200:
                             import time
                             data = await response.json()
+
+                            # progressが0.0の場合はまだ開始していない
                             progress = data.get('progress', 0.0)
-                            current_step = int(progress * total_steps)
-                            current_time = time.time()
-                            elapsed_time = current_time - start_time
+                            state = data.get('state', {})
+                            job_count = state.get('job_count', 0)
 
-                            # it/s を計算
-                            it_per_sec = 0.0
-                            time_diff = current_time - last_update_time
-                            if time_diff > 0 and current_step > last_step:
-                                steps_diff = current_step - last_step
-                                it_per_sec = steps_diff / time_diff
+                            # 生成が開始されているか確認
+                            if progress > 0.0 or job_count > 0:
+                                consecutive_errors = 0  # エラーカウントをリセット
 
-                            await self._update_progress_message(
-                                message,
-                                current_step,
-                                total_steps,
-                                prompt,
-                                model,
-                                elapsed_time,
-                                it_per_sec
-                            )
+                                current_step = int(progress * total_steps)
+                                if current_step > total_steps:
+                                    current_step = total_steps
 
-                            last_step = current_step
-                            last_update_time = current_time
+                                current_time = time.time()
+                                elapsed_time = current_time - start_time
 
+                                # it/s を計算
+                                it_per_sec = 0.0
+                                time_diff = current_time - last_update_time
+                                if time_diff > 0 and current_step > last_step:
+                                    steps_diff = current_step - last_step
+                                    it_per_sec = steps_diff / time_diff
+
+                                await self._update_progress_message(
+                                    message,
+                                    current_step,
+                                    total_steps,
+                                    prompt,
+                                    model,
+                                    elapsed_time,
+                                    it_per_sec
+                                )
+
+                                last_step = current_step
+                                last_update_time = current_time
+
+                                logger.debug(
+                                    f"📊 [IMAGE_GEN] Progress: {current_step}/{total_steps} ({progress * 100:.1f}%)")
+                            else:
+                                # まだ開始していない場合は初期化中と表示
+                                logger.debug(f"⏳ [IMAGE_GEN] Waiting for generation to start...")
+                        else:
+                            consecutive_errors += 1
+                            logger.warning(f"⚠️ [IMAGE_GEN] Progress API returned status {response.status}")
+
+                except asyncio.TimeoutError:
+                    consecutive_errors += 1
+                    logger.debug(
+                        f"⚠️ [IMAGE_GEN] Progress check timeout (attempt {consecutive_errors}/{max_consecutive_errors})")
                 except Exception as e:
-                    logger.debug(f"Progress check error: {e}")
-                    continue
+                    consecutive_errors += 1
+                    logger.debug(
+                        f"⚠️ [IMAGE_GEN] Progress check error: {e} (attempt {consecutive_errors}/{max_consecutive_errors})")
+
+                # 連続エラーが多すぎる場合は監視を停止
+                if consecutive_errors >= max_consecutive_errors:
+                    logger.warning(f"❌ [IMAGE_GEN] Too many consecutive errors, stopping progress monitoring")
+                    break
+
+                await asyncio.sleep(self.progress_update_interval)
 
         except asyncio.CancelledError:
             # タスクがキャンセルされた場合は正常終了
+            logger.info(f"🛑 [IMAGE_GEN] Progress monitoring cancelled")
             pass
+        except Exception as e:
+            logger.error(f"❌ [IMAGE_GEN] Unexpected error in progress monitoring: {e}", exc_info=True)
 
     async def get_available_models_from_forge(self) -> Optional[List[str]]:
         """Forge WebUIから利用可能なモデルリストを取得"""
