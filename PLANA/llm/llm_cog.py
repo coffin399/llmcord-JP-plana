@@ -59,6 +59,12 @@ except ImportError:
     CommandInfoManager = None
 
 try:
+    from PLANA.llm.plugins.image_generator import ImageGenerator
+except ImportError:
+    logging.error("Could not import ImageGenerator. Image generation will be disabled.")
+    ImageGenerator = None
+
+try:
     import aiofiles
 except ImportError:
     aiofiles = None
@@ -194,6 +200,7 @@ class LLMCog(commands.Cog, name="LLM"):
         ))
         return view
 
+
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         if not hasattr(self.bot, 'config') or not self.bot.config:
@@ -228,6 +235,7 @@ class LLMCog(commands.Cog, name="LLM"):
         self.bio_manager = self._initialize_bio_manager()
         self.memory_manager = self._initialize_memory_manager()
         self.command_manager = self._initialize_command_manager()
+        self.image_generator = self._initialize_image_generator()  # ← 追加
 
         default_model_string = self.llm_config.get('model')
         if default_model_string:
@@ -245,6 +253,11 @@ class LLMCog(commands.Cog, name="LLM"):
         for task in self.model_reset_tasks.values():
             task.cancel()
         logger.info(f"Cancelled {len(self.model_reset_tasks)} pending model reset tasks.")
+
+        # 画像生成プラグインのクリーンアップを追加
+        if self.image_generator:
+            await self.image_generator.close()
+
         logger.info("LLMCog's aiohttp session has been closed.")
 
     def _load_json_data(self, path: str) -> Dict[str, Any]:
@@ -344,6 +357,15 @@ class LLMCog(commands.Cog, name="LLM"):
             return CommandInfoManager(self.bot)
         except Exception as e:
             logger.error(f"Failed to initialize CommandInfoManager: {e}", exc_info=True)
+            return None
+
+    def _initialize_image_generator(self) -> Optional[ImageGenerator]:
+        if not ImageGenerator:
+            return None
+        try:
+            return ImageGenerator(self.bot)
+        except Exception as e:
+            logger.error(f"Failed to initialize ImageGenerator: {e}", exc_info=True)
             return None
 
     def _detect_language_and_create_prompt(self, text: str) -> Optional[str]:
@@ -477,6 +499,8 @@ class LLMCog(commands.Cog, name="LLM"):
             definitions.append(self.bio_manager.tool_spec)
         if 'memory' in active_tools and self.memory_manager:
             definitions.append(self.memory_manager.tool_spec)
+        if 'image_generator' in active_tools and self.image_generator:  # ← 追加
+            definitions.append(self.image_generator.tool_spec)
 
         return definitions or None
 
@@ -1138,6 +1162,12 @@ class LLMCog(commands.Cog, name="LLM"):
                     logger.info(f"🧠 [MEMORY] Executing memory manager tool")
                     tool_response_content = await self.memory_manager.run_tool(arguments=function_args)
                     logger.info(f"🧠 [MEMORY] Result:\n{tool_response_content}")
+
+                elif self.image_generator and function_name == self.image_generator.name:  # ← 追加
+                    logger.info(f"🎨 [IMAGE_GEN] Executing image generator tool")
+                    tool_response_content = await self.image_generator.run(arguments=function_args,
+                                                                           channel_id=channel_id)
+                    logger.info(f"🎨 [IMAGE_GEN] Result:\n{tool_response_content}")
 
                 else:
                     logger.warning(f"⚠️ Unsupported tool called: {function_name} | {log_context}")
@@ -1982,6 +2012,201 @@ class LLMCog(commands.Cog, name="LLM"):
         error_message = f"An unexpected error occurred: {error}\n予期せぬエラーが発生しました: {error}"
         embed = discord.Embed(title="❌ Unexpected Error / 予期せぬエラー", description=error_message,
                               color=discord.Color.red())
+        self._add_support_footer(embed)
+        view = self._create_support_view()
+        if not interaction.response.is_done():
+            await interaction.response.send_message(embed=embed, view=view, ephemeral=False)
+        else:
+            await interaction.followup.send(embed=embed, view=view, ephemeral=False)
+
+    # ============================================================================
+    # Image Model Switching Commands
+    # ============================================================================
+
+    async def image_model_autocomplete(
+            self,
+            interaction: discord.Interaction,
+            current: str
+    ) -> List[app_commands.Choice[str]]:
+        """画像生成モデルのオートコンプリート"""
+        if not self.image_generator:
+            return []
+        available_models = self.image_generator.get_available_models()
+        return [
+            app_commands.Choice(name=model, value=model)
+            for model in available_models if current.lower() in model.lower()
+        ][:25]
+
+    @app_commands.command(
+        name="switch-image-model",
+        description="Switch the image generation model for this channel. / このチャンネルの画像生成モデルを切り替えます。"
+    )
+    @app_commands.describe(
+        model="Select the image generation model you want to use. / 使用したい画像生成モデルを選択してください。"
+    )
+    @app_commands.autocomplete(model=image_model_autocomplete)
+    async def switch_image_model_slash(self, interaction: discord.Interaction, model: str):
+        await interaction.response.defer(ephemeral=False)
+
+        if not self.image_generator:
+            embed = discord.Embed(
+                title="❌ Plugin Error / プラグインエラー",
+                description="ImageGenerator is not available.\nImageGeneratorが利用できません。",
+                color=discord.Color.red()
+            )
+            self._add_support_footer(embed)
+            await interaction.followup.send(embed=embed, view=self._create_support_view())
+            return
+
+        available_models = self.image_generator.get_available_models()
+        if model not in available_models:
+            embed = discord.Embed(
+                title="⚠️ Invalid Model / 無効なモデル",
+                description=f"The specified model '{model}' is not available.\n指定されたモデル '{model}' は利用できません。",
+                color=discord.Color.gold()
+            )
+            self._add_support_footer(embed)
+            await interaction.followup.send(embed=embed, view=self._create_support_view())
+            return
+
+        try:
+            await self.image_generator.set_model_for_channel(interaction.channel_id, model)
+
+            default_model = self.image_generator.default_model
+
+            if model != default_model:
+                embed = discord.Embed(
+                    title="✅ Image Model Switched / 画像生成モデルを切り替えました",
+                    description=(
+                        f"The image generation model for this channel has been switched to `{model}`.\n"
+                        f"このチャンネルの画像生成モデルが `{model}` に切り替えられました。\n\n"
+                        f"💡 To reset to default (`{default_model}`), use `/reset-image-model`\n"
+                        f"💡 デフォルト (`{default_model}`) に戻すには `/reset-image-model` を使用してください"
+                    ),
+                    color=discord.Color.green()
+                )
+            else:
+                embed = discord.Embed(
+                    title="✅ Image Model Set to Default / 画像生成モデルをデフォルトに設定しました",
+                    description=f"The image generation model for this channel is now `{model}` (default).\nこのチャンネルの画像生成モデルが `{model}` (デフォルト) になりました。",
+                    color=discord.Color.green()
+                )
+
+            self._add_support_footer(embed)
+            await interaction.followup.send(embed=embed, view=self._create_support_view(), ephemeral=False)
+            logger.info(
+                f"Image model for channel {interaction.channel_id} switched to '{model}' by {interaction.user.name}")
+
+        except Exception as e:
+            logger.error(f"Failed to save channel image model settings: {e}", exc_info=True)
+            embed = discord.Embed(
+                title="❌ Save Error / 保存エラー",
+                description="Failed to save settings.\n設定の保存に失敗しました。",
+                color=discord.Color.red()
+            )
+            self._add_support_footer(embed)
+            await interaction.followup.send(embed=embed, view=self._create_support_view())
+
+    @app_commands.command(
+        name="reset-image-model",
+        description="Reset the image generation model to default for this channel. / このチャンネルの画像生成モデルをデフォルトに戻します。"
+    )
+    async def reset_image_model_slash(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=False)
+
+        if not self.image_generator:
+            embed = discord.Embed(
+                title="❌ Plugin Error / プラグインエラー",
+                description="ImageGenerator is not available.\nImageGeneratorが利用できません。",
+                color=discord.Color.red()
+            )
+            self._add_support_footer(embed)
+            await interaction.followup.send(embed=embed, view=self._create_support_view())
+            return
+
+        try:
+            if await self.image_generator.reset_model_for_channel(interaction.channel_id):
+                default_model = self.image_generator.default_model
+                embed = discord.Embed(
+                    title="✅ Image Model Reset to Default / 画像生成モデルをデフォルトに戻しました",
+                    description=f"The image generation model for this channel has been reset to the default (`{default_model}`).\nこのチャンネルの画像生成モデルをデフォルト (`{default_model}`) に戻しました。",
+                    color=discord.Color.green()
+                )
+                self._add_support_footer(embed)
+                await interaction.followup.send(embed=embed, view=self._create_support_view(), ephemeral=False)
+                logger.info(
+                    f"Image model for channel {interaction.channel_id} reset to default by {interaction.user.name}")
+            else:
+                embed = discord.Embed(
+                    title="ℹ️ No Custom Model Set / 専用モデルはありません",
+                    description="No custom image generation model is set for this channel.\nこのチャンネルには専用の画像生成モデルが設定されていません。",
+                    color=discord.Color.blue()
+                )
+                self._add_support_footer(embed)
+                await interaction.followup.send(embed=embed, view=self._create_support_view(), ephemeral=False)
+        except Exception as e:
+            logger.error(f"Failed to save channel image model settings after reset: {e}", exc_info=True)
+            embed = discord.Embed(
+                title="❌ Save Error / 保存エラー",
+                description="Failed to save settings.\n設定の保存に失敗しました。",
+                color=discord.Color.red()
+            )
+            self._add_support_footer(embed)
+            await interaction.followup.send(embed=embed, view=self._create_support_view())
+
+    @app_commands.command(
+        name="show-image-model",
+        description="Show the current image generation model for this channel. / このチャンネルの現在の画像生成モデルを表示します。"
+    )
+    async def show_image_model_slash(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=False)
+
+        if not self.image_generator:
+            embed = discord.Embed(
+                title="❌ Plugin Error / プラグインエラー",
+                description="ImageGenerator is not available.\nImageGeneratorが利用できません。",
+                color=discord.Color.red()
+            )
+            self._add_support_footer(embed)
+            await interaction.followup.send(embed=embed, view=self._create_support_view())
+            return
+
+        current_model = self.image_generator.get_model_for_channel(interaction.channel_id)
+        default_model = self.image_generator.default_model
+        is_default = current_model == default_model
+
+        embed = discord.Embed(
+            title="🎨 Current Image Generation Model / 現在の画像生成モデル",
+            description=(
+                f"**Current Model / 現在のモデル:** `{current_model}`\n"
+                f"**Status / 状態:** {'Default / デフォルト' if is_default else 'Custom / カスタム'}\n\n"
+                f"💡 Use `/switch-image-model` to change the model\n"
+                f"💡 モデルを変更するには `/switch-image-model` を使用してください"
+            ),
+            color=discord.Color.blue() if is_default else discord.Color.purple()
+        )
+
+        # 利用可能なモデル一覧を表示
+        available_models = self.image_generator.get_available_models()
+        models_list = "\n".join([f"• `{m}`" for m in available_models])
+        embed.add_field(
+            name="Available Models / 利用可能なモデル",
+            value=models_list,
+            inline=False
+        )
+
+        self._add_support_footer(embed)
+        await interaction.followup.send(embed=embed, view=self._create_support_view(), ephemeral=False)
+
+    @switch_image_model_slash.error
+    async def switch_image_model_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
+        logger.error(f"Error in /switch-image-model command: {error}", exc_info=True)
+        error_message = f"An unexpected error occurred: {error}\n予期せぬエラーが発生しました: {error}"
+        embed = discord.Embed(
+            title="❌ Unexpected Error / 予期せぬエラー",
+            description=error_message,
+            color=discord.Color.red()
+        )
         self._add_support_footer(embed)
         view = self._create_support_view()
         if not interaction.response.is_done():
