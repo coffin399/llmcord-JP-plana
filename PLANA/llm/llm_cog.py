@@ -200,6 +200,7 @@ class LLMCog(commands.Cog, name="LLM"):
         ))
         return view
 
+
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         if not hasattr(self.bot, 'config') or not self.bot.config:
@@ -674,16 +675,6 @@ class LLMCog(commands.Cog, name="LLM"):
 
         clean_text = "\n".join(text_parts)
 
-        # --- ログ修正 ---
-        # この詳細ログは on_message 側で集約して出力するため削除
-        # logger.info(
-        #     f"🔵 [FINAL_USER_MESSAGE] Prepared content for LLM:\n"
-        #     f"  - Text length: {len(clean_text)} chars\n"
-        #     f"  - Image count: {len(image_inputs)}"
-        # )
-        # if clean_text:
-        #     logger.info(f"🔵 [FINAL_USER_TEXT] Text content to be sent:\n{clean_text}")
-
         return image_inputs, clean_text
 
     @commands.Cog.listener()
@@ -714,7 +705,6 @@ class LLMCog(commands.Cog, name="LLM"):
             await message.reply(content=final_error_msg, view=self._create_support_view(), silent=True)
             return
 
-        # --- ログ修正: ここからロギングフローを開始 ---
         guild_log = f"guild='{message.guild.name}({message.guild.id})'" if message.guild else "guild='DM'"
         model_in_use = llm_client.model_name_for_api_calls
 
@@ -728,7 +718,6 @@ class LLMCog(commands.Cog, name="LLM"):
             await message.reply(content=error_msg, view=self._create_support_view(), silent=True)
             return
 
-        # --- 新しいログ出力 ---
         logger.info(
             f"📨 Received LLM request | {guild_log} | model='{model_in_use}' | text_length={len(text_content)} chars | images={len(image_contents)}")
         if text_content:
@@ -751,21 +740,16 @@ class LLMCog(commands.Cog, name="LLM"):
 
         messages_for_api: List[Dict[str, Any]] = [{"role": "system", "content": system_prompt}]
 
-        # 🔴 重要: 言語検出プロンプトをシステムプロンプトの直後に挿入
         if detected_lang_prompt := self._detect_language_and_create_prompt(text_content):
             messages_for_api.append({"role": "system", "content": detected_lang_prompt})
-            # --- ログ修正 ---
             logger.info("🌐 [LANG] Injecting language override prompt")
         elif self.language_prompt:
             messages_for_api.append({"role": "system", "content": self.language_prompt})
-            # --- ログ修正 ---
             logger.info("🌐 [LANG] Using default language prompt as fallback")
 
-        # 会話履歴を追加
         conversation_history = await self._collect_conversation_history(message)
         messages_for_api.extend(conversation_history)
 
-        # ユーザーメッセージを追加
         user_content_parts = []
         if text_content:
             timestamp = message.created_at.astimezone(self.jst).strftime('[%H:%M]')
@@ -779,32 +763,30 @@ class LLMCog(commands.Cog, name="LLM"):
         user_message_for_api = {"role": "user", "content": user_content_parts}
         messages_for_api.append(user_message_for_api)
 
-        # --- ログ修正 ---
         logger.info(f"🔵 [API] Sending {len(messages_for_api)} messages to LLM")
         logger.debug(f"Messages structure: system={len(messages_for_api[0]['content'])} chars, "
                      f"lang_override={'present' if len(messages_for_api) > 1 and 'CRITICAL' in str(messages_for_api[1]) else 'absent'}")
 
         try:
-            # --- ログ修正: log_context を渡さないように変更 ---
             sent_messages, llm_response = await self._handle_llm_streaming_response(
                 message, messages_for_api, llm_client
             )
 
             if sent_messages and llm_response:
-                # --- ログ修正 ---
-                logger.info(
-                    f"✅ LLM response completed | model='{model_in_use}' | response_length={len(llm_response)} chars")
-                logger.debug(f"LLM final response (length: {len(llm_response)} chars):\n{llm_response}")
+                logger.info(f"✅ LLM response completed | model='{model_in_use}' | response_length={len(llm_response)} chars")
+                # --- ★ここから変更★ ---
+                log_response = (llm_response[:200] + '...') if len(llm_response) > 203 else llm_response
+                logger.info(f"🤖 [LLM_RESPONSE] {log_response.replace(chr(10), ' ')}")
+                logger.debug(f"LLM full response (length: {len(llm_response)} chars):\n{llm_response}")
+                # --- ★ここまで変更★ ---
 
                 if thread_id not in self.conversation_threads:
                     self.conversation_threads[thread_id] = []
                 self.conversation_threads[thread_id].append(user_message_for_api)
 
-                # 最初のメッセージIDを記録
                 assistant_message = {"role": "assistant", "content": llm_response, "message_id": sent_messages[0].id}
                 self.conversation_threads[thread_id].append(assistant_message)
 
-                # 全メッセージをマッピングに追加
                 for msg in sent_messages:
                     self.message_to_thread[msg.id] = thread_id
 
@@ -844,11 +826,9 @@ class LLMCog(commands.Cog, name="LLM"):
         emoji_prefix = ":incoming_envelope: "
         emoji_suffix = " :incoming_envelope:"
 
-        # 最終更新のリトライ設定
         max_final_retries = 3
         final_retry_delay = 2.0
 
-        # --- ログ修正 ---
         logger.debug(f"Starting LLM stream for message {message.id}")
 
         try:
@@ -878,11 +858,9 @@ class LLMCog(commands.Cog, name="LLM"):
                 )
 
                 if should_update and full_response_text:
-                    # 2000文字に近づいたら警告を追加
                     display_length = len(full_response_text)
 
                     if display_length > SAFE_MESSAGE_LENGTH:
-                        # 制限を超えた場合、末尾に通知を追加
                         max_content_length = SAFE_MESSAGE_LENGTH - len(emoji_prefix) - len(emoji_suffix) - 100
                         display_text = (
                                 emoji_prefix +
@@ -921,14 +899,11 @@ class LLMCog(commands.Cog, name="LLM"):
                                 )
                                 await asyncio.sleep(retry_sleep_time)
 
-            # --- ログ修正 ---
             logger.debug(
                 f"Stream completed | Total chunks: {chunk_count} | Final length: {len(full_response_text)} chars")
 
-            # ★★★ 最終出力：長文の場合は分割送信 ★★★
             if full_response_text:
                 if len(full_response_text) <= SAFE_MESSAGE_LENGTH:
-                    # 短い場合は通常の更新（リトライ付き）
                     for attempt in range(max_final_retries):
                         try:
                             if full_response_text != sent_message.content:
@@ -966,14 +941,12 @@ class LLMCog(commands.Cog, name="LLM"):
                     return [sent_message], full_response_text
 
                 else:
-                    # 長い場合は分割送信
                     logger.debug(
                         f"Response is {len(full_response_text)} chars, splitting into multiple messages")
 
                     chunks = _split_message_smartly(full_response_text, SAFE_MESSAGE_LENGTH)
                     all_messages = []
 
-                    # 最初のメッセージを更新（リトライ付き）
                     first_chunk = chunks[0]
                     for attempt in range(max_final_retries):
                         try:
@@ -991,7 +964,6 @@ class LLMCog(commands.Cog, name="LLM"):
                                 if attempt < max_final_retries - 1:
                                     await asyncio.sleep(final_retry_delay)
 
-                    # 残りを追加送信
                     for i, chunk in enumerate(chunks[1:], start=2):
                         for attempt in range(max_final_retries):
                             try:
@@ -1009,7 +981,6 @@ class LLMCog(commands.Cog, name="LLM"):
                                     if attempt < max_final_retries - 1:
                                         await asyncio.sleep(final_retry_delay)
                                     else:
-                                        # 失敗しても続行
                                         break
 
                     return all_messages, full_response_text
@@ -1047,7 +1018,6 @@ class LLMCog(commands.Cog, name="LLM"):
         extra_params = self.llm_config.get('extra_api_parameters', {})
 
         for iteration in range(max_iterations):
-            # --- ログ修正 ---
             logger.debug(
                 f"Starting LLM API call (iteration {iteration + 1}/{max_iterations})")
 
@@ -1106,7 +1076,6 @@ class LLMCog(commands.Cog, name="LLM"):
                 logger.debug(f"No tool calls, returning final response")
                 return
 
-            # --- ログ修正 ---
             logger.info(f"🔧 [TOOL] LLM requested {len(tool_calls_buffer)} tool call(s)")
             for tc in tool_calls_buffer:
                 logger.debug(
@@ -1133,7 +1102,6 @@ class LLMCog(commands.Cog, name="LLM"):
 
             try:
                 function_args = json.loads(tool_call.function.arguments)
-                # --- ログ修正 ---
                 logger.info(f"🔧 [TOOL] Executing {function_name}")
                 logger.debug(f"🔧 [TOOL] Arguments: {json.dumps(function_args, ensure_ascii=False, indent=2)}")
 
@@ -1177,7 +1145,6 @@ class LLMCog(commands.Cog, name="LLM"):
                 error_content = f"[Tool Error]\nAn unexpected error occurred: {str(e)}"
 
             final_content = error_content if error_content else tool_response_content
-            # --- ログ修正 ---
             logger.debug(f"🔧 [TOOL] Sending tool response back to LLM (length: {len(final_content)} chars)")
 
             messages.append({
@@ -1268,7 +1235,6 @@ class LLMCog(commands.Cog, name="LLM"):
             await interaction.followup.send(content=error_msg, view=self._create_support_view(), ephemeral=False)
             return
 
-        # --- ログ修正: on_message と同様のロギングフロー ---
         guild_log = f"guild='{interaction.guild.name}({interaction.guild.id})'" if interaction.guild else "guild='DM'"
         model_in_use = llm_client.model_name_for_api_calls
 
@@ -1285,6 +1251,7 @@ class LLMCog(commands.Cog, name="LLM"):
             f"📨 Received /chat request | {guild_log} | model='{model_in_use}' | text_length={len(message)} chars | images={len(image_contents)}")
         log_text = (message[:200] + '...') if len(message) > 203 else message
         logger.info(f"💬 [USER_INPUT] {log_text.replace(chr(10), ' ')}")
+
 
         if not self.bio_manager or not self.memory_manager:
             error_msg = "Cannot respond because required plugins are not initialized.\n必要なプラグインが初期化されていないため、応答できません。"
@@ -1319,7 +1286,6 @@ class LLMCog(commands.Cog, name="LLM"):
         logger.info(f"🔵 [API] Sending {len(messages_for_api)} messages to LLM")
 
         try:
-            # 仮のメッセージオブジェクトを作成（分割送信用）
             temp_message = await interaction.followup.send(
                 ":incoming_envelope: Thinking...:incoming_envelope:",
                 ephemeral=False,
@@ -1397,15 +1363,15 @@ class LLMCog(commands.Cog, name="LLM"):
             logger.debug(
                 f"Stream completed | Total chunks: {chunk_count} | Final length: {len(full_response_text)} chars")
 
-            # 最終出力処理
             if full_response_text:
-                logger.info(
-                    f"✅ LLM response completed | model='{model_in_use}' | response_length={len(full_response_text)} chars")
-                logger.debug(
-                    f"LLM final response for /chat (length: {len(full_response_text)} chars):\n{full_response_text}")
+                logger.info(f"✅ LLM response completed | model='{model_in_use}' | response_length={len(full_response_text)} chars")
+                # --- ★ここから変更★ ---
+                log_response = (full_response_text[:200] + '...') if len(full_response_text) > 203 else full_response_text
+                logger.info(f"🤖 [LLM_RESPONSE] {log_response.replace(chr(10), ' ')}")
+                logger.debug(f"LLM full response for /chat (length: {len(full_response_text)} chars):\n{full_response_text}")
+                # --- ★ここまで変更★ ---
 
                 if len(full_response_text) <= SAFE_MESSAGE_LENGTH:
-                    # 短い場合は通常の更新（リトライ付き）
                     for attempt in range(max_final_retries):
                         try:
                             if full_response_text != temp_message.content:
@@ -1421,12 +1387,10 @@ class LLMCog(commands.Cog, name="LLM"):
                                 if attempt < max_final_retries - 1:
                                     await asyncio.sleep(final_retry_delay)
                 else:
-                    # 長い場合は分割送信
                     logger.debug(f"/chat response is {len(full_response_text)} chars, splitting")
 
                     chunks = _split_message_smartly(full_response_text, SAFE_MESSAGE_LENGTH)
 
-                    # 最初のメッセージを更新
                     for attempt in range(max_final_retries):
                         try:
                             await temp_message.edit(content=chunks[0], embed=None, view=None)
@@ -1442,7 +1406,6 @@ class LLMCog(commands.Cog, name="LLM"):
                                 if attempt < max_final_retries - 1:
                                     await asyncio.sleep(final_retry_delay)
 
-                    # 残りを追加送信
                     for i, chunk in enumerate(chunks[1:], start=2):
                         for attempt in range(max_final_retries):
                             try:
@@ -1472,7 +1435,6 @@ class LLMCog(commands.Cog, name="LLM"):
             error_msg = self.exception_handler.handle_exception(e)
             final_error_msg = f"❌ **Error / エラー** ❌\n\n{error_msg}"
             try:
-                # If temp_message exists, edit it. Otherwise, send a new followup.
                 if 'temp_message' in locals() and temp_message:
                     await temp_message.edit(content=final_error_msg, embed=None, view=self._create_support_view())
                 else:
