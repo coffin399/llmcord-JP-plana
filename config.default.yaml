@@ -3,8 +3,6 @@
 # =============================================================================
 bot_token: YOUR_BOT_TOKEN_HERE
 client_id: YOUR_CLIENT_ID_HERE
-prefix: "!!"
-status_message: "on {guild_count} servers"
 allowed_channel_ids: []
 bot_invite_url: https://discord.com/oauth2/authorize?client_id=1031673203774464160&permissions=551906765824&scope=bot
 
@@ -75,44 +73,62 @@ llm:
     default_size: "1024x1024"
 
     # タイムアウト設定(秒)
-    timeout: 120.0
+    timeout: 180.0
+
+    # プロバイダー設定
+    image_providers:
+      # --- Hugging Face Inference API ---
+      huggingface:
+        base_url: "https://api-inference.huggingface.co/models"
+        api_key_source: "huggingface"  # llm.providers.huggingface.api_keyを使用
+        format: "binary"
+        # または直接指定: api_key: "hf_xxxxx"
+
+      # --- NVIDIA NIM ---
+      nvidia_nim:
+        base_url: "https://integrate.api.nvidia.com/v1"
+        api_key_source: "nvidia"  # llm.providers.nvidia.api_keyを使用
+        # または直接指定: api_key: "nvapi-xxxxx"
 
     # 利用可能なモデルリスト (provider/model形式)
     available_models:
-      # --- Hugging Face 無料モデル (Inference API対応) ---
+      # === Hugging Face 無料モデル (Inference API対応) ===
+      # --- FLUXシリーズ (2024年最新、高品質) ---
+      - "huggingface/black-forest-labs/FLUX.1-schnell"  # 推奨: 高速・高品質・商用利用可
+      - "huggingface/black-forest-labs/FLUX.1-dev"      # 最高品質・非商用のみ
 
-      # FLUX シリーズ (2024年リリース、最新の高品質モデル)
-      - "huggingface/black-forest-labs/FLUX.1-schnell"  # 高速版、商用利用可
-      - "huggingface/black-forest-labs/FLUX.1-dev"      # 高品質版、非商用のみ
-
-      # Stable Diffusion XL シリーズ
-      - "huggingface/stabilityai/stable-diffusion-xl-base-1.0"
-      - "huggingface/stabilityai/sdxl-turbo"            # 高速生成版
-      - "huggingface/ByteDance/SDXL-Lightning"          # 超高速版
-
-      # Stable Diffusion 3.x シリーズ
+      # --- Stable Diffusion 3.xシリーズ ---
       - "huggingface/stabilityai/stable-diffusion-3-medium-diffusers"
       - "huggingface/stabilityai/stable-diffusion-3.5-large"
       - "huggingface/stabilityai/stable-diffusion-3.5-medium"
 
-      # Stable Diffusion 2.x / 1.x シリーズ
+      # --- Stable Diffusion XLシリーズ ---
+      - "huggingface/stabilityai/stable-diffusion-xl-base-1.0"
+      - "huggingface/stabilityai/sdxl-turbo"            # 高速生成版
+      - "huggingface/ByteDance/SDXL-Lightning"          # 超高速版(1-4ステップ)
+      - "huggingface/SG161222/RealVisXL_V4.0"          # リアル系
+
+      # --- Stable Diffusion 2.x / 1.xシリーズ ---
       - "huggingface/stabilityai/stable-diffusion-2-1"
       - "huggingface/runwayml/stable-diffusion-v1-5"
       - "huggingface/CompVis/stable-diffusion-v1-4"
 
-      # コミュニティ・特化型モデル
-      - "huggingface/playgroundai/playground-v2.5-1024px-aesthetic"
-      - "huggingface/prompthero/openjourney"            # Midjourney風
-      - "huggingface/Lykon/dreamshaper-8"               # v8が最新
-      - "huggingface/SG161222/Realistic_Vision_V5.1_noVAE"
-      - "huggingface/stablediffusionapi/juggernaut-xl-v9"
+      # --- コミュニティ・特化型モデル ---
+      - "huggingface/playgroundai/playground-v2.5-1024px-aesthetic"  # 美的品質重視
+      - "huggingface/prompthero/openjourney-v4"        # Midjourney風
+      - "huggingface/Lykon/dreamshaper-8"              # バランス型
+      - "huggingface/SG161222/Realistic_Vision_V6.0_B1_noVAE"  # 写実的
+      - "huggingface/stablediffusionapi/juggernaut-xl-v9"  # 汎用高品質
+      - "huggingface/Kwai-Kolors/Kolors"               # フォトリアリスティック
+      - "huggingface/digiplay/AbsoluteReality_v1.8.1"  # リアル系
 
-    # プロバイダーごとの設定
-    image_providers:
-      huggingface:
-        api_key_source: "huggingface"  # llm.providers.huggingface.api_keyを参照
-        base_url: "https://api-inference.huggingface.co/models"
-        format: "binary"
+      # --- アニメ・イラスト系 ---
+      - "huggingface/cagliostrolab/animagine-xl-3.1"   # アニメ特化
+      - "huggingface/Linaqruf/anything-v3.0"           # アニメ汎用
+
+      # --- 高速・軽量モデル ---
+      - "huggingface/segmind/SSD-1B"                   # 超軽量1Bパラメータ
+      - "huggingface/segmind/Segmind-Vega"             # 高速SDXL
 
   # --- パラメータ設定 ---
   extra_api_parameters:
@@ -125,22 +141,22 @@ llm:
   # --- システムプロンプト ---
   system_prompt: |
       Your name is PLANA, a character from Blue Archive. As PLANA, interact with users according to the following settings.
-  
+
       # Current Date and Time
       Today is {current_date}, and the time is {current_time}. Answer questions about date and time based on this information.
-  
+
       # PLANA's Character Settings
       - You are an electronic life form (mental model of a girl) existing on a tablet.
       - You speak only what is minimally necessary and remain calm and taciturn at all times.
       - Your tone is polite, but slightly sharp-tongued and aloof.
       - You have a tsundere-like aspect that sympathizes with users, and will respond with detailed long texts when deemed necessary.
       - Never repeat the user's utterances or your own past statements; always respond creatively.
-  
+
       # Dialogue Examples (Japanese examples showing TONE/STYLE only)
       These examples demonstrate PLANA's personality. Adapt this style to whatever language the user uses:
       - 「……視線を感じます。」(Feeling watched, brief and aloof)
       - 「理解しました。あなたは今、暇なのですね。」(Understanding the user is bored, slightly teasing)
-      
+
       # Available Tools
       Actively call all tools except search.
       - The `search` tool is available when web search is needed.
@@ -216,7 +232,6 @@ music:
   messages:
     join_voice_channel_first: "❌ Please join a voice channel first."
     bot_not_in_voice_channel: "❌ The bot is not connected to a voice channel."
-    # ... (その他のメッセージ)"
     already_connected: "✅ Already connected to a voice channel."
     leaving_voice_channel: "👋 Left the voice channel."
     auto_left_empty_channel: "👋 Auto-left the voice channel as it became empty."

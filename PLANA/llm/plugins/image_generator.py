@@ -1,4 +1,3 @@
-# PLANA/llm/plugins/image_generator.py
 from __future__ import annotations
 
 import asyncio
@@ -14,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 
 class ImageGenerator:
-    """画像生成プラグイン - Hugging Face / NVIDIA NIM対応"""
+    """画像生成プラグイン - Hugging Face Inference Providers / NVIDIA NIM対応"""
 
     def __init__(self, bot):
         self.bot = bot
@@ -85,7 +84,7 @@ class ImageGenerator:
     def _parse_model_string(self, model_string: str) -> tuple[str, str]:
         """
         モデル文字列をパースして (provider, model_name) を返す
-        例: "huggingface/stabilityai/stable-diffusion-xl" -> ("huggingface", "stabilityai/stable-diffusion-xl")
+        例: "huggingface/black-forest-labs/FLUX.1-dev" -> ("huggingface", "black-forest-labs/FLUX.1-dev")
         """
         if '/' not in model_string:
             raise ValueError(f"Invalid model format: {model_string}. Expected 'provider/model_name'")
@@ -172,7 +171,7 @@ class ImageGenerator:
                             "type": "string",
                             "description": (
                                 "Things to avoid in the image (optional). "
-                                "画像に含めたくない要素（オプション）。"
+                                "画像に含めたくない要素(オプション)。"
                             )
                         },
                         "size": {
@@ -267,16 +266,16 @@ class ImageGenerator:
             model: str
     ) -> Optional[bytes]:
         """
-        画像を生成（プロバイダーごとの処理分岐）
+        画像を生成(プロバイダーごとの処理分岐)
 
         Args:
             prompt: 生成する画像の説明
             negative_prompt: 除外する要素
             size: 画像サイズ
-            model: 使用するモデル（provider/model_name形式）
+            model: 使用するモデル(provider/model_name形式)
 
         Returns:
-            生成された画像データ（PNG形式）
+            生成された画像データ(PNG形式)
         """
         try:
             provider_name, model_name = self._parse_model_string(model)
@@ -289,21 +288,29 @@ class ImageGenerator:
             logger.error(f"❌ [IMAGE_GEN] No configuration found for provider: {provider_name}")
             return None
 
-        # APIキーを取得
-        api_key_source = provider_config.get('api_key_source')
-        if api_key_source:
+        # APIキーを取得 - 修正版
+        api_key = None
+
+        # まず直接指定のapi_keyをチェック
+        if 'api_key' in provider_config:
+            api_key = provider_config['api_key']
+            logger.info(f"🔑 [IMAGE_GEN] Using direct API key for {provider_name}")
+        # 次にapi_key_sourceから取得
+        elif 'api_key_source' in provider_config:
+            api_key_source = provider_config['api_key_source']
             llm_provider = self.llm_providers.get(api_key_source, {})
             api_key = llm_provider.get('api_key')
-        else:
-            api_key = provider_config.get('api_key')
+            logger.info(f"🔑 [IMAGE_GEN] Using API key from llm.providers.{api_key_source}")
 
         if not api_key:
             logger.error(f"❌ [IMAGE_GEN] No API key found for provider: {provider_name}")
+            logger.error(f"❌ [IMAGE_GEN] Provider config: {provider_config}")
+            logger.error(f"❌ [IMAGE_GEN] Available LLM providers: {list(self.llm_providers.keys())}")
             return None
 
         # プロバイダーごとに処理を分岐
         if provider_name == "huggingface":
-            return await self._generate_image_huggingface(
+            return await self._generate_image_huggingface_new(
                 api_key, provider_config, model_name, prompt, negative_prompt, size
             )
         elif provider_name == "nvidia_nim":
@@ -314,7 +321,7 @@ class ImageGenerator:
             logger.error(f"❌ [IMAGE_GEN] Unsupported provider: {provider_name}")
             return None
 
-    async def _generate_image_huggingface(
+    async def _generate_image_huggingface_new(
             self,
             api_key: str,
             provider_config: Dict,
@@ -323,52 +330,82 @@ class ImageGenerator:
             negative_prompt: str,
             size: str
     ) -> Optional[bytes]:
-        """Hugging Face APIで画像を生成"""
+        """Hugging Face Inference APIで画像を生成 (Legacy Inference API使用)"""
         width, height = map(int, size.split('x'))
-        base_url = provider_config.get('base_url', 'https://api-inference.huggingface.co/models')
-        url = f"{base_url}/{model_name}"
+
+        # Legacy Inference APIエンドポイント（POST /models/{model_id}）
+        url = f"https://api-inference.huggingface.co/models/{model_name}"
 
         headers = {
             "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json"
         }
 
-        payload = {
-            "inputs": prompt,
-            "parameters": {
-                "width": width,
-                "height": height,
-                "num_inference_steps": 25
-            }
-        }
+        # バイナリペイロード形式: JSONではなくプロンプトを直接送信
+        # 一部モデルはJSONパラメータに対応していないため、シンプルな形式を使用
+        payload = prompt.encode('utf-8')
 
-        if negative_prompt:
-            payload["parameters"]["negative_prompt"] = negative_prompt
+        logger.info(f"🔵 [IMAGE_GEN] Calling Hugging Face Legacy Inference API")
+        logger.info(f"🔵 [IMAGE_GEN] URL: {url}")
+        logger.info(f"🔵 [IMAGE_GEN] Prompt: {prompt[:100]}...")
+        logger.info(f"🔵 [IMAGE_GEN] Size: {width}x{height}")
 
-        logger.info(f"🔵 [IMAGE_GEN] Calling Hugging Face API: {url}")
+        # 注意: Legacy APIは一部モデルでwidth/heightパラメータに対応していない
+        # そのため、モデルのデフォルトサイズで生成されることがある
 
         try:
             async with self.http_session.post(
                     url,
                     headers=headers,
-                    json=payload,
+                    data=payload,  # JSONではなくバイナリデータとして送信
                     timeout=aiohttp.ClientTimeout(total=self.timeout)
             ) as response:
+                logger.info(f"🔵 [IMAGE_GEN] Response status: {response.status}")
+                logger.info(f"🔵 [IMAGE_GEN] Response headers: {dict(response.headers)}")
+
                 if response.status == 200:
-                    # Hugging Faceはバイナリデータを直接返す
+                    # レスポンスがバイナリ画像データ
+                    content_type = response.headers.get('Content-Type', '')
+                    logger.info(f"🔵 [IMAGE_GEN] Content-Type: {content_type}")
+
                     image_bytes = await response.read()
                     logger.info(f"✅ [IMAGE_GEN] Successfully received image ({len(image_bytes)} bytes)")
                     return image_bytes
+
+                # 503エラーはモデルロード中のためリトライを試みる
+                elif response.status == 503:
+                    try:
+                        error_json = await response.json()
+                        estimated_time = error_json.get('estimated_time', 20.0)
+                        logger.warning(f"⚠️ Model is loading. Retrying in {estimated_time} seconds...")
+                        await asyncio.sleep(min(estimated_time, 30.0))  # 最大30秒まで
+                        # 再帰呼び出し
+                        return await self._generate_image_huggingface_new(
+                            api_key, provider_config, model_name, prompt, negative_prompt, size
+                        )
+                    except Exception as e:
+                        logger.error(f"❌ [IMAGE_GEN] Error parsing 503 response: {e}")
+                        error_text = await response.text()
+                        logger.error(f"❌ [IMAGE_GEN] 503 Response: {error_text[:500]}")
+                        return None
+
                 else:
                     error_text = await response.text()
                     logger.error(f"❌ [IMAGE_GEN] API error {response.status}: {error_text[:500]}")
+
+                    # 詳細なエラー情報を出力
+                    try:
+                        error_json = await response.json()
+                        logger.error(f"❌ [IMAGE_GEN] Error details: {error_json}")
+                    except:
+                        pass
+
                     return None
 
         except asyncio.TimeoutError:
             logger.error(f"❌ [IMAGE_GEN] Request timed out after {self.timeout}s")
             return None
         except Exception as e:
-            logger.error(f"❌ [IMAGE_GEN] Exception: {e}", exc_info=True)
+            logger.error(f"❌ [IMAGE_GEN] Exception during API call: {e}", exc_info=True)
             return None
 
     async def _generate_image_nvidia(
@@ -383,6 +420,7 @@ class ImageGenerator:
         """NVIDIA NIM APIで画像を生成"""
         width, height = map(int, size.split('x'))
         base_url = provider_config.get('base_url', 'https://integrate.api.nvidia.com/v1')
+        base_url = base_url.rstrip('/')
         url = f"{base_url}/images/generations"
 
         headers = {
@@ -392,6 +430,7 @@ class ImageGenerator:
         }
 
         payload = {
+            "model": model_name,
             "text_prompts": [{"text": prompt, "weight": 1.0}],
             "cfg_scale": 5.0,
             "sampler": "K_DPM_2_ANCESTRAL",
@@ -404,7 +443,8 @@ class ImageGenerator:
         if negative_prompt:
             payload["text_prompts"].append({"text": negative_prompt, "weight": -1.0})
 
-        logger.info(f"🔵 [IMAGE_GEN] Calling NVIDIA NIM API: {url}")
+        logger.info(f"🔵 [IMAGE_GEN] Calling NVIDIA NIM API")
+        logger.info(f"🔵 [IMAGE_GEN] URL: {url}")
 
         try:
             async with self.http_session.post(
@@ -413,6 +453,8 @@ class ImageGenerator:
                     json=payload,
                     timeout=aiohttp.ClientTimeout(total=self.timeout)
             ) as response:
+                logger.info(f"🔵 [IMAGE_GEN] Response status: {response.status}")
+
                 if response.status == 200:
                     result = await response.json()
 
