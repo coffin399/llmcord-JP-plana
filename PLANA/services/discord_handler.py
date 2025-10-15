@@ -1,7 +1,9 @@
 # PLANA/services/discord_handler.py
 
 import asyncio
+import json
 import logging
+import os
 import re
 from asyncio import Queue
 from typing import List
@@ -43,38 +45,87 @@ class DiscordLogHandler(logging.Handler):
     レートリミットを回避するため、ログをキューに溜め、定期的にまとめて送信します。
     """
 
-    def __init__(self, bot: Client, channel_ids: List[int], interval: float = 5.0):
+    def __init__(self, bot: Client, channel_ids: List[int], interval: float = 5.0,
+                 config_path: str = "data/log_channels.json"):
         super().__init__()
         self.bot = bot
         self.channel_ids = channel_ids
         self.interval = interval
+        self.config_path = config_path
 
         self.queue: Queue[str] = Queue()
         self.channels: List[TextChannel] = []
         self._closed = False
+
+        # 無効なチャンネルIDを追跡（連続で失敗した回数）
+        self.invalid_channel_attempts: dict[int, int] = {}
+        self.max_attempts = 3  # 3回連続で失敗したら削除
 
         self._task = self.bot.loop.create_task(self._log_sender_loop())
 
     def add_channel(self, channel_id: int):
         if channel_id not in self.channel_ids:
             self.channel_ids.append(channel_id)
+            # 失敗カウントをリセット
+            self.invalid_channel_attempts.pop(channel_id, None)
+
             if self.bot.is_ready():
                 channel = self.bot.get_channel(channel_id)
                 if isinstance(channel, TextChannel):
                     self.channels.append(channel)
                     print(f"DiscordLogHandler: Immediately added and activated channel {channel_id}.")
+                    # 設定を保存
+                    asyncio.create_task(self._save_config())
                 else:
                     print(
                         f"DiscordLogHandler: Added channel ID {channel_id}, but it's not a valid text channel or not found yet.")
             else:
                 self.channels = []
                 print(f"DiscordLogHandler: Added channel ID {channel_id}. Will be activated once bot is ready.")
+                # 設定を保存
+                asyncio.create_task(self._save_config())
 
     def remove_channel(self, channel_id: int):
         if channel_id in self.channel_ids:
             self.channel_ids.remove(channel_id)
             self.channels = [ch for ch in self.channels if ch.id != channel_id]
+            self.invalid_channel_attempts.pop(channel_id, None)
             print(f"DiscordLogHandler: Immediately removed and deactivated channel {channel_id}.")
+            # 設定を保存
+            asyncio.create_task(self._save_config())
+
+    async def _save_config(self):
+        """チャンネルIDリストをJSONファイルに保存"""
+        try:
+            os.makedirs(os.path.dirname(self.config_path), exist_ok=True)
+
+            data = {
+                "log_channels": self.channel_ids
+            }
+
+            try:
+                import aiofiles
+                async with aiofiles.open(self.config_path, 'w', encoding='utf-8') as f:
+                    await f.write(json.dumps(data, indent=4, ensure_ascii=False))
+            except ImportError:
+                with open(self.config_path, 'w', encoding='utf-8') as f:
+                    json.dump(data, f, indent=4, ensure_ascii=False)
+
+            print(f"DiscordLogHandler: Saved log channel configuration to {self.config_path}")
+        except Exception as e:
+            print(f"DiscordLogHandler: Failed to save config: {e}")
+
+    async def _remove_invalid_channel(self, channel_id: int, reason: str):
+        """無効なチャンネルをリストから削除"""
+        if channel_id in self.channel_ids:
+            self.channel_ids.remove(channel_id)
+            self.channels = [ch for ch in self.channels if ch.id != channel_id]
+            self.invalid_channel_attempts.pop(channel_id, None)
+
+            print(f"DiscordLogHandler: ⚠️ Removed invalid channel {channel_id} from config. Reason: {reason}")
+
+            # 設定を保存
+            await self._save_config()
 
     def emit(self, record: logging.LogRecord):
         if self._closed:
@@ -229,7 +280,8 @@ class DiscordLogHandler(logging.Handler):
         # または: 'ギルド名' の 'チャンネル名' -> 'ギ****' の 'チ****'
         message = re.sub(
             r"'([^']+)' の '([^']+)'",
-            lambda m: f"'{self._get_display_chars(m.group(1), 1)}****' の '{self._get_display_chars(m.group(2), 1)}****'",
+            lambda
+                m: f"'{self._get_display_chars(m.group(1), 1)}****' の '{self._get_display_chars(m.group(2), 1)}****'",
             message
         )
 
@@ -258,13 +310,31 @@ class DiscordLogHandler(logging.Handler):
         # チャンネルの存在確認と更新
         if not self.channels or len(self.channels) != len(self.channel_ids):
             found_channels = []
+            channels_to_remove = []
+
             for cid in self.channel_ids:
                 channel = self.bot.get_channel(cid)
                 if channel and isinstance(channel, TextChannel):
                     found_channels.append(channel)
+                    # 成功したら失敗カウントをリセット
+                    self.invalid_channel_attempts.pop(cid, None)
                 else:
-                    print(f"DiscordLogHandler: Warning - Channel with ID {cid} not found or is not a text channel.")
+                    # チャンネルが見つからない場合、失敗カウントを増やす
+                    self.invalid_channel_attempts[cid] = self.invalid_channel_attempts.get(cid, 0) + 1
+
+                    if self.invalid_channel_attempts[cid] >= self.max_attempts:
+                        # 規定回数失敗したら削除対象に
+                        channels_to_remove.append(cid)
+                        print(f"DiscordLogHandler: ⚠️ Channel {cid} not found {self.max_attempts} times consecutively.")
+                    else:
+                        print(
+                            f"DiscordLogHandler: Warning - Channel with ID {cid} not found or is not a text channel. (Attempt {self.invalid_channel_attempts[cid]}/{self.max_attempts})")
+
             self.channels = found_channels
+
+            # 無効なチャンネルを削除
+            for cid in channels_to_remove:
+                await self._remove_invalid_channel(cid, f"Channel not found after {self.max_attempts} attempts")
 
         if not self.channels:
             if self.channel_ids:
@@ -329,16 +399,44 @@ class DiscordLogHandler(logging.Handler):
             chunks.append("```ansi\n" + "\n".join(current_logs) + "\n```")
 
         # 全てのチャンネルに、作成したチャンクを送信
+        channels_to_remove = []
         for channel in self.channels:
+            send_success = False
             for chunk in chunks:
                 if not chunk.strip():
                     continue
                 try:
                     await channel.send(chunk, silent=True)
+                    send_success = True
                     # チャンク間の送信にわずかな遅延を入れ、レートリミットを回避
                     await asyncio.sleep(0.2)
+                except discord.errors.Forbidden:
+                    # 権限エラー: チャンネルが削除されたか、アクセス権がない
+                    print(f"DiscordLogHandler: ⚠️ No permission to send to channel {channel.id}. Marking for removal.")
+                    channels_to_remove.append((channel.id, "Forbidden: No permission to send messages"))
+                    break
+                except discord.errors.NotFound:
+                    # チャンネルが見つからない（削除された）
+                    print(f"DiscordLogHandler: ⚠️ Channel {channel.id} not found (deleted?). Marking for removal.")
+                    channels_to_remove.append((channel.id, "NotFound: Channel has been deleted"))
+                    break
                 except Exception as e:
                     print(f"Failed to send log to Discord channel {channel.id}: {e}")
+                    if not send_success:
+                        # 1つも送信できなかった場合のみ失敗カウントを増やす
+                        self.invalid_channel_attempts[channel.id] = self.invalid_channel_attempts.get(channel.id, 0) + 1
+                        if self.invalid_channel_attempts[channel.id] >= self.max_attempts:
+                            channels_to_remove.append(
+                                (channel.id, f"Failed to send after {self.max_attempts} attempts: {str(e)}"))
+                    break
+
+            # 成功したらカウントリセット
+            if send_success:
+                self.invalid_channel_attempts.pop(channel.id, None)
+
+        # 無効なチャンネルを削除
+        for channel_id, reason in channels_to_remove:
+            await self._remove_invalid_channel(channel_id, reason)
 
     async def _log_sender_loop(self):
         """バックグラウンドで定期的にキュー処理を呼び出すループ。"""
