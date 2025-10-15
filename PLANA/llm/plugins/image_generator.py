@@ -42,6 +42,10 @@ class ImageGenerator:
         self.show_progress = self.image_gen_config.get('show_progress', True)
         self.progress_update_interval = self.image_gen_config.get('progress_update_interval', 2.0)
 
+        # 画像保存設定
+        self.save_images = self.image_gen_config.get('save_images', True)
+        self.save_directory = self.image_gen_config.get('save_directory', 'data/image')
+
         # 生成パラメータ
         self.default_params = self.image_gen_config.get('default_params', {})
 
@@ -66,6 +70,7 @@ class ImageGenerator:
         logger.info(f"ImageGenerator initialized with Forge WebUI at: {self.forge_url}")
         logger.info(f"Default model: {self.default_model}")
         logger.info(f"Available models: {len(self.available_models)} models")
+        logger.info(f"Save images: {self.save_images} (directory: {self.save_directory})")
 
     def _load_channel_models(self) -> Dict[str, str]:
         """チャンネルごとのモデル設定を読み込む"""
@@ -351,6 +356,11 @@ class ImageGenerator:
             if not image_data:
                 return "❌ Failed to generate image. / 画像の生成に失敗しました。"
 
+            # 画像を保存
+            saved_path = None
+            if self.save_images:
+                saved_path = await self._save_image(image_data, prompt, model, size)
+
             channel = self.bot.get_channel(channel_id)
             if not channel:
                 logger.error(f"Channel {channel_id} not found!")
@@ -371,15 +381,20 @@ class ImageGenerator:
                 )
             embed.add_field(name="Size", value=size, inline=True)
             embed.add_field(name="Model", value=model, inline=True)
+            if saved_path:
+                embed.add_field(name="Saved to / 保存先", value=f"`{saved_path}`", inline=False)
             embed.set_footer(text="Powered by SDWebUI reForge and PLANA on RTX3050")
 
             await channel.send(embed=embed, file=image_file)
 
             logger.info(f"✅ [IMAGE_GEN] Successfully generated and sent image")
+            if saved_path:
+                logger.info(f"💾 [IMAGE_GEN] Image saved to: {saved_path}")
 
             return (
                 f"✅ Successfully generated image with prompt: '{prompt[:100]}{'...' if len(prompt) > 100 else ''}'\n"
                 f"The image has been sent to the channel. / 画像をチャンネルに送信しました。"
+                f"{f' Image saved to: {saved_path}' if saved_path else ''}"
             )
 
         finally:
@@ -710,6 +725,59 @@ class ImageGenerator:
             pass
         except Exception as e:
             logger.error(f"❌ [IMAGE_GEN] Unexpected error in progress monitoring: {e}", exc_info=True)
+
+    async def _save_image(self, image_data: bytes, prompt: str, model: str, size: str) -> Optional[str]:
+        """
+        生成された画像をファイルに保存
+
+        Args:
+            image_data: 画像データ（バイト列）
+            prompt: 生成プロンプト
+            model: 使用したモデル名
+            size: 画像サイズ
+
+        Returns:
+            保存されたファイルパス（相対パス）、失敗時はNone
+        """
+        import os
+        import datetime
+        import re
+
+        try:
+            # 保存ディレクトリを作成
+            os.makedirs(self.save_directory, exist_ok=True)
+
+            # ファイル名を生成（タイムスタンプ + プロンプトの一部）
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+
+            # プロンプトから安全なファイル名を生成（最初の50文字まで）
+            safe_prompt = re.sub(r'[^\w\s-]', '', prompt[:50])
+            safe_prompt = re.sub(r'[-\s]+', '_', safe_prompt).strip('_')
+
+            # モデル名から簡単な識別子を抽出
+            model_short = model.split('.')[0][:20] if '.' in model else model[:20]
+            model_short = re.sub(r'[^\w-]', '', model_short)
+
+            # ファイル名を構築
+            filename = f"{timestamp}_{model_short}_{size}_{safe_prompt}.png"
+            filepath = os.path.join(self.save_directory, filename)
+
+            # 画像を保存
+            try:
+                import aiofiles
+                async with aiofiles.open(filepath, 'wb') as f:
+                    await f.write(image_data)
+            except ImportError:
+                # aiofいlesがない場合は通常の書き込み
+                with open(filepath, 'wb') as f:
+                    f.write(image_data)
+
+            logger.info(f"💾 [IMAGE_GEN] Image saved to: {filepath}")
+            return filepath
+
+        except Exception as e:
+            logger.error(f"❌ [IMAGE_GEN] Failed to save image: {e}", exc_info=True)
+            return None
 
     async def get_available_models_from_forge(self) -> Optional[List[str]]:
         """Forge WebUIから利用可能なモデルリストを取得"""
