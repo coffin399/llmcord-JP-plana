@@ -371,7 +371,7 @@ class ImageGenerator:
                 )
             embed.add_field(name="Size", value=size, inline=True)
             embed.add_field(name="Model", value=model, inline=True)
-            embed.set_footer(text="Powered by SDWebUI reForge PLANA on RTX3050")
+            embed.set_footer(text="Powered by SDWebUI reForge and PLANA on RTX3050")
 
             await channel.send(embed=embed, file=image_file)
 
