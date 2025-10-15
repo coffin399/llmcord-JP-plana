@@ -200,7 +200,6 @@ class LLMCog(commands.Cog, name="LLM"):
         ))
         return view
 
-
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         if not hasattr(self.bot, 'config') or not self.bot.config:
@@ -375,7 +374,7 @@ class LLMCog(commands.Cog, name="LLM"):
 
         # 信頼性を上げるため、ある程度の長さが必要
         if len(text.strip()) < 15:
-            logger.info("Text too short for reliable language detection.")
+            logger.debug("Text too short for reliable language detection.")
             return None
 
         try:
@@ -394,7 +393,8 @@ class LLMCog(commands.Cog, name="LLM"):
 
             lang_name = lang_map.get(lang_code, lang_code)
 
-            logger.info(f"Language detected: {lang_code} ({lang_name})")
+            # --- ログ修正 ---
+            logger.info(f"🌐 [LANG] Detected: {lang_code} ({lang_name})")
 
             # より強力な言語指示プロンプト
             prompt = (
@@ -414,7 +414,7 @@ class LLMCog(commands.Cog, name="LLM"):
             return None
 
     async def _prepare_system_prompt(self, channel_id: int, user_id: int, user_display_name: str) -> str:
-        """システムプロンプトを生成する（言語に関する記述を削除/修正）"""
+        """システムプロンプトを生成する"""
         if not self.bio_manager or not self.memory_manager:
             logger.error("BioManager or MemoryManager is not initialized.")
             return "Error: Core components for prompt generation are missing."
@@ -426,7 +426,6 @@ class LLMCog(commands.Cog, name="LLM"):
         )
 
         # システムプロンプトから言語に関する指示を削除または弱める
-        # 例: 「日本語で応答してください」などの記述を削除
         system_prompt_template = system_prompt_template.replace(
             "必ず日本語で応答してください", ""
         ).replace(
@@ -435,17 +434,12 @@ class LLMCog(commands.Cog, name="LLM"):
             "Please respond in Japanese", ""
         )
 
-        logger.info(f"🔵 [DEBUG] Template length: {len(system_prompt_template)} chars")
-        logger.info(
-            f"🔵 [DEBUG] Template contains {{available_commands}}: {'{available_commands}' in system_prompt_template}")
-
         available_commands = ""
         if self.command_manager:
             await self.bot.wait_until_ready()
             available_commands = self.command_manager.get_all_commands_info()
-            logger.info(f"🔵 [INPUT] Command info retrieved: {len(available_commands)} characters")
         else:
-            logger.warning("CommandInfoManager is not available. Command list will be empty in the prompt.")
+            logger.warning("CommandInfoManager is not available.")
 
         try:
             now = datetime.now(self.jst)
@@ -459,16 +453,14 @@ class LLMCog(commands.Cog, name="LLM"):
                     available_commands=available_commands
                 )
             else:
-                logger.warning("⚠️ {available_commands} not in template. Formatting without it.")
+                logger.warning("⚠️ {available_commands} not in template")
                 system_prompt = system_prompt_template.format(
                     current_date=current_date_str,
                     current_time=current_time_str
                 )
 
-            logger.info(f"🔵 [INPUT] System prompt after formatting: {len(system_prompt)} characters")
-
         except (KeyError, ValueError) as e:
-            logger.warning(f"Could not format system_prompt with all placeholders. Error: {e}")
+            logger.warning(f"Could not format system_prompt: {e}")
             system_prompt = system_prompt_template
             system_prompt = system_prompt.replace('{current_date}', current_date_str)
             system_prompt = system_prompt.replace('{current_time}', current_time_str)
@@ -476,17 +468,13 @@ class LLMCog(commands.Cog, name="LLM"):
 
         if available_commands:
             if "# 🤖 利用可能なBotコマンド一覧" not in system_prompt:
-                logger.info("🔧 [FIX] Appending command info to system prompt")
                 system_prompt += f"\n\n{available_commands}"
-            else:
-                logger.info("✅ [DEBUG] Command info already in system prompt")
-
-        logger.info(f"🔵 [INPUT] System prompt after command insertion: {len(system_prompt)} characters")
 
         if formatted_memories := self.memory_manager.get_formatted_memories():
             system_prompt += f"\n\n{formatted_memories}"
 
-        logger.info(f"🔵 [INPUT] Final system prompt: {len(system_prompt)} characters")
+        # --- ログ修正 ---
+        logger.info(f"🔧 [SYSTEM] System prompt prepared ({len(system_prompt)} chars)")
         return system_prompt
 
     def get_tools_definition(self) -> Optional[List[Dict[str, Any]]]:
@@ -593,7 +581,8 @@ class LLMCog(commands.Cog, name="LLM"):
                         }
                         mime_type = mime_mapping.get(ext, 'image/jpeg')
 
-                    logger.info(
+                    # --- ログ修正 ---
+                    logger.debug(
                         f"🖼️ [IMAGE] Successfully processed image: {url[:100]}... (MIME: {mime_type}, Size: {len(image_bytes)} bytes)")
 
                     # OpenAI Vision API互換フォーマット
@@ -685,14 +674,15 @@ class LLMCog(commands.Cog, name="LLM"):
 
         clean_text = "\n".join(text_parts)
 
-        logger.info(
-            f"🔵 [FINAL_USER_MESSAGE] Prepared content for LLM:\n"
-            f"  - Text length: {len(clean_text)} chars\n"
-            f"  - Image count: {len(image_inputs)}"
-        )
-
-        if clean_text:
-            logger.info(f"🔵 [FINAL_USER_TEXT] Text content to be sent:\n{clean_text}")
+        # --- ログ修正 ---
+        # この詳細ログは on_message 側で集約して出力するため削除
+        # logger.info(
+        #     f"🔵 [FINAL_USER_MESSAGE] Prepared content for LLM:\n"
+        #     f"  - Text length: {len(clean_text)} chars\n"
+        #     f"  - Image count: {len(image_inputs)}"
+        # )
+        # if clean_text:
+        #     logger.info(f"🔵 [FINAL_USER_TEXT] Text content to be sent:\n{clean_text}")
 
         return image_inputs, clean_text
 
@@ -724,9 +714,9 @@ class LLMCog(commands.Cog, name="LLM"):
             await message.reply(content=final_error_msg, view=self._create_support_view(), silent=True)
             return
 
-        original_content = message.content.replace(f'<@!{self.bot.user.id}>', '').replace(f'<@{self.bot.user.id}>',
-                                                                                          '').strip()
-        logger.info(f"🔵 [RAW_INPUT] Original message content from user:\n{original_content}")
+        # --- ログ修正: ここからロギングフローを開始 ---
+        guild_log = f"guild='{message.guild.name}({message.guild.id})'" if message.guild else "guild='DM'"
+        model_in_use = llm_client.model_name_for_api_calls
 
         image_contents, text_content = await self._prepare_multimodal_content(message)
         text_content = text_content.replace(f'<@!{self.bot.user.id}>', '').replace(f'<@{self.bot.user.id}>', '').strip()
@@ -738,17 +728,12 @@ class LLMCog(commands.Cog, name="LLM"):
             await message.reply(content=error_msg, view=self._create_support_view(), silent=True)
             return
 
-        guild_log = f"guild='{message.guild.name}({message.guild.id})'" if message.guild else "guild='DM'"
-        channel_log = f"channel='{message.channel.name}({message.channel.id})'" if hasattr(message.channel,
-                                                                                           'name') and message.channel.name else f"channel(id)={message.channel.id}"
-        author_log = f"author='{message.author.name}({message.author.id})'"
-        log_context = f"{guild_log}, {channel_log}, {author_log}"
-
-        model_in_use = llm_client.model_name_for_api_calls
+        # --- 新しいログ出力 ---
         logger.info(
-            f"📨 Received LLM request | {log_context} | model='{model_in_use}' | image_count={len(image_contents)} | is_reply={is_reply_to_bot}")
-
-        logger.info(f"🔵 [PROCESSED_INPUT] Final user text content (after image context extraction):\n{text_content}")
+            f"📨 Received LLM request | {guild_log} | model='{model_in_use}' | text_length={len(text_content)} chars | images={len(image_contents)}")
+        if text_content:
+            log_text = (text_content[:200] + '...') if len(text_content) > 203 else text_content
+            logger.info(f"💬 [USER_INPUT] {log_text.replace(chr(10), ' ')}")
 
         thread_id = await self._get_conversation_thread_id(message)
 
@@ -764,17 +749,17 @@ class LLMCog(commands.Cog, name="LLM"):
             message.author.display_name
         )
 
-        logger.info(f"🔵 [INPUT] System prompt prepared (length: {len(system_prompt)} chars)")
-
         messages_for_api: List[Dict[str, Any]] = [{"role": "system", "content": system_prompt}]
 
         # 🔴 重要: 言語検出プロンプトをシステムプロンプトの直後に挿入
         if detected_lang_prompt := self._detect_language_and_create_prompt(text_content):
             messages_for_api.append({"role": "system", "content": detected_lang_prompt})
-            logger.info("🔵 [INPUT] Injecting CRITICAL language override prompt immediately after system prompt.")
+            # --- ログ修正 ---
+            logger.info("🌐 [LANG] Injecting language override prompt")
         elif self.language_prompt:
             messages_for_api.append({"role": "system", "content": self.language_prompt})
-            logger.info("🔵 [INPUT] Could not detect language, falling back to default language prompt.")
+            # --- ログ修正 ---
+            logger.info("🌐 [LANG] Using default language prompt as fallback")
 
         # 会話履歴を追加
         conversation_history = await self._collect_conversation_history(message)
@@ -789,23 +774,27 @@ class LLMCog(commands.Cog, name="LLM"):
 
         user_content_parts.extend(image_contents)
         if image_contents:
-            logger.info(f"🔵 [INPUT] Including {len(image_contents)} image(s) in request")
+            logger.debug(f"Including {len(image_contents)} image(s) in request")
 
         user_message_for_api = {"role": "user", "content": user_content_parts}
         messages_for_api.append(user_message_for_api)
 
-        logger.info(f"🔵 [INPUT] Total messages for API: {len(messages_for_api)} (system + history + user)")
-        logger.info(f"🌐 [LANG] Messages structure: system={len(messages_for_api[0]['content'])} chars, "
-                    f"lang_override={'present' if len(messages_for_api) > 1 and 'CRITICAL' in str(messages_for_api[1]) else 'absent'}")
+        # --- ログ修正 ---
+        logger.info(f"🔵 [API] Sending {len(messages_for_api)} messages to LLM")
+        logger.debug(f"Messages structure: system={len(messages_for_api[0]['content'])} chars, "
+                     f"lang_override={'present' if len(messages_for_api) > 1 and 'CRITICAL' in str(messages_for_api[1]) else 'absent'}")
 
         try:
+            # --- ログ修正: log_context を渡さないように変更 ---
             sent_messages, llm_response = await self._handle_llm_streaming_response(
-                message, messages_for_api, llm_client, log_context
+                message, messages_for_api, llm_client
             )
 
             if sent_messages and llm_response:
-                logger.info(f"🟢 [OUTPUT] LLM final response (length: {len(llm_response)} chars):\n{llm_response}")
-                logger.info(f"✅ LLM stream finished | {log_context} | model='{model_in_use}'")
+                # --- ログ修正 ---
+                logger.info(
+                    f"✅ LLM response completed | model='{model_in_use}' | response_length={len(llm_response)} chars")
+                logger.debug(f"LLM final response (length: {len(llm_response)} chars):\n{llm_response}")
 
                 if thread_id not in self.conversation_threads:
                     self.conversation_threads[thread_id] = []
@@ -838,8 +827,7 @@ class LLMCog(commands.Cog, name="LLM"):
             self,
             message: discord.Message,
             initial_messages: List[Dict[str, Any]],
-            client: openai.AsyncOpenAI,
-            log_context: str
+            client: openai.AsyncOpenAI
     ) -> Tuple[Optional[List[discord.Message]], str]:
         """
         ストリーミング + 長文分割対応版
@@ -860,7 +848,8 @@ class LLMCog(commands.Cog, name="LLM"):
         max_final_retries = 3
         final_retry_delay = 2.0
 
-        logger.info(f"🔵 [STREAMING] Starting LLM stream | {log_context}")
+        # --- ログ修正 ---
+        logger.debug(f"Starting LLM stream for message {message.id}")
 
         try:
             sent_message = await message.reply(placeholder, silent=True)
@@ -869,7 +858,7 @@ class LLMCog(commands.Cog, name="LLM"):
 
         try:
             stream_generator = self._llm_stream_and_tool_handler(
-                initial_messages, client, log_context, message.channel.id, message.author.id
+                initial_messages, client, message.channel.id, message.author.id
             )
 
             async for content_chunk in stream_generator:
@@ -878,7 +867,7 @@ class LLMCog(commands.Cog, name="LLM"):
 
                 if chunk_count % 100 == 0:
                     logger.debug(
-                        f"🟢 [STREAMING] Received chunk #{chunk_count}, total length: {len(full_response_text)} chars")
+                        f"Stream chunk #{chunk_count}, total length: {len(full_response_text)} chars")
 
                 current_time = time.time()
                 chars_accumulated = len(full_response_text) - last_displayed_length
@@ -911,7 +900,7 @@ class LLMCog(commands.Cog, name="LLM"):
                             last_update = current_time
                             last_displayed_length = len(full_response_text)
                             logger.debug(
-                                f"🟢 [STREAMING] Updated Discord message (displayed: {len(display_text)} chars)")
+                                f"Updated Discord message (displayed: {len(display_text)} chars)")
                         except discord.NotFound:
                             logger.warning(
                                 f"⚠️ Message deleted during stream (ID: {sent_message.id}). Aborting.")
@@ -932,8 +921,9 @@ class LLMCog(commands.Cog, name="LLM"):
                                 )
                                 await asyncio.sleep(retry_sleep_time)
 
-            logger.info(
-                f"🟢 [STREAMING] Stream completed | Total chunks: {chunk_count} | Final length: {len(full_response_text)} chars")
+            # --- ログ修正 ---
+            logger.debug(
+                f"Stream completed | Total chunks: {chunk_count} | Final length: {len(full_response_text)} chars")
 
             # ★★★ 最終出力：長文の場合は分割送信 ★★★
             if full_response_text:
@@ -943,7 +933,7 @@ class LLMCog(commands.Cog, name="LLM"):
                         try:
                             if full_response_text != sent_message.content:
                                 await sent_message.edit(content=full_response_text, embed=None, view=None)
-                                logger.info(f"🟢 [STREAMING] Final message updated successfully (attempt {attempt + 1})")
+                                logger.debug(f"Final message updated successfully (attempt {attempt + 1})")
                             break
                         except discord.NotFound:
                             logger.error(f"❌ Message was deleted before final update")
@@ -977,8 +967,8 @@ class LLMCog(commands.Cog, name="LLM"):
 
                 else:
                     # 長い場合は分割送信
-                    logger.info(
-                        f"📄 [SPLIT] Response is {len(full_response_text)} chars, splitting into multiple messages")
+                    logger.debug(
+                        f"Response is {len(full_response_text)} chars, splitting into multiple messages")
 
                     chunks = _split_message_smartly(full_response_text, SAFE_MESSAGE_LENGTH)
                     all_messages = []
@@ -989,7 +979,7 @@ class LLMCog(commands.Cog, name="LLM"):
                         try:
                             await sent_message.edit(content=first_chunk, embed=None, view=None)
                             all_messages.append(sent_message)
-                            logger.info(f"📄 [SPLIT] Updated first message (1/{len(chunks)})")
+                            logger.debug(f"Updated first message (1/{len(chunks)})")
                             break
                         except discord.HTTPException as e:
                             if e.status == 429:
@@ -1007,7 +997,7 @@ class LLMCog(commands.Cog, name="LLM"):
                             try:
                                 continuation_msg = await message.channel.send(chunk)
                                 all_messages.append(continuation_msg)
-                                logger.info(f"📄 [SPLIT] Sent continuation message {i}/{len(chunks)}")
+                                logger.debug(f"Sent continuation message {i}/{len(chunks)}")
                                 break
                             except discord.HTTPException as e:
                                 if e.status == 429:
@@ -1049,7 +1039,6 @@ class LLMCog(commands.Cog, name="LLM"):
             self,
             messages: List[Dict[str, Any]],
             client: openai.AsyncOpenAI,
-            log_context: str,
             channel_id: int,
             user_id: int
     ) -> AsyncGenerator[str, None]:
@@ -1058,8 +1047,9 @@ class LLMCog(commands.Cog, name="LLM"):
         extra_params = self.llm_config.get('extra_api_parameters', {})
 
         for iteration in range(max_iterations):
-            logger.info(
-                f"🔵 [API CALL] Starting LLM API call (iteration {iteration + 1}/{max_iterations}) | {log_context}")
+            # --- ログ修正 ---
+            logger.debug(
+                f"Starting LLM API call (iteration {iteration + 1}/{max_iterations})")
 
             tools_def = self.get_tools_definition()
             api_kwargs = {
@@ -1072,11 +1062,11 @@ class LLMCog(commands.Cog, name="LLM"):
             if tools_def:
                 api_kwargs["tools"] = tools_def
                 api_kwargs["tool_choice"] = "auto"
-                logger.info(f"🔧 [TOOLS] Available tools: {[t['function']['name'] for t in tools_def]}")
+                logger.debug(f"Available tools: {[t['function']['name'] for t in tools_def]}")
 
             try:
                 stream = await client.chat.completions.create(**api_kwargs)
-                logger.info(f"🔵 [API CALL] Stream connection established")
+                logger.debug(f"Stream connection established")
             except Exception as e:
                 logger.error(f"❌ Error calling LLM API in stream handler: {e}", exc_info=True)
                 raise
@@ -1113,13 +1103,14 @@ class LLMCog(commands.Cog, name="LLM"):
             current_messages.append(assistant_message)
 
             if not tool_calls_buffer:
-                logger.info(f"🟢 [OUTPUT] No tool calls, returning final response")
+                logger.debug(f"No tool calls, returning final response")
                 return
 
-            logger.info(f"🔧 [TOOLS] Processing {len(tool_calls_buffer)} tool call(s) in iteration {iteration + 1}")
+            # --- ログ修正 ---
+            logger.info(f"🔧 [TOOL] LLM requested {len(tool_calls_buffer)} tool call(s)")
             for tc in tool_calls_buffer:
-                logger.info(
-                    f"🔧 [TOOLS] Tool call: {tc['function']['name']} with args: {tc['function']['arguments'][:200]}")
+                logger.debug(
+                    f"Tool call details: {tc['function']['name']} with args: {tc['function']['arguments'][:200]}")
 
             tool_calls_obj = [
                 SimpleNamespace(
@@ -1127,14 +1118,14 @@ class LLMCog(commands.Cog, name="LLM"):
                     function=SimpleNamespace(name=tc['function']['name'], arguments=tc['function']['arguments'])
                 ) for tc in tool_calls_buffer
             ]
-            await self._process_tool_calls(tool_calls_obj, current_messages, log_context, channel_id, user_id)
+            await self._process_tool_calls(tool_calls_obj, current_messages, channel_id, user_id)
 
         logger.warning(f"⚠️ Tool processing exceeded max iterations ({max_iterations})")
         yield self.llm_config.get('error_msg', {}).get('tool_loop_timeout',
                                                        "Tool processing exceeded max iterations.\nツールの処理が最大反復回数を超えました。")
 
     async def _process_tool_calls(self, tool_calls: List[Any], messages: List[Dict[str, Any]],
-                                  log_context: str, channel_id: int, user_id: int) -> None:
+                                  channel_id: int, user_id: int) -> None:
         for tool_call in tool_calls:
             function_name = tool_call.function.name
             error_content = None
@@ -1142,35 +1133,31 @@ class LLMCog(commands.Cog, name="LLM"):
 
             try:
                 function_args = json.loads(tool_call.function.arguments)
-                logger.info(f"🔧 [TOOL EXEC] Executing {function_name} | {log_context}")
-                logger.info(f"🔧 [TOOL EXEC] Arguments: {json.dumps(function_args, ensure_ascii=False, indent=2)}")
+                # --- ログ修正 ---
+                logger.info(f"🔧 [TOOL] Executing {function_name}")
+                logger.debug(f"🔧 [TOOL] Arguments: {json.dumps(function_args, ensure_ascii=False, indent=2)}")
 
                 if self.search_agent and function_name == self.search_agent.name:
-                    query_text = function_args.get('query', 'N/A')
-                    logger.info(f"🔍 [SEARCH] Query: '{query_text}'")
                     tool_response_content = await self.search_agent.run(arguments=function_args, bot=self.bot,
                                                                         channel_id=channel_id)
-                    logger.info(
-                        f"🔍 [SEARCH] Result (length: {len(str(tool_response_content))} chars):\n{str(tool_response_content)[:1000]}")
+                    logger.debug(
+                        f"🔧 [TOOL] Result (length: {len(str(tool_response_content))} chars):\n{str(tool_response_content)[:1000]}")
 
                 elif self.bio_manager and function_name == self.bio_manager.name:
-                    logger.info(f"👤 [BIO] Executing bio manager tool")
                     tool_response_content = await self.bio_manager.run_tool(arguments=function_args, user_id=user_id)
-                    logger.info(f"👤 [BIO] Result:\n{tool_response_content}")
+                    logger.debug(f"🔧 [TOOL] Result:\n{tool_response_content}")
 
                 elif self.memory_manager and function_name == self.memory_manager.name:
-                    logger.info(f"🧠 [MEMORY] Executing memory manager tool")
                     tool_response_content = await self.memory_manager.run_tool(arguments=function_args)
-                    logger.info(f"🧠 [MEMORY] Result:\n{tool_response_content}")
+                    logger.debug(f"🔧 [TOOL] Result:\n{tool_response_content}")
 
                 elif self.image_generator and function_name == self.image_generator.name:  # ← 追加
-                    logger.info(f"🎨 [IMAGE_GEN] Executing image generator tool")
                     tool_response_content = await self.image_generator.run(arguments=function_args,
                                                                            channel_id=channel_id)
-                    logger.info(f"🎨 [IMAGE_GEN] Result:\n{tool_response_content}")
+                    logger.debug(f"🔧 [TOOL] Result:\n{tool_response_content}")
 
                 else:
-                    logger.warning(f"⚠️ Unsupported tool called: {function_name} | {log_context}")
+                    logger.warning(f"⚠️ Unsupported tool called: {function_name}")
                     error_content = f"Error: Tool '{function_name}' is not available."
 
             except json.JSONDecodeError as e:
@@ -1190,7 +1177,8 @@ class LLMCog(commands.Cog, name="LLM"):
                 error_content = f"[Tool Error]\nAn unexpected error occurred: {str(e)}"
 
             final_content = error_content if error_content else tool_response_content
-            logger.info(f"🔧 [TOOL RESULT] Sending tool response back to LLM (length: {len(final_content)} chars)")
+            # --- ログ修正 ---
+            logger.debug(f"🔧 [TOOL] Sending tool response back to LLM (length: {len(final_content)} chars)")
 
             messages.append({
                 "tool_call_id": tool_call.id,
@@ -1280,25 +1268,23 @@ class LLMCog(commands.Cog, name="LLM"):
             await interaction.followup.send(content=error_msg, view=self._create_support_view(), ephemeral=False)
             return
 
+        # --- ログ修正: on_message と同様のロギングフロー ---
         guild_log = f"guild='{interaction.guild.name}({interaction.guild.id})'" if interaction.guild else "guild='DM'"
-        channel_log = f"channel='{interaction.channel.name}({interaction.channel.id})'" if hasattr(interaction.channel,
-                                                                                                   'name') else f"channel(id)={interaction.channel.id}"
-        author_log = f"author='{interaction.user.name}({interaction.user.id})'"
-        log_context = f"{guild_log}, {channel_log}, {author_log}"
-
         model_in_use = llm_client.model_name_for_api_calls
-        logger.info(f"📨 Received /chat command | {log_context} | model='{model_in_use}'")
-        logger.info(f"🔵 [RAW_INPUT] /chat message from user:\n{message}")
 
         image_contents = []
         if image_url:
             if image_data := await self._process_image_url(image_url):
                 image_contents.append(image_data)
-                logger.info(f"🔵 [INPUT] Including 1 image from URL in /chat request")
             else:
                 error_msg = "⚠️ **Image Error / 画像エラー** ⚠️\n\nFailed to process the specified image URL.\n指定された画像URLの処理に失敗しました。"
                 await interaction.followup.send(content=error_msg, view=self._create_support_view(), ephemeral=False)
                 return
+
+        logger.info(
+            f"📨 Received /chat request | {guild_log} | model='{model_in_use}' | text_length={len(message)} chars | images={len(image_contents)}")
+        log_text = (message[:200] + '...') if len(message) > 203 else message
+        logger.info(f"💬 [USER_INPUT] {log_text.replace(chr(10), ' ')}")
 
         if not self.bio_manager or not self.memory_manager:
             error_msg = "Cannot respond because required plugins are not initialized.\n必要なプラグインが初期化されていないため、応答できません。"
@@ -1312,8 +1298,6 @@ class LLMCog(commands.Cog, name="LLM"):
             interaction.user.display_name
         )
 
-        logger.info(f"🔵 [INPUT] System prompt prepared for /chat (length: {len(system_prompt)} chars)")
-
         messages_for_api: List[Dict[str, Any]] = [{"role": "system", "content": system_prompt}]
 
         user_content_parts = []
@@ -1324,15 +1308,15 @@ class LLMCog(commands.Cog, name="LLM"):
 
         if detected_lang_prompt := self._detect_language_and_create_prompt(message):
             messages_for_api.append({"role": "system", "content": detected_lang_prompt})
-            logger.info("🔵 [INPUT] Injecting detected language prompt for /chat.")
+            logger.info("🌐 [LANG] Injecting language override prompt")
         elif self.language_prompt:
             messages_for_api.append({"role": "system", "content": self.language_prompt})
-            logger.info("🔵 [INPUT] Could not detect language for /chat, falling back to default language prompt.")
+            logger.info("🌐 [LANG] Using default language prompt as fallback")
 
         user_message_for_api = {"role": "user", "content": user_content_parts}
         messages_for_api.append(user_message_for_api)
 
-        logger.info(f"🔵 [INPUT] Total messages for API: {len(messages_for_api)} (system + user)")
+        logger.info(f"🔵 [API] Sending {len(messages_for_api)} messages to LLM")
 
         try:
             # 仮のメッセージオブジェクトを作成（分割送信用）
@@ -1353,10 +1337,10 @@ class LLMCog(commands.Cog, name="LLM"):
             max_final_retries = 3
             final_retry_delay = 2.0
 
-            logger.info(f"🔵 [STREAMING] Starting LLM stream for /chat | {log_context}")
+            logger.debug(f"Starting LLM stream for /chat command")
 
             stream_generator = self._llm_stream_and_tool_handler(
-                messages_for_api, llm_client, log_context, interaction.channel_id, interaction.user.id
+                messages_for_api, llm_client, interaction.channel_id, interaction.user.id
             )
 
             async for content_chunk in stream_generator:
@@ -1365,7 +1349,7 @@ class LLMCog(commands.Cog, name="LLM"):
 
                 if chunk_count % 100 == 0:
                     logger.debug(
-                        f"🟢 [STREAMING] Received chunk #{chunk_count}, total length: {len(full_response_text)} chars")
+                        f"Stream chunk #{chunk_count}, total length: {len(full_response_text)} chars")
 
                 current_time = time.time()
                 chars_accumulated = len(full_response_text) - last_displayed_length
@@ -1396,7 +1380,7 @@ class LLMCog(commands.Cog, name="LLM"):
                             last_update = current_time
                             last_displayed_length = len(full_response_text)
                             logger.debug(
-                                f"🟢 [STREAMING] Updated Discord message (displayed: {len(display_text)} chars)")
+                                f"Updated Discord message (displayed: {len(display_text)} chars)")
                         except discord.NotFound:
                             logger.warning(f"⚠️ Message deleted during stream. Aborting.")
                             return
@@ -1410,20 +1394,22 @@ class LLMCog(commands.Cog, name="LLM"):
                                 logger.warning(f"⚠️ Failed to edit message: {e.status}")
                                 await asyncio.sleep(2.0)
 
-            logger.info(
-                f"🟢 [STREAMING] Stream completed | Total chunks: {chunk_count} | Final length: {len(full_response_text)} chars")
+            logger.debug(
+                f"Stream completed | Total chunks: {chunk_count} | Final length: {len(full_response_text)} chars")
 
             # 最終出力処理
             if full_response_text:
+                logger.info(
+                    f"✅ LLM response completed | model='{model_in_use}' | response_length={len(full_response_text)} chars")
+                logger.debug(
+                    f"LLM final response for /chat (length: {len(full_response_text)} chars):\n{full_response_text}")
+
                 if len(full_response_text) <= SAFE_MESSAGE_LENGTH:
                     # 短い場合は通常の更新（リトライ付き）
                     for attempt in range(max_final_retries):
                         try:
                             if full_response_text != temp_message.content:
                                 await temp_message.edit(content=full_response_text, embed=None, view=None)
-                                logger.info(
-                                    f"🟢 [OUTPUT] LLM final response for /chat (length: {len(full_response_text)} chars):\n{full_response_text}")
-                                logger.info(f"✅ /chat LLM stream finished | {log_context} | model='{model_in_use}'")
                             break
                         except discord.HTTPException as e:
                             if e.status == 429:
@@ -1436,7 +1422,7 @@ class LLMCog(commands.Cog, name="LLM"):
                                     await asyncio.sleep(final_retry_delay)
                 else:
                     # 長い場合は分割送信
-                    logger.info(f"📄 [SPLIT] /chat response is {len(full_response_text)} chars, splitting")
+                    logger.debug(f"/chat response is {len(full_response_text)} chars, splitting")
 
                     chunks = _split_message_smartly(full_response_text, SAFE_MESSAGE_LENGTH)
 
@@ -1444,7 +1430,7 @@ class LLMCog(commands.Cog, name="LLM"):
                     for attempt in range(max_final_retries):
                         try:
                             await temp_message.edit(content=chunks[0], embed=None, view=None)
-                            logger.info(f"📄 [SPLIT] Updated first message (1/{len(chunks)})")
+                            logger.debug(f"Updated first message (1/{len(chunks)})")
                             break
                         except discord.HTTPException as e:
                             if e.status == 429:
@@ -1461,7 +1447,7 @@ class LLMCog(commands.Cog, name="LLM"):
                         for attempt in range(max_final_retries):
                             try:
                                 await interaction.channel.send(chunk)
-                                logger.info(f"📄 [SPLIT] Sent continuation message {i}/{len(chunks)}")
+                                logger.debug(f"Sent continuation message {i}/{len(chunks)}")
                                 break
                             except discord.HTTPException as e:
                                 if e.status == 429:
@@ -1474,9 +1460,6 @@ class LLMCog(commands.Cog, name="LLM"):
                                         await asyncio.sleep(final_retry_delay)
                                     else:
                                         break
-
-                    logger.info(f"🟢 [OUTPUT] /chat split response completed")
-                    logger.info(f"✅ /chat LLM stream finished | {log_context} | model='{model_in_use}'")
             else:
                 error_msg = self.llm_config.get('error_msg', {}).get('general_error',
                                                                      "There was no response from the AI.\nAIから応答がありませんでした。")
