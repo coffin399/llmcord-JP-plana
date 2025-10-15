@@ -335,8 +335,9 @@ class ImageGenerator:
         }
 
         # 追加パラメータがあればマージ
-        extra_params = self.default_params.get('extra_params', {})
-        payload.update(extra_params)
+        extra_params = self.default_params.get('extra_params')
+        if extra_params and isinstance(extra_params, dict):
+            payload.update(extra_params)
 
         logger.info(f"🟢 [IMAGE_GEN] Calling Forge WebUI API")
         logger.info(f"🟢 [IMAGE_GEN] URL: {url}")
