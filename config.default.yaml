@@ -59,15 +59,13 @@ llm:
       base_url: https://api.groq.com/openai/v1
       api_key: YOUR_GROQ_API_KEY_HERE
 
-    huggingface:
-      base_url: "https://api-inference.huggingface.co"
-      api_key: "hf_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-
-
-  # --- 画像生成設定 ---
+  # --- 画像生成設定 (Stable Diffusion WebUI Forge) ---
   image_generator:
-    # デフォルトモデル (provider/model形式)
-    model: "huggingface/black-forest-labs/FLUX.1-schnell"
+    # Forge WebUI のURL (デフォルト: http://127.0.0.1:7860)
+    forge_url: "http://127.0.0.1:7860"
+
+    # デフォルトモデル (Forge WebUI内のモデル名)
+    model: "sd_xl_base_1.0.safetensors"
 
     # デフォルト画像サイズ
     default_size: "1024x1024"
@@ -75,60 +73,33 @@ llm:
     # タイムアウト設定(秒)
     timeout: 180.0
 
-    # プロバイダー設定
-    image_providers:
-      # --- Hugging Face Inference API ---
-      huggingface:
-        base_url: "https://api-inference.huggingface.co/models"
-        api_key: "huggingface"  # llm.providers.huggingface.api_keyを使用
-        format: "binary"
-        # または直接指定: api_key: "hf_xxxxx"
-
-      # --- NVIDIA NIM ---
-      nvidia_nim:
-        base_url: "https://integrate.api.nvidia.com/v1"
-        api_key: "nvidia"  # llm.providers.nvidia.api_keyを使用
-        # または直接指定: api_key: "nvapi-xxxxx"
-
-    # 利用可能なモデルリスト (provider/model形式)
+    # 利用可能なモデルリスト
+    # ※Forge WebUIのmodelsフォルダにあるモデル名を指定
     available_models:
-      # === Hugging Face 無料モデル (Inference API対応) ===
-      # --- FLUXシリーズ (2024年最新、高品質) ---
-      - "huggingface/black-forest-labs/FLUX.1-schnell"  # 推奨: 高速・高品質・商用利用可
-      - "huggingface/black-forest-labs/FLUX.1-dev"      # 最高品質・非商用のみ
+      # --- SDXL系モデル ---
+      - "sd_xl_base_1.0.safetensors"
+      - "sd_xl_turbo_1.0.safetensors"
 
-      # --- Stable Diffusion 3.xシリーズ ---
-      - "huggingface/stabilityai/stable-diffusion-3-medium-diffusers"
-      - "huggingface/stabilityai/stable-diffusion-3.5-large"
-      - "huggingface/stabilityai/stable-diffusion-3.5-medium"
+      # --- SD1.5系モデル ---
+      - "v1-5-pruned-emaonly.safetensors"
 
-      # --- Stable Diffusion XLシリーズ ---
-      - "huggingface/stabilityai/stable-diffusion-xl-base-1.0"
-      - "huggingface/stabilityai/sdxl-turbo"            # 高速生成版
-      - "huggingface/ByteDance/SDXL-Lightning"          # 超高速版(1-4ステップ)
-      - "huggingface/SG161222/RealVisXL_V4.0"          # リアル系
+    # デフォルト生成パラメータ
+    default_params:
+      steps: 20                      # サンプリングステップ数 (推奨: 20-30)
+      cfg_scale: 7.0                 # CFG Scale (推奨: 7-11)
+      sampler_name: "DPM++ 2M Karras" # サンプラー名
+      seed: -1                       # シード値 (-1 = ランダム)
+      restore_faces: false           # 顔修復を有効化
+      tiling: false                  # タイリング生成
 
-      # --- Stable Diffusion 2.x / 1.xシリーズ ---
-      - "huggingface/stabilityai/stable-diffusion-2-1"
-      - "huggingface/runwayml/stable-diffusion-v1-5"
-      - "huggingface/CompVis/stable-diffusion-v1-4"
+      # デフォルトネガティブプロンプト
+      negative_prompt: "lowres, bad anatomy, bad hands, text, error, missing fingers, extra digit, fewer digits, cropped, worst quality, low quality, normal quality, jpeg artifacts, signature, watermark, username, blurry"
 
-      # --- コミュニティ・特化型モデル ---
-      - "huggingface/playgroundai/playground-v2.5-1024px-aesthetic"  # 美的品質重視
-      - "huggingface/prompthero/openjourney-v4"        # Midjourney風
-      - "huggingface/Lykon/dreamshaper-8"              # バランス型
-      - "huggingface/SG161222/Realistic_Vision_V6.0_B1_noVAE"  # 写実的
-      - "huggingface/stablediffusionapi/juggernaut-xl-v9"  # 汎用高品質
-      - "huggingface/Kwai-Kolors/Kolors"               # フォトリアリスティック
-      - "huggingface/digiplay/AbsoluteReality_v1.8.1"  # リアル系
-
-      # --- アニメ・イラスト系 ---
-      - "huggingface/cagliostrolab/animagine-xl-3.1"   # アニメ特化
-      - "huggingface/Linaqruf/anything-v3.0"           # アニメ汎用
-
-      # --- 高速・軽量モデル ---
-      - "huggingface/segmind/SSD-1B"                   # 超軽量1Bパラメータ
-      - "huggingface/segmind/Segmind-Vega"             # 高速SDXL
+      # 追加パラメータ (必要に応じて追加)
+      extra_params:
+        # clip_skip: 2
+        # denoising_strength: 0.7
+        # eta: 0.0
 
   # --- パラメータ設定 ---
   extra_api_parameters:

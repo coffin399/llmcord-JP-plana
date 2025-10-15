@@ -16,4 +16,3 @@ matplotlib
 japanize-matplotlib
 cartopy
 langdetect
-huggingface_hub

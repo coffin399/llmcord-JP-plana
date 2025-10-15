@@ -13,17 +13,25 @@ logger = logging.getLogger(__name__)
 
 
 class ImageGenerator:
-    """画像生成プラグイン - Hugging Face Inference Providers / NVIDIA NIM対応"""
+    """画像生成プラグイン - Stable Diffusion WebUI Forge対応"""
 
     def __init__(self, bot):
         self.bot = bot
         self.config = bot.config.get('llm', {})
         self.image_gen_config = self.config.get('image_generator', {})
 
-        # デフォルト設定
-        self.default_model = self.image_gen_config.get('model', 'huggingface/stabilityai/stable-diffusion-xl-base-1.0')
+        # Forge WebUI設定
+        self.forge_url = self.image_gen_config.get('forge_url', 'http://127.0.0.1:7860')
+        self.default_model = self.image_gen_config.get('model', 'sd_xl_base_1.0.safetensors')
         self.default_size = self.image_gen_config.get('default_size', '1024x1024')
-        self.timeout = self.image_gen_config.get('timeout', 120.0)
+        self.timeout = self.image_gen_config.get('timeout', 180.0)
+
+        # プログレスバー設定
+        self.show_progress = self.image_gen_config.get('show_progress', True)
+        self.progress_update_interval = self.image_gen_config.get('progress_update_interval', 2.0)
+
+        # 生成パラメータ
+        self.default_params = self.image_gen_config.get('default_params', {})
 
         # 利用可能なモデルリスト
         self.available_models = self.image_gen_config.get('available_models', [self.default_model])
@@ -31,19 +39,15 @@ class ImageGenerator:
             self.available_models.insert(0, self.default_model)
             logger.warning(f"Default model '{self.default_model}' not in available_models, adding it")
 
-        # プロバイダー設定
-        self.image_providers = self.image_gen_config.get('image_providers', {})
-        self.llm_providers = self.config.get('providers', {})
-
         # チャンネルごとのモデル設定
         self.channel_models_path = "data/channel_image_models.json"
         self.channel_models: Dict[str, str] = self._load_channel_models()
 
         self.http_session = aiohttp.ClientSession()
 
-        logger.info(f"ImageGenerator initialized with default model: {self.default_model}")
-        logger.info(f"Available image models: {len(self.available_models)} models")
-        logger.info(f"Configured providers: {list(self.image_providers.keys())}")
+        logger.info(f"ImageGenerator initialized with Forge WebUI at: {self.forge_url}")
+        logger.info(f"Default model: {self.default_model}")
+        logger.info(f"Available models: {len(self.available_models)} models")
 
     def _load_channel_models(self) -> Dict[str, str]:
         """チャンネルごとのモデル設定を読み込む"""
@@ -81,17 +85,6 @@ class ImageGenerator:
             logger.error(f"Failed to save channel image models: {e}")
             raise
 
-    def _parse_model_string(self, model_string: str) -> tuple[str, str]:
-        """
-        モデル文字列をパースして (provider, model_name) を返す
-        例: "huggingface/black-forest-labs/FLUX.1-dev" -> ("huggingface", "black-forest-labs/FLUX.1-dev")
-        """
-        if '/' not in model_string:
-            raise ValueError(f"Invalid model format: {model_string}. Expected 'provider/model_name'")
-
-        parts = model_string.split('/', 1)
-        return parts[0], parts[1]
-
     def get_model_for_channel(self, channel_id: int) -> str:
         """指定されたチャンネルで使用するモデルを取得"""
         channel_id_str = str(channel_id)
@@ -127,18 +120,58 @@ class ImageGenerator:
         """利用可能なモデルのリストを取得"""
         return self.available_models.copy()
 
-    def get_models_by_provider(self) -> Dict[str, List[str]]:
-        """プロバイダーごとにモデルを分類して返す"""
-        models_by_provider = {}
-        for model in self.available_models:
-            try:
-                provider, _ = self._parse_model_string(model)
-                if provider not in models_by_provider:
-                    models_by_provider[provider] = []
-                models_by_provider[provider].append(model)
-            except ValueError:
-                continue
-        return models_by_provider
+    def _create_progress_bar(self, current: int, total: int, width: int = 20) -> str:
+        """プログレスバーの文字列を生成"""
+        if total == 0:
+            percentage = 0
+        else:
+            percentage = int((current / total) * 100)
+
+        filled = int((current / total) * width) if total > 0 else 0
+        bar = '█' * filled + '░' * (width - filled)
+
+        return f"{bar} {percentage}% ({current}/{total})"
+
+    async def _update_progress_message(
+            self,
+            message: discord.Message,
+            current: int,
+            total: int,
+            prompt: str,
+            model: str,
+            elapsed_time: float = 0.0
+    ):
+        """プログレスメッセージを更新"""
+        progress_bar = self._create_progress_bar(current, total)
+
+        embed = discord.Embed(
+            title="🎨 Generating Image... / 画像生成中...",
+            description=f"**Prompt:** {prompt[:150]}{'...' if len(prompt) > 150 else ''}",
+            color=discord.Color.orange()
+        )
+        embed.add_field(
+            name="Progress / 進捗",
+            value=f"```\n{progress_bar}\n```",
+            inline=False
+        )
+        embed.add_field(name="Model", value=model, inline=True)
+
+        if elapsed_time > 0:
+            embed.add_field(
+                name="Elapsed Time / 経過時間",
+                value=f"{elapsed_time:.1f}s",
+                inline=True
+            )
+
+        if current < total:
+            embed.set_footer(text="⏳ Please wait... / お待ちください...")
+        else:
+            embed.set_footer(text="✅ Finalizing... / 最終処理中...")
+
+        try:
+            await message.edit(embed=embed)
+        except discord.HTTPException as e:
+            logger.warning(f"Failed to update progress message: {e}")
 
     @property
     def name(self) -> str:
@@ -180,7 +213,8 @@ class ImageGenerator:
                                 "Image size in format WIDTHxHEIGHT (e.g., '1024x1024', '512x768'). "
                                 "Default is 1024x1024."
                             ),
-                            "enum": ["512x512", "768x768", "1024x1024", "512x768", "768x512"]
+                            "enum": ["512x512", "768x768", "1024x1024", "512x768", "768x512",
+                                     "1024x768", "768x1024", "1280x720", "720x1280"]
                         }
                     },
                     "required": ["prompt"]
@@ -213,7 +247,7 @@ class ImageGenerator:
         logger.info(f"🎨 [IMAGE_GEN] Prompt: {prompt[:100]}...")
 
         try:
-            image_data = await self._generate_image(prompt, negative_prompt, size, model)
+            image_data = await self._generate_image_forge(prompt, negative_prompt, size, model, channel_id)
 
             if not image_data:
                 return "❌ Failed to generate image. / 画像の生成に失敗しました。"
@@ -238,12 +272,7 @@ class ImageGenerator:
                 )
             embed.add_field(name="Size", value=size, inline=True)
             embed.add_field(name="Model", value=model, inline=True)
-
-            try:
-                provider, _ = self._parse_model_string(model)
-                embed.set_footer(text=f"Provider: {provider}")
-            except ValueError:
-                pass
+            embed.set_footer(text="Powered by Stable Diffusion WebUI Forge")
 
             await channel.send(embed=embed, file=image_file)
 
@@ -258,225 +287,255 @@ class ImageGenerator:
             logger.error(f"❌ [IMAGE_GEN] Error: {e}", exc_info=True)
             return f"❌ Error during image generation: {str(e)[:200]}"
 
-    async def _generate_image(
+    async def _generate_image_forge(
             self,
             prompt: str,
             negative_prompt: str,
             size: str,
-            model: str
+            model: str,
+            channel_id: int
     ) -> Optional[bytes]:
         """
-        画像を生成(プロバイダーごとの処理分岐)
+        Stable Diffusion WebUI Forge APIで画像を生成
 
         Args:
             prompt: 生成する画像の説明
             negative_prompt: 除外する要素
             size: 画像サイズ
-            model: 使用するモデル(provider/model_name形式)
+            model: 使用するモデル名
+            channel_id: Discordチャンネルid (プログレス表示用)
 
         Returns:
             生成された画像データ(PNG形式)
         """
-        try:
-            provider_name, model_name = self._parse_model_string(model)
-        except ValueError as e:
-            logger.error(f"❌ [IMAGE_GEN] {e}")
-            return None
-
-        provider_config = self.image_providers.get(provider_name)
-        if not provider_config:
-            logger.error(f"❌ [IMAGE_GEN] No configuration found for provider: {provider_name}")
-            return None
-
-        # APIキーを取得 - 修正版
-        api_key = None
-
-        # まず直接指定のapi_keyをチェック
-        if 'api_key' in provider_config:
-            api_key = provider_config['api_key']
-            logger.info(f"🔑 [IMAGE_GEN] Using direct API key for {provider_name}")
-        # 次にapi_key_sourceから取得
-        elif 'api_key_source' in provider_config:
-            api_key_source = provider_config['api_key_source']
-            llm_provider = self.llm_providers.get(api_key_source, {})
-            api_key = llm_provider.get('api_key')
-            logger.info(f"🔑 [IMAGE_GEN] Using API key from llm.providers.{api_key_source}")
-
-        if not api_key:
-            logger.error(f"❌ [IMAGE_GEN] No API key found for provider: {provider_name}")
-            logger.error(f"❌ [IMAGE_GEN] Provider config: {provider_config}")
-            logger.error(f"❌ [IMAGE_GEN] Available LLM providers: {list(self.llm_providers.keys())}")
-            return None
-
-        # プロバイダーごとに処理を分岐
-        if provider_name == "huggingface":
-            return await self._generate_image_huggingface_new(
-                api_key, provider_config, model_name, prompt, negative_prompt, size
-            )
-        elif provider_name == "nvidia_nim":
-            return await self._generate_image_nvidia(
-                api_key, provider_config, model_name, prompt, negative_prompt, size
-            )
-        else:
-            logger.error(f"❌ [IMAGE_GEN] Unsupported provider: {provider_name}")
-            return None
-
-    async def _generate_image_huggingface_new(
-            self,
-            api_key: str,
-            provider_config: Dict,
-            model_name: str,
-            prompt: str,
-            negative_prompt: str,
-            size: str
-    ) -> Optional[bytes]:
-        """Hugging Face Inference APIで画像を生成 (Legacy Inference API使用)"""
         width, height = map(int, size.split('x'))
 
-        # Legacy Inference APIエンドポイント（POST /models/{model_id}）
-        url = f"https://api-inference.huggingface.co/models/{model_name}"
+        # Forge WebUI API エンドポイント
+        url = f"{self.forge_url.rstrip('/')}/sdapi/v1/txt2img"
 
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-        }
-
-        # バイナリペイロード形式: JSONではなくプロンプトを直接送信
-        # 一部モデルはJSONパラメータに対応していないため、シンプルな形式を使用
-        payload = prompt.encode('utf-8')
-
-        logger.info(f"🔵 [IMAGE_GEN] Calling Hugging Face Legacy Inference API")
-        logger.info(f"🔵 [IMAGE_GEN] URL: {url}")
-        logger.info(f"🔵 [IMAGE_GEN] Prompt: {prompt[:100]}...")
-        logger.info(f"🔵 [IMAGE_GEN] Size: {width}x{height}")
-
-        # 注意: Legacy APIは一部モデルでwidth/heightパラメータに対応していない
-        # そのため、モデルのデフォルトサイズで生成されることがある
-
-        try:
-            async with self.http_session.post(
-                    url,
-                    headers=headers,
-                    data=payload,  # JSONではなくバイナリデータとして送信
-                    timeout=aiohttp.ClientTimeout(total=self.timeout)
-            ) as response:
-                logger.info(f"🔵 [IMAGE_GEN] Response status: {response.status}")
-                logger.info(f"🔵 [IMAGE_GEN] Response headers: {dict(response.headers)}")
-
-                if response.status == 200:
-                    # レスポンスがバイナリ画像データ
-                    content_type = response.headers.get('Content-Type', '')
-                    logger.info(f"🔵 [IMAGE_GEN] Content-Type: {content_type}")
-
-                    image_bytes = await response.read()
-                    logger.info(f"✅ [IMAGE_GEN] Successfully received image ({len(image_bytes)} bytes)")
-                    return image_bytes
-
-                # 503エラーはモデルロード中のためリトライを試みる
-                elif response.status == 503:
-                    try:
-                        error_json = await response.json()
-                        estimated_time = error_json.get('estimated_time', 20.0)
-                        logger.warning(f"⚠️ Model is loading. Retrying in {estimated_time} seconds...")
-                        await asyncio.sleep(min(estimated_time, 30.0))  # 最大30秒まで
-                        # 再帰呼び出し
-                        return await self._generate_image_huggingface_new(
-                            api_key, provider_config, model_name, prompt, negative_prompt, size
-                        )
-                    except Exception as e:
-                        logger.error(f"❌ [IMAGE_GEN] Error parsing 503 response: {e}")
-                        error_text = await response.text()
-                        logger.error(f"❌ [IMAGE_GEN] 503 Response: {error_text[:500]}")
-                        return None
-
-                else:
-                    error_text = await response.text()
-                    logger.error(f"❌ [IMAGE_GEN] API error {response.status}: {error_text[:500]}")
-
-                    # 詳細なエラー情報を出力
-                    try:
-                        error_json = await response.json()
-                        logger.error(f"❌ [IMAGE_GEN] Error details: {error_json}")
-                    except:
-                        pass
-
-                    return None
-
-        except asyncio.TimeoutError:
-            logger.error(f"❌ [IMAGE_GEN] Request timed out after {self.timeout}s")
-            return None
-        except Exception as e:
-            logger.error(f"❌ [IMAGE_GEN] Exception during API call: {e}", exc_info=True)
-            return None
-
-    async def _generate_image_nvidia(
-            self,
-            api_key: str,
-            provider_config: Dict,
-            model_name: str,
-            prompt: str,
-            negative_prompt: str,
-            size: str
-    ) -> Optional[bytes]:
-        """NVIDIA NIM APIで画像を生成"""
-        width, height = map(int, size.split('x'))
-        base_url = provider_config.get('base_url', 'https://integrate.api.nvidia.com/v1')
-        base_url = base_url.rstrip('/')
-        url = f"{base_url}/images/generations"
-
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-            "Accept": "application/json"
-        }
-
+        # デフォルトパラメータとマージ
+        steps = self.default_params.get('steps', 20)
         payload = {
-            "model": model_name,
-            "text_prompts": [{"text": prompt, "weight": 1.0}],
-            "cfg_scale": 5.0,
-            "sampler": "K_DPM_2_ANCESTRAL",
-            "seed": 0,
-            "steps": 25,
+            "prompt": prompt,
+            "negative_prompt": negative_prompt or self.default_params.get('negative_prompt', ''),
             "width": width,
-            "height": height
+            "height": height,
+            "steps": steps,
+            "cfg_scale": self.default_params.get('cfg_scale', 7.0),
+            "sampler_name": self.default_params.get('sampler_name', 'DPM++ 2M Karras'),
+            "batch_size": 1,
+            "n_iter": 1,
+            "seed": self.default_params.get('seed', -1),
+            "restore_faces": self.default_params.get('restore_faces', False),
+            "tiling": self.default_params.get('tiling', False),
+            "override_settings": {
+                "sd_model_checkpoint": model
+            },
+            "override_settings_restore_afterwards": True
         }
 
-        if negative_prompt:
-            payload["text_prompts"].append({"text": negative_prompt, "weight": -1.0})
+        # 追加パラメータがあればマージ
+        extra_params = self.default_params.get('extra_params', {})
+        payload.update(extra_params)
 
-        logger.info(f"🔵 [IMAGE_GEN] Calling NVIDIA NIM API")
-        logger.info(f"🔵 [IMAGE_GEN] URL: {url}")
+        logger.info(f"🟢 [IMAGE_GEN] Calling Forge WebUI API")
+        logger.info(f"🟢 [IMAGE_GEN] URL: {url}")
+        logger.info(f"🟢 [IMAGE_GEN] Model: {model}")
+        logger.info(f"🟢 [IMAGE_GEN] Size: {width}x{height}")
+        logger.info(f"🟢 [IMAGE_GEN] Steps: {payload['steps']}, CFG: {payload['cfg_scale']}")
+        logger.info(f"🟢 [IMAGE_GEN] Sampler: {payload['sampler_name']}")
+
+        # プログレスメッセージを投稿
+        progress_message = None
+        if self.show_progress:
+            channel = self.bot.get_channel(channel_id)
+            if channel:
+                try:
+                    embed = discord.Embed(
+                        title="🎨 Starting Image Generation... / 画像生成を開始...",
+                        description=f"**Prompt:** {prompt[:150]}{'...' if len(prompt) > 150 else ''}",
+                        color=discord.Color.orange()
+                    )
+                    embed.add_field(name="Model", value=model, inline=True)
+                    embed.add_field(name="Size", value=size, inline=True)
+                    embed.set_footer(text="⏳ Initializing... / 初期化中...")
+                    progress_message = await channel.send(embed=embed)
+                except Exception as e:
+                    logger.warning(f"Failed to send progress message: {e}")
 
         try:
+            # 画像生成リクエストを送信
+            import time
+            start_time = time.time()
+
             async with self.http_session.post(
                     url,
-                    headers=headers,
                     json=payload,
                     timeout=aiohttp.ClientTimeout(total=self.timeout)
             ) as response:
-                logger.info(f"🔵 [IMAGE_GEN] Response status: {response.status}")
+
+                # プログレス監視タスクを起動
+                progress_task = None
+                if self.show_progress and progress_message:
+                    progress_task = asyncio.create_task(
+                        self._monitor_progress(progress_message, steps, prompt, model, start_time)
+                    )
+
+                logger.info(f"🟢 [IMAGE_GEN] Response status: {response.status}")
 
                 if response.status == 200:
                     result = await response.json()
 
-                    if result.get('artifacts') and len(result['artifacts']) > 0:
-                        b64_image = result['artifacts'][0].get('base64')
-                        if b64_image:
-                            image_bytes = base64.b64decode(b64_image)
-                            logger.info(f"✅ [IMAGE_GEN] Successfully received image ({len(image_bytes)} bytes)")
-                            return image_bytes
+                    # プログレス監視を停止
+                    if progress_task:
+                        progress_task.cancel()
+                        try:
+                            await progress_task
+                        except asyncio.CancelledError:
+                            pass
+
+                    if result.get('images') and len(result['images']) > 0:
+                        # Base64エンコードされた画像をデコード
+                        b64_image = result['images'][0]
+                        image_bytes = base64.b64decode(b64_image)
+
+                        elapsed_time = time.time() - start_time
+                        logger.info(f"✅ [IMAGE_GEN] Successfully received image ({len(image_bytes)} bytes)")
+                        logger.info(f"✅ [IMAGE_GEN] Total generation time: {elapsed_time:.1f}s")
+
+                        # 生成情報をログ出力
+                        if 'info' in result:
+                            logger.info(f"🟢 [IMAGE_GEN] Generation info: {result['info'][:200]}...")
+
+                        # 完了メッセージを表示
+                        if progress_message:
+                            try:
+                                final_embed = discord.Embed(
+                                    title="✅ Image Generation Complete! / 画像生成完了!",
+                                    description=f"**Prompt:** {prompt[:150]}{'...' if len(prompt) > 150 else ''}",
+                                    color=discord.Color.green()
+                                )
+                                final_embed.add_field(
+                                    name="Generation Time / 生成時間",
+                                    value=f"{elapsed_time:.1f}s",
+                                    inline=True
+                                )
+                                final_embed.set_footer(text="🎉 Sending image... / 画像を送信中...")
+                                await progress_message.edit(embed=final_embed)
+
+                                # 少し待ってから削除
+                                await asyncio.sleep(2)
+                                await progress_message.delete()
+                            except Exception as e:
+                                logger.warning(f"Failed to update final progress: {e}")
+
+                        return image_bytes
 
                     logger.error(f"❌ [IMAGE_GEN] No image data in response")
+                    if progress_message:
+                        try:
+                            await progress_message.delete()
+                        except:
+                            pass
                     return None
                 else:
                     error_text = await response.text()
                     logger.error(f"❌ [IMAGE_GEN] API error {response.status}: {error_text[:500]}")
+                    if progress_message:
+                        try:
+                            await progress_message.delete()
+                        except:
+                            pass
                     return None
 
         except asyncio.TimeoutError:
             logger.error(f"❌ [IMAGE_GEN] Request timed out after {self.timeout}s")
+            if progress_message:
+                try:
+                    await progress_message.delete()
+                except:
+                    pass
+            return None
+        except aiohttp.ClientConnectorError as e:
+            logger.error(f"❌ [IMAGE_GEN] Connection error: {e}")
+            logger.error(f"❌ [IMAGE_GEN] Make sure Forge WebUI is running at {self.forge_url}")
+            if progress_message:
+                try:
+                    await progress_message.delete()
+                except:
+                    pass
             return None
         except Exception as e:
-            logger.error(f"❌ [IMAGE_GEN] Exception: {e}", exc_info=True)
+            logger.error(f"❌ [IMAGE_GEN] Exception during API call: {e}", exc_info=True)
+            if progress_message:
+                try:
+                    await progress_message.delete()
+                except:
+                    pass
+            return None
+
+    async def _monitor_progress(
+            self,
+            message: discord.Message,
+            total_steps: int,
+            prompt: str,
+            model: str,
+            start_time: float
+    ):
+        """プログレスを監視してメッセージを更新"""
+        progress_url = f"{self.forge_url.rstrip('/')}/sdapi/v1/progress"
+
+        try:
+            while True:
+                await asyncio.sleep(self.progress_update_interval)
+
+                try:
+                    async with self.http_session.get(
+                            progress_url,
+                            timeout=aiohttp.ClientTimeout(total=5.0)
+                    ) as response:
+                        if response.status == 200:
+                            import time
+                            data = await response.json()
+                            progress = data.get('progress', 0.0)
+                            current_step = int(progress * total_steps)
+                            elapsed_time = time.time() - start_time
+
+                            await self._update_progress_message(
+                                message,
+                                current_step,
+                                total_steps,
+                                prompt,
+                                model,
+                                elapsed_time
+                            )
+                except Exception as e:
+                    logger.debug(f"Progress check error: {e}")
+                    continue
+
+        except asyncio.CancelledError:
+            # タスクがキャンセルされた場合は正常終了
+            pass
+
+    async def get_available_models_from_forge(self) -> Optional[List[str]]:
+        """Forge WebUIから利用可能なモデルリストを取得"""
+        url = f"{self.forge_url.rstrip('/')}/sdapi/v1/sd-models"
+
+        try:
+            async with self.http_session.get(
+                    url,
+                    timeout=aiohttp.ClientTimeout(total=10.0)
+            ) as response:
+                if response.status == 200:
+                    models = await response.json()
+                    model_names = [model['title'] for model in models]
+                    logger.info(f"📋 [IMAGE_GEN] Found {len(model_names)} models in Forge WebUI")
+                    return model_names
+                else:
+                    logger.error(f"❌ [IMAGE_GEN] Failed to fetch models: {response.status}")
+                    return None
+        except Exception as e:
+            logger.error(f"❌ [IMAGE_GEN] Error fetching models: {e}")
             return None
 
     async def close(self):
