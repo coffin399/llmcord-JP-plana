@@ -80,14 +80,14 @@ llm:
       # --- Hugging Face Inference API ---
       huggingface:
         base_url: "https://api-inference.huggingface.co/models"
-        api_key_source: "huggingface"  # llm.providers.huggingface.api_keyを使用
+        api_key: "huggingface"  # llm.providers.huggingface.api_keyを使用
         format: "binary"
         # または直接指定: api_key: "hf_xxxxx"
 
       # --- NVIDIA NIM ---
       nvidia_nim:
         base_url: "https://integrate.api.nvidia.com/v1"
-        api_key_source: "nvidia"  # llm.providers.nvidia.api_keyを使用
+        api_key: "nvidia"  # llm.providers.nvidia.api_keyを使用
         # または直接指定: api_key: "nvapi-xxxxx"
 
     # 利用可能なモデルリスト (provider/model形式)
