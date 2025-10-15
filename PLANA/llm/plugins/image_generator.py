@@ -22,6 +22,7 @@ class GenerationTask:
     prompt: str
     channel_id: int
     position: int
+    queue_message: Optional[discord.Message] = None
 
 
 class ImageGenerator:
@@ -213,7 +214,7 @@ class ImageGenerator:
         except discord.HTTPException as e:
             logger.warning(f"Failed to update progress message: {e}")
 
-    async def _show_queue_message(self, channel_id: int, user_name: str, position: int) -> Optional[discord.Message]:
+    async def _show_queue_message(self, channel_id: int, position: int, prompt: str) -> Optional[discord.Message]:
         """キュー待機メッセージを表示"""
         channel = self.bot.get_channel(channel_id)
         if not channel:
@@ -222,7 +223,7 @@ class ImageGenerator:
         try:
             embed = discord.Embed(
                 title="⏳ Added to Queue / キューに追加されました",
-                description=f"**User:** {user_name}",
+                description=f"**Prompt:** {prompt[:100]}{'...' if len(prompt) > 100 else ''}",
                 color=discord.Color.gold()
             )
             embed.add_field(
@@ -241,6 +242,29 @@ class ImageGenerator:
         except Exception as e:
             logger.warning(f"Failed to send queue message: {e}")
             return None
+
+    async def _update_queue_message(self, message: discord.Message, status: str, position: int, prompt: str):
+        """キューメッセージを更新"""
+        try:
+            embed = discord.Embed(
+                title="🎨 Generation Starting... / 生成開始中...",
+                description=f"**Prompt:** {prompt[:100]}{'...' if len(prompt) > 100 else ''}",
+                color=discord.Color.blue()
+            )
+            embed.add_field(
+                name="Position in Queue / キュー位置",
+                value=f"#{position}",
+                inline=True
+            )
+            embed.add_field(
+                name="Status / ステータス",
+                value=status,
+                inline=True
+            )
+            embed.set_footer(text="🎨 Now generating... / 生成中...")
+            await message.edit(embed=embed)
+        except Exception as e:
+            logger.warning(f"Failed to update queue message: {e}")
 
     @property
     def name(self) -> str:
@@ -360,15 +384,19 @@ class ImageGenerator:
                 user_name=user_name,
                 prompt=prompt,
                 channel_id=channel_id,
-                position=position
+                position=position,
+                queue_message=None
             )
-            self.generation_queue.append(task)
 
             # 既に生成中の場合はキュー待機メッセージを表示
             if self.is_generating:
-                queue_message = await self._show_queue_message(channel_id, user_name, position)
+                queue_message = await self._show_queue_message(channel_id, position, prompt)
+                task.queue_message = queue_message
+                self.generation_queue.append(task)
                 logger.info(f"📋 [IMAGE_GEN] User {user_name} added to queue at position {position}")
                 return f"⏳ Your request has been added to the queue (Position #{position}). Please wait... / リクエストをキューに追加しました（位置: #{position}）。お待ちください..."
+
+            self.generation_queue.append(task)
 
         # 生成を開始
         try:
@@ -386,6 +414,15 @@ class ImageGenerator:
 
             self.is_generating = True
             self.current_task = self.generation_queue.popleft()
+
+        # キューメッセージを更新（生成開始）
+        if self.current_task.queue_message:
+            await self._update_queue_message(
+                self.current_task.queue_message,
+                "Generating... / 生成中...",
+                self.current_task.position,
+                self.current_task.prompt
+            )
 
         try:
             # 引数から生成パラメータを取得（指定されていない場合はデフォルト値を使用）
@@ -460,6 +497,13 @@ class ImageGenerator:
             embed.set_footer(text="Powered by SDWebUI reForge and PLANA on RTX3050")
 
             await channel.send(embed=embed, file=image_file)
+
+            # キューメッセージを削除
+            if self.current_task.queue_message:
+                try:
+                    await self.current_task.queue_message.delete()
+                except Exception as e:
+                    logger.warning(f"Failed to delete queue message: {e}")
 
             logger.info(f"✅ [IMAGE_GEN] Successfully generated and sent image")
             if saved_path:
