@@ -173,14 +173,20 @@ class ImageGenerator:
 
         # キュー情報を取得
         queue_info = ""
+        current_position = 0
         async with self.queue_lock:
             queue_length = len(self.generation_queue)
+            if self.current_task:
+                current_position = self.current_task.position
             if queue_length > 0:
                 queue_info = f"\n📋 **Queue:** {queue_length} task(s) waiting / {queue_length}件待機中"
 
+        # キュー位置情報を追加
+        position_info = f"\n🔢 **Queue Position / キュー位置:** #{current_position}" if current_position > 0 else ""
+
         embed = discord.Embed(
             title="🎨 Generating Image... / 画像生成中...",
-            description=f"**Prompt:** {prompt[:150]}{'...' if len(prompt) > 150 else ''}{queue_info}",
+            description=f"**Prompt:** {prompt[:150]}{'...' if len(prompt) > 150 else ''}{position_info}{queue_info}",
             color=discord.Color.orange()
         )
         embed.add_field(
@@ -278,6 +284,49 @@ class ImageGenerator:
                             ),
                             "enum": ["512x512", "768x768", "1024x1024", "512x768", "768x512",
                                      "1024x768", "768x1024", "1280x720", "720x1280"]
+                        },
+                        "steps": {
+                            "type": "integer",
+                            "description": (
+                                "Number of sampling steps (optional). "
+                                "Higher values = better quality but slower. "
+                                "Recommended: 20-30. Default from config if not specified."
+                            ),
+                            "minimum": 1,
+                            "maximum": 150
+                        },
+                        "cfg_scale": {
+                            "type": "number",
+                            "description": (
+                                "CFG Scale - how closely to follow the prompt (optional). "
+                                "Higher values = more adherence to prompt. "
+                                "Recommended: 7-11. Default from config if not specified."
+                            ),
+                            "minimum": 1.0,
+                            "maximum": 30.0
+                        },
+                        "sampler_name": {
+                            "type": "string",
+                            "description": (
+                                "Sampling method (optional). "
+                                "Common options: 'DPM++ 2M Karras', 'Euler a', 'DPM++ SDE Karras'. "
+                                "Default from config if not specified."
+                            )
+                        },
+                        "seed": {
+                            "type": "integer",
+                            "description": (
+                                "Seed for reproducibility (optional). "
+                                "Use -1 for random seed. Default is -1."
+                            ),
+                            "minimum": -1
+                        },
+                        "restore_faces": {
+                            "type": "boolean",
+                            "description": (
+                                "Enable face restoration (optional). "
+                                "Improves face quality. Default from config if not specified."
+                            )
                         }
                     },
                     "required": ["prompt"]
@@ -300,9 +349,6 @@ class ImageGenerator:
             LLMに返すレスポンスメッセージ
         """
         prompt = arguments.get('prompt', '').strip()
-        negative_prompt = arguments.get('negative_prompt', '').strip()
-        size = arguments.get('size', self.default_size)
-
         if not prompt:
             return "❌ Error: Empty prompt provided. / エラー: プロンプトが空です。"
 
@@ -342,16 +388,38 @@ class ImageGenerator:
             self.current_task = self.generation_queue.popleft()
 
         try:
+            # 引数から生成パラメータを取得（指定されていない場合はデフォルト値を使用）
             prompt = arguments.get('prompt', '').strip()
             negative_prompt = arguments.get('negative_prompt', '').strip()
             size = arguments.get('size', self.default_size)
+
+            # 動的パラメータの取得（LLMからの指定があればそれを使用、なければconfig.yamlのデフォルト）
+            steps = arguments.get('steps', self.default_params.get('steps', 20))
+            cfg_scale = arguments.get('cfg_scale', self.default_params.get('cfg_scale', 7.0))
+            sampler_name = arguments.get('sampler_name', self.default_params.get('sampler_name', 'DPM++ 2M Karras'))
+            seed = arguments.get('seed', self.default_params.get('seed', -1))
+            restore_faces = arguments.get('restore_faces', self.default_params.get('restore_faces', False))
+
             model = self.get_model_for_channel(channel_id)
 
             logger.info(f"🎨 [IMAGE_GEN] Starting image generation for {self.current_task.user_name}")
             logger.info(f"🎨 [IMAGE_GEN] Model: {model}, Size: {size}")
+            logger.info(f"🎨 [IMAGE_GEN] Steps: {steps}, CFG: {cfg_scale}, Sampler: {sampler_name}")
+            logger.info(f"🎨 [IMAGE_GEN] Seed: {seed}, Restore Faces: {restore_faces}")
             logger.info(f"🎨 [IMAGE_GEN] Prompt: {prompt[:100]}...")
 
-            image_data = await self._generate_image_forge(prompt, negative_prompt, size, model, channel_id)
+            # パラメータ辞書を作成
+            gen_params = {
+                'steps': steps,
+                'cfg_scale': cfg_scale,
+                'sampler_name': sampler_name,
+                'seed': seed,
+                'restore_faces': restore_faces
+            }
+
+            image_data = await self._generate_image_forge(
+                prompt, negative_prompt, size, model, channel_id, gen_params
+            )
 
             if not image_data:
                 return "❌ Failed to generate image. / 画像の生成に失敗しました。"
@@ -368,6 +436,7 @@ class ImageGenerator:
 
             image_file = discord.File(fp=io.BytesIO(image_data), filename="generated_image.png")
 
+            # Embedに詳細なパラメータ情報を追加
             embed = discord.Embed(
                 title="🎨 Generated Image / 生成された画像",
                 description=f"**Prompt:** {prompt[:200]}{'...' if len(prompt) > 200 else ''}",
@@ -381,8 +450,13 @@ class ImageGenerator:
                 )
             embed.add_field(name="Size", value=size, inline=True)
             embed.add_field(name="Model", value=model, inline=True)
-            if saved_path:
-                embed.add_field(name="Saved to / 保存先", value=f"`{saved_path}`", inline=False)
+            embed.add_field(name="Steps", value=str(steps), inline=True)
+            embed.add_field(name="CFG Scale", value=str(cfg_scale), inline=True)
+            embed.add_field(name="Sampler", value=sampler_name, inline=True)
+            if seed != -1:
+                embed.add_field(name="Seed", value=str(seed), inline=True)
+            if restore_faces:
+                embed.add_field(name="Face Restoration", value="✅ Enabled", inline=True)
             embed.set_footer(text="Powered by SDWebUI reForge and PLANA on RTX3050")
 
             await channel.send(embed=embed, file=image_file)
@@ -391,10 +465,25 @@ class ImageGenerator:
             if saved_path:
                 logger.info(f"💾 [IMAGE_GEN] Image saved to: {saved_path}")
 
+            # 現在のキュー位置を取得
+            queue_position_info = ""
+            async with self.queue_lock:
+                if self.current_task:
+                    queue_position_info = f" Queue position / キュー位置: #{self.current_task.position}"
+
+            # パラメータ情報を含めたレスポンス
+            param_info = f"\nParameters: steps={steps}, cfg={cfg_scale}, sampler={sampler_name}"
+            if seed != -1:
+                param_info += f", seed={seed}"
+            if restore_faces:
+                param_info += f", restore_faces=true"
+
             return (
                 f"✅ Successfully generated image with prompt: '{prompt[:100]}{'...' if len(prompt) > 100 else ''}'\n"
                 f"The image has been sent to the channel. / 画像をチャンネルに送信しました。"
-                f"{f' Image saved to: {saved_path}' if saved_path else ''}"
+                f"{queue_position_info}"
+                f"{param_info}"
+                f"{f' (Saved locally)' if saved_path else ''}"
             )
 
         finally:
@@ -430,7 +519,8 @@ class ImageGenerator:
             negative_prompt: str,
             size: str,
             model: str,
-            channel_id: int
+            channel_id: int,
+            gen_params: Dict[str, Any]
     ) -> Optional[bytes]:
         """
         Stable Diffusion WebUI Forge APIで画像を生成
@@ -441,6 +531,7 @@ class ImageGenerator:
             size: 画像サイズ
             model: 使用するモデル名
             channel_id: Discordチャンネルid (プログレス表示用)
+            gen_params: 生成パラメータ (steps, cfg_scale, sampler_name, seed, restore_faces)
 
         Returns:
             生成された画像データ(PNG形式)
@@ -450,20 +541,25 @@ class ImageGenerator:
         # Forge WebUI API エンドポイント
         url = f"{self.forge_url.rstrip('/')}/sdapi/v1/txt2img"
 
-        # デフォルトパラメータとマージ
-        steps = self.default_params.get('steps', 20)
+        # 渡されたパラメータを使用（デフォルトは既に適用済み）
+        steps = gen_params.get('steps', 20)
+        cfg_scale = gen_params.get('cfg_scale', 7.0)
+        sampler_name = gen_params.get('sampler_name', 'DPM++ 2M Karras')
+        seed = gen_params.get('seed', -1)
+        restore_faces = gen_params.get('restore_faces', False)
+
         payload = {
             "prompt": prompt,
             "negative_prompt": negative_prompt or self.default_params.get('negative_prompt', ''),
             "width": width,
             "height": height,
             "steps": steps,
-            "cfg_scale": self.default_params.get('cfg_scale', 7.0),
-            "sampler_name": self.default_params.get('sampler_name', 'DPM++ 2M Karras'),
+            "cfg_scale": cfg_scale,
+            "sampler_name": sampler_name,
             "batch_size": 1,
             "n_iter": 1,
-            "seed": self.default_params.get('seed', -1),
-            "restore_faces": self.default_params.get('restore_faces', False),
+            "seed": seed,
+            "restore_faces": restore_faces,
             "tiling": self.default_params.get('tiling', False),
             "override_settings": {
                 "sd_model_checkpoint": model
@@ -471,17 +567,21 @@ class ImageGenerator:
             "override_settings_restore_afterwards": True
         }
 
-        # 追加パラメータがあればマージ
+        # 追加パラメータがあればマージ（ただしユーザー指定を優先）
         extra_params = self.default_params.get('extra_params')
         if extra_params and isinstance(extra_params, dict):
-            payload.update(extra_params)
+            # ユーザー指定のパラメータで上書きされないように注意
+            for key, value in extra_params.items():
+                if key not in payload:
+                    payload[key] = value
 
         logger.info(f"🟢 [IMAGE_GEN] Calling Forge WebUI API")
         logger.info(f"🟢 [IMAGE_GEN] URL: {url}")
         logger.info(f"🟢 [IMAGE_GEN] Model: {model}")
         logger.info(f"🟢 [IMAGE_GEN] Size: {width}x{height}")
         logger.info(f"🟢 [IMAGE_GEN] Steps: {payload['steps']}, CFG: {payload['cfg_scale']}")
-        logger.info(f"🟢 [IMAGE_GEN] Sampler: {payload['sampler_name']}")
+        logger.info(f"🟢 [IMAGE_GEN] Sampler: {payload['sampler_name']}, Seed: {payload['seed']}")
+        logger.info(f"🟢 [IMAGE_GEN] Restore Faces: {payload['restore_faces']}")
 
         # プログレスメッセージを投稿
         progress_message = None
@@ -491,14 +591,19 @@ class ImageGenerator:
                 try:
                     # キュー情報を追加
                     queue_info = ""
+                    current_position = 0
                     async with self.queue_lock:
                         queue_length = len(self.generation_queue)
+                        if self.current_task:
+                            current_position = self.current_task.position
                         if queue_length > 0:
                             queue_info = f"\n📋 **Queue:** {queue_length} task(s) waiting / {queue_length}件待機中"
 
+                    position_info = f"\n🔢 **Queue Position / キュー位置:** #{current_position}" if current_position > 0 else ""
+
                     embed = discord.Embed(
                         title="🎨 Starting Image Generation... / 画像生成を開始...",
-                        description=f"**Prompt:** {prompt[:150]}{'...' if len(prompt) > 150 else ''}{queue_info}",
+                        description=f"**Prompt:** {prompt[:150]}{'...' if len(prompt) > 150 else ''}{position_info}{queue_info}",
                         color=discord.Color.orange()
                     )
                     embed.add_field(name="Model", value=model, inline=True)
@@ -768,7 +873,7 @@ class ImageGenerator:
                 async with aiofiles.open(filepath, 'wb') as f:
                     await f.write(image_data)
             except ImportError:
-                # aiofいlesがない場合は通常の書き込み
+                # aiofilesがない場合は通常の書き込み
                 with open(filepath, 'wb') as f:
                     f.write(image_data)
 
