@@ -285,6 +285,23 @@ class DiscordLogHandler(logging.Handler):
             message
         )
 
+        # [on_message]形式: [on_message] ギルド名(ID****),ユーザー名(ID****)💬
+        # -> [on_message] ギ****(ID****),ユ****(ID****)💬
+        message = re.sub(
+            r"\[on_message\] ([^(]+)\(([^)]+)\),([^(]+)\(([^)]+)\)",
+            lambda
+                m: f"[on_message] {self._get_display_chars(m.group(1), 1)}****({m.group(2)}),{self._get_display_chars(m.group(3), 1)}****({m.group(4)})",
+            message
+        )
+
+        # [/chat]形式も同様に処理
+        message = re.sub(
+            r"\[/chat\] ([^(]+)\(([^)]+)\),([^(]+)\(([^)]+)\)",
+            lambda
+                m: f"[/chat] {self._get_display_chars(m.group(1), 1)}****({m.group(2)}),{self._get_display_chars(m.group(3), 1)}****({m.group(4)})",
+            message
+        )
+
         # on_guild_join/on_guild_remove形式: 'サーバー名' (ID: X****) -> 'サ****' (ID: X****)
         message = re.sub(
             r"'([^']+)' \(ID: (\d+\*+)\)",
