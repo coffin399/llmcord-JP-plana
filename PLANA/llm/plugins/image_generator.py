@@ -50,6 +50,12 @@ class ImageGenerator:
         # 生成パラメータ
         self.default_params = self.image_gen_config.get('default_params', {})
 
+        # 解像度の制限設定（config.yamlで設定可能）
+        self.max_width = self.image_gen_config.get('max_width', 2048)
+        self.max_height = self.image_gen_config.get('max_height', 2048)
+        self.min_width = self.image_gen_config.get('min_width', 256)
+        self.min_height = self.image_gen_config.get('min_height', 256)
+
         # 利用可能なモデルリスト
         self.available_models = self.image_gen_config.get('available_models', [self.default_model])
         if self.default_model not in self.available_models:
@@ -72,6 +78,7 @@ class ImageGenerator:
         logger.info(f"Default model: {self.default_model}")
         logger.info(f"Available models: {len(self.available_models)} models")
         logger.info(f"Save images: {self.save_images} (directory: {self.save_directory})")
+        logger.info(f"Resolution limits: {self.min_width}x{self.min_height} to {self.max_width}x{self.max_height}")
 
     def _load_channel_models(self) -> Dict[str, str]:
         """チャンネルごとのモデル設定を読み込む"""
@@ -143,6 +150,41 @@ class ImageGenerator:
     def get_available_models(self) -> List[str]:
         """利用可能なモデルのリストを取得"""
         return self.available_models.copy()
+
+    def _validate_and_adjust_size(self, size: str) -> tuple[int, int, str]:
+        """
+        サイズ文字列を検証し、必要に応じて調整する
+
+        Returns:
+            (width, height, adjusted_size_string)
+        """
+        try:
+            parts = size.lower().replace(' ', '').split('x')
+            if len(parts) != 2:
+                raise ValueError(f"Invalid size format: {size}")
+
+            width = int(parts[0])
+            height = int(parts[1])
+
+            # 範囲チェックと調整
+            original_width, original_height = width, height
+            width = max(self.min_width, min(width, self.max_width))
+            height = max(self.min_height, min(height, self.max_height))
+
+            # 8の倍数に調整（SD WebUIの要件）
+            width = (width // 8) * 8
+            height = (height // 8) * 8
+
+            adjusted_size = f"{width}x{height}"
+
+            if width != original_width or height != original_height:
+                logger.info(f"Adjusted size from {original_width}x{original_height} to {adjusted_size}")
+
+            return width, height, adjusted_size
+
+        except (ValueError, IndexError) as e:
+            logger.warning(f"Invalid size '{size}', using default: {e}")
+            return self._validate_and_adjust_size(self.default_size)
 
     def _create_progress_bar(self, current: int, total: int, it_per_sec: float = 0.0, width: int = 20) -> str:
         """プログレスバーの文字列を生成"""
@@ -303,11 +345,14 @@ class ImageGenerator:
                         "size": {
                             "type": "string",
                             "description": (
-                                "Image size in format WIDTHxHEIGHT (e.g., '1024x1024', '512x768'). "
-                                "Default is 1024x1024."
+                                f"Image size in format WIDTHxHEIGHT (e.g., '1024x1024', '512x768', '1920x1080'). "
+                                f"Allowed range: {self.min_width}x{self.min_height} to {self.max_width}x{self.max_height}. "
+                                f"Dimensions will be automatically adjusted to multiples of 8. "
+                                f"Default is {self.default_size}. "
+                                f"Common sizes: 1024x1024 (square), 1024x768 (landscape), 768x1024 (portrait), "
+                                f"1920x1080 (16:9 landscape), 1080x1920 (9:16 portrait)."
                             ),
-                            "enum": ["512x512", "768x768", "1024x1024", "512x768", "768x512",
-                                     "1024x768", "768x1024", "1280x720", "720x1280"]
+                            "pattern": "^[0-9]+x[0-9]+$"
                         },
                         "steps": {
                             "type": "integer",
@@ -428,7 +473,10 @@ class ImageGenerator:
             # 引数から生成パラメータを取得（指定されていない場合はデフォルト値を使用）
             prompt = arguments.get('prompt', '').strip()
             negative_prompt = arguments.get('negative_prompt', '').strip()
-            size = arguments.get('size', self.default_size)
+            size_input = arguments.get('size', self.default_size)
+
+            # サイズを検証・調整
+            width, height, adjusted_size = self._validate_and_adjust_size(size_input)
 
             # 動的パラメータの取得（LLMからの指定があればそれを使用、なければconfig.yamlのデフォルト）
             steps = arguments.get('steps', self.default_params.get('steps', 20))
@@ -440,7 +488,7 @@ class ImageGenerator:
             model = self.get_model_for_channel(channel_id)
 
             logger.info(f"🎨 [IMAGE_GEN] Starting image generation for {self.current_task.user_name}")
-            logger.info(f"🎨 [IMAGE_GEN] Model: {model}, Size: {size}")
+            logger.info(f"🎨 [IMAGE_GEN] Model: {model}, Size: {adjusted_size} (requested: {size_input})")
             logger.info(f"🎨 [IMAGE_GEN] Steps: {steps}, CFG: {cfg_scale}, Sampler: {sampler_name}")
             logger.info(f"🎨 [IMAGE_GEN] Seed: {seed}, Restore Faces: {restore_faces}")
             logger.info(f"🎨 [IMAGE_GEN] Prompt: {prompt[:100]}...")
@@ -455,7 +503,7 @@ class ImageGenerator:
             }
 
             image_data = await self._generate_image_forge(
-                prompt, negative_prompt, size, model, channel_id, gen_params
+                prompt, negative_prompt, adjusted_size, model, channel_id, gen_params
             )
 
             if not image_data:
@@ -464,7 +512,7 @@ class ImageGenerator:
             # 画像を保存
             saved_path = None
             if self.save_images:
-                saved_path = await self._save_image(image_data, prompt, model, size)
+                saved_path = await self._save_image(image_data, prompt, model, adjusted_size)
 
             channel = self.bot.get_channel(channel_id)
             if not channel:
@@ -485,7 +533,7 @@ class ImageGenerator:
                     value=negative_prompt[:100] + ('...' if len(negative_prompt) > 100 else ''),
                     inline=False
                 )
-            embed.add_field(name="Size", value=size, inline=True)
+            embed.add_field(name="Size", value=adjusted_size, inline=True)
             embed.add_field(name="Model", value=model, inline=True)
             embed.add_field(name="Steps", value=str(steps), inline=True)
             embed.add_field(name="CFG Scale", value=str(cfg_scale), inline=True)
@@ -494,6 +542,15 @@ class ImageGenerator:
                 embed.add_field(name="Seed", value=str(seed), inline=True)
             if restore_faces:
                 embed.add_field(name="Face Restoration", value="✅ Enabled", inline=True)
+
+            # サイズが調整された場合は注記
+            if size_input != adjusted_size:
+                embed.add_field(
+                    name="ℹ️ Size Adjusted",
+                    value=f"Requested: {size_input} → Used: {adjusted_size}",
+                    inline=False
+                )
+
             embed.set_footer(text="Powered by SDWebUI reForge and PLANA on RTX3050")
 
             await channel.send(embed=embed, file=image_file)
@@ -516,11 +573,13 @@ class ImageGenerator:
                     queue_position_info = f" Queue position / キュー位置: #{self.current_task.position}"
 
             # パラメータ情報を含めたレスポンス
-            param_info = f"\nParameters: steps={steps}, cfg={cfg_scale}, sampler={sampler_name}"
+            param_info = f"\nParameters: size={adjusted_size}, steps={steps}, cfg={cfg_scale}, sampler={sampler_name}"
             if seed != -1:
                 param_info += f", seed={seed}"
             if restore_faces:
                 param_info += f", restore_faces=true"
+            if size_input != adjusted_size:
+                param_info += f"\n(Size adjusted from {size_input} to {adjusted_size})"
 
             return (
                 f"✅ Successfully generated image with prompt: '{prompt[:100]}{'...' if len(prompt) > 100 else ''}'\n"
