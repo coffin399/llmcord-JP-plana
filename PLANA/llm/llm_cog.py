@@ -1044,12 +1044,17 @@ class LLMCog(commands.Cog, name="LLM"):
 
             tool_calls_buffer = []
             assistant_response_content = ""
+
+            # ストリーミング中のデータを収集
             async for chunk in stream:
                 delta = chunk.choices[0].delta
+
+                # テキストコンテンツを処理
                 if delta and delta.content:
                     assistant_response_content += delta.content
                     yield delta.content
 
+                # ツールコールを収集（yieldはしない）
                 if delta and delta.tool_calls:
                     for tool_call_chunk in delta.tool_calls:
                         chunk_index = tool_call_chunk.index if tool_call_chunk.index is not None else 0
@@ -1067,21 +1072,25 @@ class LLMCog(commands.Cog, name="LLM"):
                             if tool_call_chunk.function.arguments:
                                 buffer["function"]["arguments"] += tool_call_chunk.function.arguments
 
+            # ストリーミング完了後にアシスタントメッセージを構築
             assistant_message = {"role": "assistant", "content": assistant_response_content or None}
             if tool_calls_buffer:
                 assistant_message["tool_calls"] = tool_calls_buffer
 
             current_messages.append(assistant_message)
 
+            # ツールコールがない場合は終了
             if not tool_calls_buffer:
                 logger.debug(f"No tool calls, returning final response")
                 return
 
+            # ツールコールがある場合、ログ出力とツール実行
             logger.info(f"🔧 [TOOL] LLM requested {len(tool_calls_buffer)} tool call(s)")
             for tc in tool_calls_buffer:
                 logger.debug(
                     f"Tool call details: {tc['function']['name']} with args: {tc['function']['arguments'][:200]}")
 
+            # ツールコールオブジェクトを構築して実行
             tool_calls_obj = [
                 SimpleNamespace(
                     id=tc['id'],
@@ -1090,6 +1099,7 @@ class LLMCog(commands.Cog, name="LLM"):
             ]
             await self._process_tool_calls(tool_calls_obj, current_messages, channel_id, user_id)
 
+        # 最大反復回数を超えた場合
         logger.warning(f"⚠️ Tool processing exceeded max iterations ({max_iterations})")
         yield self.llm_config.get('error_msg', {}).get('tool_loop_timeout',
                                                        "Tool processing exceeded max iterations.\nツールの処理が最大反復回数を超えました。")
