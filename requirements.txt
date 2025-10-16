@@ -16,3 +16,4 @@ matplotlib
 japanize-matplotlib
 cartopy
 langdetect
+pillow

@@ -555,7 +555,7 @@ class LLMCog(commands.Cog, name="LLM"):
         return history[-max_history_entries:] if len(history) > max_history_entries else history
 
     async def _process_image_url(self, url: str) -> Optional[Dict[str, Any]]:
-        """画像URLを処理してBase64エンコードされた画像データを返す（修正版）"""
+        """画像URLを処理してBase64エンコードされた画像データを返す（アニメーションGIF対応版）"""
         try:
             async with self.http_session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as response:
                 if response.status == 200:
@@ -565,8 +565,6 @@ class LLMCog(commands.Cog, name="LLM"):
                     if len(image_bytes) > 20 * 1024 * 1024:
                         logger.warning(f"Image too large ({len(image_bytes)} bytes): {url}")
                         return None
-
-                    encoded_image = base64.b64encode(image_bytes).decode('utf-8')
 
                     # MIME typeの正確な判定
                     mime_type = response.content_type
@@ -582,7 +580,49 @@ class LLMCog(commands.Cog, name="LLM"):
                         }
                         mime_type = mime_mapping.get(ext, 'image/jpeg')
 
-                    # --- ログ修正 ---
+                    # アニメーションGIFの検出と最初のフレームへの変換
+                    if mime_type == 'image/gif':
+                        try:
+                            from PIL import Image
+
+                            # GIF画像を開く
+                            gif_image = Image.open(io.BytesIO(image_bytes))
+
+                            # アニメーションGIFかどうかを確認
+                            is_animated = getattr(gif_image, 'is_animated', False)
+
+                            if is_animated:
+                                logger.info(
+                                    f"🎬 [IMAGE] Detected animated GIF. Converting to static image: {url[:100]}...")
+
+                                # 最初のフレームを取得
+                                gif_image.seek(0)
+
+                                # RGBAモードに変換（透過対応）
+                                if gif_image.mode != 'RGBA':
+                                    gif_image = gif_image.convert('RGBA')
+
+                                # PNGとして再エンコード
+                                output_buffer = io.BytesIO()
+                                gif_image.save(output_buffer, format='PNG', optimize=True)
+                                image_bytes = output_buffer.getvalue()
+                                mime_type = 'image/png'
+
+                                logger.debug(
+                                    f"🖼️ [IMAGE] Converted animated GIF to PNG (Size: {len(image_bytes)} bytes)")
+                            else:
+                                logger.debug(f"🖼️ [IMAGE] Static GIF detected, processing normally")
+
+                        except ImportError:
+                            logger.warning(
+                                "⚠️ Pillow (PIL) library not found. Cannot process animated GIFs. Skipping image.")
+                            return None
+                        except Exception as gif_error:
+                            logger.error(f"❌ Error processing GIF image: {gif_error}", exc_info=True)
+                            return None
+
+                    encoded_image = base64.b64encode(image_bytes).decode('utf-8')
+
                     logger.debug(
                         f"🖼️ [IMAGE] Successfully processed image: {url[:100]}... (MIME: {mime_type}, Size: {len(image_bytes)} bytes)")
 
