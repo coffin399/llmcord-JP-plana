@@ -706,6 +706,7 @@ class LLMCog(commands.Cog, name="LLM"):
             return
 
         guild_log = f"guild='{message.guild.name}({message.guild.id})'" if message.guild else "guild='DM'"
+        user_log = f"user='{message.author.name}({message.author.id})'" #
         model_in_use = llm_client.model_name_for_api_calls
 
         image_contents, text_content = await self._prepare_multimodal_content(message)
@@ -719,10 +720,12 @@ class LLMCog(commands.Cog, name="LLM"):
             return
 
         logger.info(
-            f"📨 Received LLM request | {guild_log} | model='{model_in_use}' | text_length={len(text_content)} chars | images={len(image_contents)}")
+            f"📨 Received LLM request | {guild_log} | {user_log} | model='{model_in_use}' | text_length={len(text_content)} chars | images={len(image_contents)}") #
         if text_content:
             log_text = (text_content[:200] + '...') if len(text_content) > 203 else text_content
-            logger.info(f"💬 [USER_INPUT] {log_text.replace(chr(10), ' ')}")
+            guild_info = f"{message.guild.name}({message.guild.id})" if message.guild else "DM" #
+            user_info = f"{message.author.name}({message.author.id})"
+            logger.info(f"[on_message] {guild_info},{user_info}💬 [USER_INPUT] {log_text.replace(chr(10), ' ')}")
 
         thread_id = await self._get_conversation_thread_id(message)
 
@@ -774,11 +777,9 @@ class LLMCog(commands.Cog, name="LLM"):
 
             if sent_messages and llm_response:
                 logger.info(f"✅ LLM response completed | model='{model_in_use}' | response_length={len(llm_response)} chars")
-                # --- ★ここから変更★ ---
                 log_response = (llm_response[:200] + '...') if len(llm_response) > 203 else llm_response
                 logger.info(f"🤖 [LLM_RESPONSE] {log_response.replace(chr(10), ' ')}")
                 logger.debug(f"LLM full response (length: {len(llm_response)} chars):\n{llm_response}")
-                # --- ★ここまで変更★ ---
 
                 if thread_id not in self.conversation_threads:
                     self.conversation_threads[thread_id] = []
@@ -1236,6 +1237,7 @@ class LLMCog(commands.Cog, name="LLM"):
             return
 
         guild_log = f"guild='{interaction.guild.name}({interaction.guild.id})'" if interaction.guild else "guild='DM'"
+        user_log = f"user='{interaction.user.name}({interaction.user.id})'"
         model_in_use = llm_client.model_name_for_api_calls
 
         image_contents = []
@@ -1248,9 +1250,11 @@ class LLMCog(commands.Cog, name="LLM"):
                 return
 
         logger.info(
-            f"📨 Received /chat request | {guild_log} | model='{model_in_use}' | text_length={len(message)} chars | images={len(image_contents)}")
+            f"📨 Received /chat request | {guild_log} | {user_log} | model='{model_in_use}' | text_length={len(message)} chars | images={len(image_contents)}")
         log_text = (message[:200] + '...') if len(message) > 203 else message
-        logger.info(f"💬 [USER_INPUT] {log_text.replace(chr(10), ' ')}")
+        guild_info = f"{interaction.guild.name}({interaction.guild.id})" if interaction.guild else "DM"
+        user_info = f"{interaction.user.name}({interaction.user.id})"
+        logger.info(f"[/chat] {guild_info},{user_info}💬 [USER_INPUT] {log_text.replace(chr(10), ' ')}")
 
 
         if not self.bio_manager or not self.memory_manager:
@@ -1365,11 +1369,9 @@ class LLMCog(commands.Cog, name="LLM"):
 
             if full_response_text:
                 logger.info(f"✅ LLM response completed | model='{model_in_use}' | response_length={len(full_response_text)} chars")
-                # --- ★ここから変更★ ---
                 log_response = (full_response_text[:200] + '...') if len(full_response_text) > 203 else full_response_text
                 logger.info(f"🤖 [LLM_RESPONSE] {log_response.replace(chr(10), ' ')}")
                 logger.debug(f"LLM full response for /chat (length: {len(full_response_text)} chars):\n{full_response_text}")
-                # --- ★ここまで変更★ ---
 
                 if len(full_response_text) <= SAFE_MESSAGE_LENGTH:
                     for attempt in range(max_final_retries):
