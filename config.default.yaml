@@ -48,8 +48,13 @@ llm:
       api_key: key
 
     google:
-      base_url: https://generativelanguage.googleapis.com/v1beta
-      api_key: key
+      base_url: https://generativelanguage.googleapis.com/v1beta/
+      api_key1:
+      api_key2:
+      api_key3:
+      api_key4:
+      api_key5:
+      #you can add more api keys here
 
     mistral:
       base_url: https://api.mistral.ai/v1
