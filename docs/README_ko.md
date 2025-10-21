@@ -19,7 +19,7 @@
 [![Discord](https://img.shields.io/discord/1305004687921250436?logo=discord&logoColor=white&label=Discord&color=5865F2)](https://discord.gg/H79HKKqx3s)</div>
 
 
-**언어 / Languages:** [日本語](docs/README_ja.md) | [English](docs/README_en.md) | [中文](docs/README_zh.md) | [繁體中文](docs/README_zh-TW.md) | [한국어](docs/README_ko.md)
+**언어 / Languages:** [日本語](README_ja.md) | [English](README_en.md) | [中文](README_zh.md) | [繁體中文](README_zh-TW.md) | [한국어](README_ko.md)
 
 [개요](#-개요) • [기능](#-주요-기능) • [설치 및 설정](#️-설치-및-설정-셀프-호스팅)
 
