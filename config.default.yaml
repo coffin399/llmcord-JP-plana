@@ -18,7 +18,7 @@ admin_user_ids:
 # =============================================================================
 llm:
   # --- モデル設定 ---
-  model: "mistral/mistral-medium-latest"
+  model: "google/gemini-2.5-pro"
 
   available_models:
     # --- Official OpenAI ---
@@ -33,6 +33,7 @@ llm:
 
     # --- Google OpenAI-Compatible Proxy ---
     - "google/gemini-2.5-flash"
+    - "google/gemini-2.5-pro"
 
     # --- Other Providers ---
     - "mistral/mistral-medium-latest"
@@ -41,11 +42,13 @@ llm:
   providers:
     openai:
       base_url: https://api.openai.com/v1
-      api_key: key
+      api_key1: key
+      #you can add more api keys here
 
     nvidia_nim:
       base_url: https://integrate.api.nvidia.com/v1
-      api_key: key
+      api_key1: key
+      #you can add more api keys here
 
     google:
       base_url: https://generativelanguage.googleapis.com/v1beta/
@@ -58,11 +61,13 @@ llm:
 
     mistral:
       base_url: https://api.mistral.ai/v1
-      api_key: key
+      api_key1: key
+      #you can add more api keys here
 
     groq:
       base_url: https://api.groq.com/openai/v1
-      api_key: YOUR_GROQ_API_KEY_HERE
+      api_key1: key
+      #you can add more api keys here
 
   # --- 画像生成設定 (Stable Diffusion WebUI Forge) ---
   image_generator:
@@ -173,6 +178,8 @@ llm:
     api_status_error: "⚠️AIとの通信でエラーが発生しました。 (Code: {status_code})"
     general_error: "⚠️ 予期しないエラーが発生しました。もう一度お試しください。"
     tool_loop_timeout: "⚠️ツールの処理が複雑すぎたため、応答を生成できませんでした。"
+    content_filter_error: "AIの応答がコンテンツフィルターによってブロックされました。不適切な内容が含まれている可能性があります。\nThe response was blocked by the content filter, likely due to inappropriate content."
+    empty_response_error: "AIから応答がありませんでした。表現を変えるか、少し待ってからもう一度お試しください。\nThere was no response from the AI. Please try rephrasing your message or wait a moment and try again."
 
 # =============================================================================
 # その他の設定
