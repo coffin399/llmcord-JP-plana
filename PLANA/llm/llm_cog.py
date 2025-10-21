@@ -200,7 +200,6 @@ class LLMCog(commands.Cog, name="LLM"):
         ))
         return view
 
-
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         if not hasattr(self.bot, 'config') or not self.bot.config:
@@ -219,6 +218,11 @@ class LLMCog(commands.Cog, name="LLM"):
         self.conversation_threads: Dict[int, List[Dict[str, Any]]] = {}
         self.message_to_thread: Dict[int, int] = {}
         self.llm_clients: Dict[str, openai.AsyncOpenAI] = {}
+
+        ### ADDED ### - APIキーの管理用
+        self.provider_api_keys: Dict[str, List[str]] = {}
+        self.provider_key_index: Dict[str, int] = {}
+        ### END ADDED ###
 
         self.model_reset_tasks: Dict[int, asyncio.Task] = {}
 
@@ -286,6 +290,7 @@ class LLMCog(commands.Cog, name="LLM"):
     async def _save_channel_models(self) -> None:
         await self._save_json_data(self.channel_models, self.channel_settings_path)
 
+    ### MODIFIED ### - 複数APIキーを読み込むように変更
     def _initialize_llm_client(self, model_string: Optional[str]) -> Optional[openai.AsyncOpenAI]:
         if not model_string or '/' not in model_string:
             logger.error(f"Invalid model format: '{model_string}'. Expected 'provider_name/model_name'.")
@@ -296,14 +301,58 @@ class LLMCog(commands.Cog, name="LLM"):
             if not provider_config:
                 logger.error(f"Configuration for LLM provider '{provider_name}' not found.")
                 return None
+
+            # プロバイダーのAPIキーをまだ読み込んでいない場合、収集する
+            if provider_name not in self.provider_api_keys:
+                api_keys = []
+                # 'api_key1', 'api_key2', ... という形式のキーを収集
+                i = 1
+                while True:
+                    key_name = f'api_key{i}'
+                    if provider_config.get(key_name):
+                        api_keys.append(provider_config[key_name])
+                        i += 1
+                    else:
+                        break
+
+                # 上記のキーがない場合、単一の 'api_key' を試す
+                if not api_keys and provider_config.get('api_key'):
+                    api_keys.append(provider_config['api_key'])
+
+                if not api_keys:
+                    # ローカルモデルなど、キーが不要な場合を考慮
+                    logger.warning(f"No API keys found for provider '{provider_name}'. Using a dummy key.")
+                    self.provider_api_keys[provider_name] = ["local-dummy-key"]
+                else:
+                    self.provider_api_keys[provider_name] = api_keys
+                    logger.info(f"Loaded {len(api_keys)} API key(s) for provider '{provider_name}'.")
+
+            # 現在使用するキーのインデックスを初期化または取得
+            self.provider_key_index.setdefault(provider_name, 0)
+
+            key_list = self.provider_api_keys[provider_name]
+            current_key_index = self.provider_key_index[provider_name]
+
+            # インデックスがリストの範囲外になっていないか安全確認
+            if current_key_index >= len(key_list):
+                current_key_index = 0
+                self.provider_key_index[provider_name] = 0
+
+            api_key_to_use = key_list[current_key_index]
+
             client = openai.AsyncOpenAI(base_url=provider_config.get('base_url'),
-                                        api_key=provider_config.get('api_key') or "local-dummy-key")
+                                        api_key=api_key_to_use)
             client.model_name_for_api_calls = model_name
-            logger.info(f"Initialized LLM client for provider '{provider_name}' with model '{model_name}'.")
+            client.provider_name = provider_name  # 再試行のためにプロバイダー名をクライアントに保存
+
+            logger.info(
+                f"Initialized LLM client for provider '{provider_name}' with model '{model_name}' using key index {current_key_index}.")
             return client
         except Exception as e:
             logger.error(f"Error initializing LLM client for '{model_string}': {e}", exc_info=True)
             return None
+
+    ### END MODIFIED ###
 
     async def _get_llm_client_for_channel(self, channel_id: int) -> Optional[openai.AsyncOpenAI]:
         channel_id_str = str(channel_id)
@@ -746,7 +795,7 @@ class LLMCog(commands.Cog, name="LLM"):
             return
 
         guild_log = f"guild='{message.guild.name}({message.guild.id})'" if message.guild else "guild='DM'"
-        user_log = f"user='{message.author.name}({message.author.id})'" #
+        user_log = f"user='{message.author.name}({message.author.id})'"  #
         model_in_use = llm_client.model_name_for_api_calls
 
         image_contents, text_content = await self._prepare_multimodal_content(message)
@@ -760,10 +809,10 @@ class LLMCog(commands.Cog, name="LLM"):
             return
 
         logger.info(
-            f"📨 Received LLM request | {guild_log} | {user_log} | model='{model_in_use}' | text_length={len(text_content)} chars | images={len(image_contents)}") #
+            f"📨 Received LLM request | {guild_log} | {user_log} | model='{model_in_use}' | text_length={len(text_content)} chars | images={len(image_contents)}")  #
         if text_content:
             log_text = (text_content[:200] + '...') if len(text_content) > 203 else text_content
-            guild_info = f"{message.guild.name}({message.guild.id})" if message.guild else "DM" #
+            guild_info = f"{message.guild.name}({message.guild.id})" if message.guild else "DM"  #
             user_info = f"{message.author.name}({message.author.id})"
             logger.info(f"[on_message] {guild_info},{user_info}💬 [USER_INPUT] {log_text.replace(chr(10), ' ')}")
 
@@ -816,7 +865,8 @@ class LLMCog(commands.Cog, name="LLM"):
             )
 
             if sent_messages and llm_response:
-                logger.info(f"✅ LLM response completed | model='{model_in_use}' | response_length={len(llm_response)} chars")
+                logger.info(
+                    f"✅ LLM response completed | model='{model_in_use}' | response_length={len(llm_response)} chars")
                 log_response = (llm_response[:200] + '...') if len(llm_response) > 203 else llm_response
                 logger.info(f"🤖 [LLM_RESPONSE] {log_response.replace(chr(10), ' ')}")
                 logger.debug(f"LLM full response (length: {len(llm_response)} chars):\n{llm_response}")
@@ -1100,6 +1150,7 @@ class LLMCog(commands.Cog, name="LLM"):
 
         return converted_messages, combined_system_prompt
 
+    ### MODIFIED ### - レート制限時にAPIキーを切り替えて再試行するロジックを追加
     async def _llm_stream_and_tool_handler(
             self,
             messages: List[Dict[str, Any]],
@@ -1107,7 +1158,7 @@ class LLMCog(commands.Cog, name="LLM"):
             channel_id: int,
             user_id: int
     ) -> AsyncGenerator[str, None]:
-        #for gemini
+        # for gemini
         model_string = self.channel_models.get(str(channel_id)) or self.llm_config.get('model')
         # モデル名に 'gemini' が含まれているかで判定（例: 'gemini/gemini-pro', 'google/gemini-1.5-pro'）
         is_gemini = model_string and 'gemini' in model_string.lower()
@@ -1144,12 +1195,64 @@ class LLMCog(commands.Cog, name="LLM"):
                 api_kwargs["tool_choice"] = "auto"
                 logger.debug(f"Available tools: {[t['function']['name'] for t in tools_def]}")
 
-            try:
-                stream = await client.chat.completions.create(**api_kwargs)
-                logger.debug(f"Stream connection established")
-            except Exception as e:
-                logger.error(f"❌ Error calling LLM API in stream handler: {e}", exc_info=True)
-                raise
+            # --- API呼び出しとキーローテーションによる再試行ロジック ---
+            stream = None
+            provider_name = client.provider_name
+            api_keys = self.provider_api_keys.get(provider_name, [])
+            num_keys = len(api_keys)
+
+            if num_keys == 0:
+                logger.error(f"FATAL: No API keys configured for provider '{provider_name}'.")
+                raise Exception(f"No API keys available for provider {provider_name}")
+
+            # 現在のキーから始めて、最大 num_keys 回試行する
+            for attempt in range(num_keys):
+                try:
+                    current_key_index = self.provider_key_index.get(provider_name, 0)
+                    logger.debug(
+                        f"Attempting API call to '{provider_name}' with key index {current_key_index} (Attempt {attempt + 1}/{num_keys}).")
+
+                    stream = await client.chat.completions.create(**api_kwargs)
+                    logger.debug(f"Stream connection established successfully.")
+                    break  # 成功したらループを抜ける
+
+                except openai.RateLimitError as e:
+                    logger.warning(
+                        f"⚠️ Rate limit error for provider '{provider_name}' with key index {current_key_index}. Details: {e}")
+
+                    # すべてのキーを試した場合
+                    if attempt + 1 >= num_keys:
+                        logger.error(
+                            f"❌ All {num_keys} API keys for provider '{provider_name}' are rate-limited. Aborting.")
+                        raise e  # エラーを再発生させて上位で処理
+
+                    # 次のキーに切り替える
+                    next_key_index = (current_key_index + 1) % num_keys
+                    self.provider_key_index[provider_name] = next_key_index
+                    next_key = api_keys[next_key_index]
+
+                    logger.info(f"🔄 Switching to next API key for '{provider_name}' (index: {next_key_index}).")
+
+                    # 新しいキーでクライアントを再生成
+                    new_client = openai.AsyncOpenAI(base_url=client.base_url, api_key=next_key)
+                    new_client.model_name_for_api_calls = client.model_name_for_api_calls
+                    new_client.provider_name = client.provider_name
+                    client = new_client  # このハンドラ内で使用するクライアントを差し替える
+
+                    # グローバルなクライアントキャッシュも更新
+                    current_model_string = f"{provider_name}/{client.model_name_for_api_calls}"
+                    self.llm_clients[current_model_string] = new_client
+
+                    await asyncio.sleep(1)  # APIに少し猶予を与える
+
+                except Exception as e:
+                    logger.error(f"❌ Unhandled error calling LLM API: {e}", exc_info=True)
+                    raise  # RateLimitError 以外はそのままエラーを発生させる
+
+            if stream is None:
+                # ループが完了しても stream が None の場合 (通常は発生しない)
+                raise Exception("Failed to establish stream with any API key.")
+            # --- ここまでが再試行ロジック ---
 
             tool_calls_buffer = []
             assistant_response_content = ""
@@ -1212,6 +1315,8 @@ class LLMCog(commands.Cog, name="LLM"):
         logger.warning(f"⚠️ Tool processing exceeded max iterations ({max_iterations})")
         yield self.llm_config.get('error_msg', {}).get('tool_loop_timeout',
                                                        "Tool processing exceeded max iterations.\nツールの処理が最大反復回数を超えました。")
+
+    ### END MODIFIED ###
 
     async def _process_tool_calls(self, tool_calls: List[Any], messages: List[Dict[str, Any]],
                                   channel_id: int, user_id: int) -> None:
@@ -1319,6 +1424,7 @@ class LLMCog(commands.Cog, name="LLM"):
         finally:
             self.model_reset_tasks.pop(channel_id, None)
 
+    # ( ... ここから下のコマンド部分は変更ありません ... )
     @app_commands.command(
         name="chat",
         description="Chat with the AI without needing to mention.\nAIと対話します。メンション不要で会話できます。"
@@ -1374,7 +1480,6 @@ class LLMCog(commands.Cog, name="LLM"):
         guild_info = f"{interaction.guild.name}({interaction.guild.id})" if interaction.guild else "DM"
         user_info = f"{interaction.user.name}({interaction.user.id})"
         logger.info(f"[/chat] {guild_info},{user_info}💬 [USER_INPUT] {log_text.replace(chr(10), ' ')}")
-
 
         if not self.bio_manager or not self.memory_manager:
             error_msg = "Cannot respond because required plugins are not initialized.\n必要なプラグインが初期化されていないため、応答できません。"
@@ -1487,10 +1592,13 @@ class LLMCog(commands.Cog, name="LLM"):
                 f"Stream completed | Total chunks: {chunk_count} | Final length: {len(full_response_text)} chars")
 
             if full_response_text:
-                logger.info(f"✅ LLM response completed | model='{model_in_use}' | response_length={len(full_response_text)} chars")
-                log_response = (full_response_text[:200] + '...') if len(full_response_text) > 203 else full_response_text
+                logger.info(
+                    f"✅ LLM response completed | model='{model_in_use}' | response_length={len(full_response_text)} chars")
+                log_response = (full_response_text[:200] + '...') if len(
+                    full_response_text) > 203 else full_response_text
                 logger.info(f"🤖 [LLM_RESPONSE] {log_response.replace(chr(10), ' ')}")
-                logger.debug(f"LLM full response for /chat (length: {len(full_response_text)} chars):\n{full_response_text}")
+                logger.debug(
+                    f"LLM full response for /chat (length: {len(full_response_text)} chars):\n{full_response_text}")
 
                 if len(full_response_text) <= SAFE_MESSAGE_LENGTH:
                     for attempt in range(max_final_retries):
