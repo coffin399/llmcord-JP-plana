@@ -48,7 +48,7 @@ llm:
       api_key: key
 
     google:
-      base_url: https://generativelanguage.googleapis.com/v1beta/
+      base_url: https://generativelanguage.googleapis.com/v1beta/openai/
       api_key: key
 
     mistral:

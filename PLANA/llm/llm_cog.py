@@ -1047,6 +1047,59 @@ class LLMCog(commands.Cog, name="LLM"):
                 await message.reply(content=final_error_msg, view=self._create_support_view(), silent=True)
             return None, ""
 
+    # for gemini
+    def _convert_messages_for_gemini(self, messages: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], str]:
+        """
+        OpenAI形式のメッセージを、Geminiモデルと互換性のある形式に変換します。
+        'system'ロールをネイティブにサポートしないため、システムメッセージを結合して
+        会話の先頭にユーザーメッセージとして挿入し、モデルに指示として認識させます。
+
+        Args:
+            messages: OpenAI形式のメッセージリスト。
+
+        Returns:
+            変換後のメッセージリストと、結合されたシステムプロンプトの文字列のタプル。
+            変換が不要だった場合、元のメッセージリストと空文字列を返します。
+        """
+        system_prompts_content = []
+        other_messages = []
+        has_system_message = False
+
+        for message in messages:
+            if message.get("role") == "system":
+                # contentが文字列で、空でないことを確認
+                if isinstance(message.get("content"), str) and message["content"].strip():
+                    system_prompts_content.append(message["content"])
+                    has_system_message = True
+            else:
+                other_messages.append(message)
+
+        # 変換が不要な場合（システムメッセージが存在しない場合）は元のリストを返す
+        if not has_system_message:
+            return messages, ""
+
+        combined_system_prompt = "\n\n".join(system_prompts_content)
+
+        # 新しいメッセージリストを作成
+        converted_messages = []
+
+        # 結合したシステムプロンプトを最初のユーザーメッセージとして挿入
+        converted_messages.append({
+            "role": "user",
+            "content": combined_system_prompt
+        })
+
+        # モデルに役割を理解させ、会話のターンを整えるための短い応答を追加
+        converted_messages.append({
+            "role": "assistant",
+            "content": "承知いたしました。指示に従います。"
+        })
+
+        # 元の会話履歴（システムメッセージ以外）を追加
+        converted_messages.extend(other_messages)
+
+        return converted_messages, combined_system_prompt
+
     async def _llm_stream_and_tool_handler(
             self,
             messages: List[Dict[str, Any]],
@@ -1054,6 +1107,22 @@ class LLMCog(commands.Cog, name="LLM"):
             channel_id: int,
             user_id: int
     ) -> AsyncGenerator[str, None]:
+        #for gemini
+        model_string = self.channel_models.get(str(channel_id)) or self.llm_config.get('model')
+        # モデル名に 'gemini' が含まれているかで判定（例: 'gemini/gemini-pro', 'google/gemini-1.5-pro'）
+        is_gemini = model_string and 'gemini' in model_string.lower()
+
+        original_messages_for_log = messages  # ログ出力用に変換前のメッセージを保持
+        if is_gemini:
+            messages, combined_system_prompt = self._convert_messages_for_gemini(messages)
+            if combined_system_prompt:  # 実際に変換が行われた場合のみログを出力
+                logger.info(f"🔄 [GEMINI ADAPTER] Converting system prompts for Gemini model '{model_string}'.")
+                log_prompt = combined_system_prompt.replace('\n', ' ')
+                logger.debug(
+                    f"  - Combined system prompt ({len(combined_system_prompt)} chars): {log_prompt[:300]}...")
+                logger.debug(
+                    f"  - Message count changed: {len(original_messages_for_log)} -> {len(messages)}")
+
         current_messages = messages.copy()
         max_iterations = self.llm_config.get('max_tool_iterations', 5)
         extra_params = self.llm_config.get('extra_api_parameters', {})
