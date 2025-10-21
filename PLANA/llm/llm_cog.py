@@ -860,7 +860,7 @@ class LLMCog(commands.Cog, name="LLM"):
                      f"lang_override={'present' if len(messages_for_api) > 1 and 'CRITICAL' in str(messages_for_api[1]) else 'absent'}")
 
         try:
-            sent_messages, llm_response = await self._handle_llm_streaming_response(
+            sent_messages, llm_response, used_key_index = await self._handle_llm_streaming_response(
                 message, messages_for_api, llm_client
             )
 
@@ -868,7 +868,12 @@ class LLMCog(commands.Cog, name="LLM"):
                 logger.info(
                     f"✅ LLM response completed | model='{model_in_use}' | response_length={len(llm_response)} chars")
                 log_response = (llm_response[:200] + '...') if len(llm_response) > 203 else llm_response
-                logger.info(f"🤖 [LLM_RESPONSE] {log_response.replace(chr(10), ' ')}")
+
+                key_log_str = ""
+                if used_key_index is not None:
+                    key_log_str = f" [key{used_key_index + 1}]"
+
+                logger.info(f"🤖 [LLM_RESPONSE]{key_log_str} {log_response.replace(chr(10), ' ')}")
                 logger.debug(f"LLM full response (length: {len(llm_response)} chars):\n{llm_response}")
 
                 if thread_id not in self.conversation_threads:
@@ -901,7 +906,7 @@ class LLMCog(commands.Cog, name="LLM"):
             message: discord.Message,
             initial_messages: List[Dict[str, Any]],
             client: openai.AsyncOpenAI
-    ) -> Tuple[Optional[List[discord.Message]], str]:
+    ) -> Tuple[Optional[List[discord.Message]], str, Optional[int]]:
         """
         ストリーミング + 長文分割対応版
         """
@@ -973,7 +978,7 @@ class LLMCog(commands.Cog, name="LLM"):
                         except discord.NotFound:
                             logger.warning(
                                 f"⚠️ Message deleted during stream (ID: {sent_message.id}). Aborting.")
-                            return None, ""
+                            return None, "", None
                         except discord.HTTPException as e:
                             if e.status == 429:
                                 retry_after = (e.retry_after or 1.0) + 0.5
@@ -1003,7 +1008,7 @@ class LLMCog(commands.Cog, name="LLM"):
                             break
                         except discord.NotFound:
                             logger.error(f"❌ Message was deleted before final update")
-                            return None, ""
+                            return None, "", None
                         except discord.HTTPException as e:
                             if e.status == 429:
                                 retry_after = (e.retry_after or 1.0) + 0.5
@@ -1029,7 +1034,7 @@ class LLMCog(commands.Cog, name="LLM"):
                             if attempt < max_final_retries - 1:
                                 await asyncio.sleep(final_retry_delay)
 
-                    return [sent_message], full_response_text
+                    return [sent_message], full_response_text, getattr(client, 'last_used_key_index', None)
 
                 else:
                     logger.debug(
@@ -1074,15 +1079,27 @@ class LLMCog(commands.Cog, name="LLM"):
                                     else:
                                         break
 
-                    return all_messages, full_response_text
+                    return all_messages, full_response_text, getattr(client, 'last_used_key_index', None)
             else:
-                error_msg = self.llm_config.get('error_msg', {}).get(
-                    'general_error', "There was no response from the AI.\nAIから応答がありませんでした。"
-                )
-                logger.warning(f"⚠️ Empty response from LLM")
+                # MODIFIED: 空応答時のエラーハンドリングを改善
+                finish_reason = getattr(client, 'last_finish_reason', None)
+
+                if finish_reason == 'content_filter':
+                    error_msg = self.llm_config.get('error_msg', {}).get(
+                        'content_filter_error',
+                        "The response was blocked by the content filter.\nAIの応答がコンテンツフィルターによってブロックされました。"
+                    )
+                    logger.warning(f"⚠️ Empty response from LLM due to content filter.")
+                else:
+                    error_msg = self.llm_config.get('error_msg', {}).get(
+                        'empty_response_error',
+                        "There was no response from the AI. Please try rephrasing your message.\nAIから応答がありませんでした。表現を変えてもう一度お試しください。"
+                    )
+                    logger.warning(f"⚠️ Empty response from LLM (Finish reason: {finish_reason})")
+
                 final_error_msg = f"❌ **Error / エラー** ❌\n\n{error_msg}"
                 await sent_message.edit(content=final_error_msg, embed=None, view=self._create_support_view())
-                return None, ""
+                return None, "", None
 
         except Exception as e:
             logger.error(f"❌ Error during LLM streaming response: {e}", exc_info=True)
@@ -1095,7 +1112,7 @@ class LLMCog(commands.Cog, name="LLM"):
                     pass
             else:
                 await message.reply(content=final_error_msg, view=self._create_support_view(), silent=True)
-            return None, ""
+            return None, "", None
 
     # for gemini
     def _convert_messages_for_gemini(self, messages: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], str]:
@@ -1209,6 +1226,7 @@ class LLMCog(commands.Cog, name="LLM"):
             for attempt in range(num_keys):
                 try:
                     current_key_index = self.provider_key_index.get(provider_name, 0)
+                    client.last_used_key_index = current_key_index  # どのキーを使ったか記録
                     logger.debug(
                         f"Attempting API call to '{provider_name}' with key index {current_key_index} (Attempt {attempt + 1}/{num_keys}).")
 
@@ -1256,9 +1274,14 @@ class LLMCog(commands.Cog, name="LLM"):
 
             tool_calls_buffer = []
             assistant_response_content = ""
+            finish_reason = None  # MODIFIED: finish_reason を初期化
 
             # ストリーミング中のデータを収集
             async for chunk in stream:
+                # MODIFIED: finish_reason を取得
+                if chunk.choices[0].finish_reason:
+                    finish_reason = chunk.choices[0].finish_reason
+
                 delta = chunk.choices[0].delta
 
                 # テキストコンテンツを処理
@@ -1284,6 +1307,9 @@ class LLMCog(commands.Cog, name="LLM"):
                             if tool_call_chunk.function.arguments:
                                 buffer["function"]["arguments"] += tool_call_chunk.function.arguments
 
+            # MODIFIED: clientオブジェクトにfinish_reasonを保存
+            client.last_finish_reason = finish_reason
+
             # ストリーミング完了後にアシスタントメッセージを構築
             assistant_message = {"role": "assistant", "content": assistant_response_content or None}
             if tool_calls_buffer:
@@ -1293,7 +1319,7 @@ class LLMCog(commands.Cog, name="LLM"):
 
             # ツールコールがない場合は終了
             if not tool_calls_buffer:
-                logger.debug(f"No tool calls, returning final response")
+                logger.debug(f"No tool calls, returning final response (Finish reason: {finish_reason})")
                 return
 
             # ツールコールがある場合、ログ出力とツール実行
@@ -1596,7 +1622,13 @@ class LLMCog(commands.Cog, name="LLM"):
                     f"✅ LLM response completed | model='{model_in_use}' | response_length={len(full_response_text)} chars")
                 log_response = (full_response_text[:200] + '...') if len(
                     full_response_text) > 203 else full_response_text
-                logger.info(f"🤖 [LLM_RESPONSE] {log_response.replace(chr(10), ' ')}")
+
+                key_log_str = ""
+                used_key_index = getattr(llm_client, 'last_used_key_index', None)
+                if used_key_index is not None:
+                    key_log_str = f" [key{used_key_index + 1}]"
+
+                logger.info(f"🤖 [LLM_RESPONSE]{key_log_str} {log_response.replace(chr(10), ' ')}")
                 logger.debug(
                     f"LLM full response for /chat (length: {len(full_response_text)} chars):\n{full_response_text}")
 
@@ -1653,9 +1685,22 @@ class LLMCog(commands.Cog, name="LLM"):
                                     else:
                                         break
             else:
-                error_msg = self.llm_config.get('error_msg', {}).get('general_error',
-                                                                     "There was no response from the AI.\nAIから応答がありませんでした。")
-                logger.warning(f"⚠️ Empty response from LLM for /chat")
+                # MODIFIED: 空応答時のエラーハンドリングを改善
+                finish_reason = getattr(client, 'last_finish_reason', None)
+
+                if finish_reason == 'content_filter':
+                    error_msg = self.llm_config.get('error_msg', {}).get(
+                        'content_filter_error',
+                        "The response was blocked by the content filter.\nAIの応答がコンテンツフィルターによってブロックされました。"
+                    )
+                    logger.warning(f"⚠️ Empty response from LLM for /chat due to content filter.")
+                else:
+                    error_msg = self.llm_config.get('error_msg', {}).get(
+                        'empty_response_error',
+                        "There was no response from the AI. Please try rephrasing your message.\nAIから応答がありませんでした。表現を変えてもう一度お試しください。"
+                    )
+                    logger.warning(f"⚠️ Empty response from LLM for /chat (Finish reason: {finish_reason})")
+
                 final_error_msg = f"❌ **Error / エラー** ❌\n\n{error_msg}"
                 await temp_message.edit(content=final_error_msg, embed=None, view=self._create_support_view())
 
