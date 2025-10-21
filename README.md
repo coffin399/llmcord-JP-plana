@@ -12,6 +12,8 @@
 
 <div align="center">
 
+![access counter](https://counter.seku.su/cmoe?name=PLANAv1&theme=gb)
+
 ### [日本語](docs/README_ja.md) | [English](docs/README_en.md) | [中文](docs/README_zh.md) | [繁體中文](docs/README_zh-TW.md) | [한국어](docs/README_ko.md)
 
 [![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)](https://www.python.org/)
