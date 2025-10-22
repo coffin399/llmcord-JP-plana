@@ -618,13 +618,22 @@ class MusicCog(commands.Cog, name="music_cog"):
         # シーク中フラグを設定してコールバックを無視
         state.is_seeking = True
 
-        # 現在の再生を停止して、新しい位置から再生
+        # 現在の再生を停止
         if state.voice_client and state.voice_client.is_playing():
             state.voice_client.stop()
 
-        # 少し待機してからシーク再生を開始
-        await asyncio.sleep(0.1)
+        # FFmpegプロセスの完全終了を待つ（重要：短すぎるとプロセス競合が発生）
+        await asyncio.sleep(0.5)
 
+        # ストリームURLを再取得して最新の状態にする
+        try:
+            updated_track = await ensure_stream(state.current_track)
+            if updated_track and updated_track.stream_url:
+                state.current_track.stream_url = updated_track.stream_url
+        except Exception as e:
+            logger.warning(f"Guild {interaction.guild.id}: Stream refresh failed during seek: {e}")
+
+        # シーク再生を開始（フラグは_play_next_song内でクリアされる）
         await self._send_response(interaction, "seeked_to_position", position=format_duration(seek_seconds))
         await self._play_next_song(interaction.guild.id, seek_seconds=seek_seconds)
 
