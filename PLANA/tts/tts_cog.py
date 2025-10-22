@@ -530,8 +530,7 @@ class TTSCog(commands.Cog, name="tts_cog"):
         }
 
         try:
-            # POSTメソッドでリクエスト
-            async with self.session.post(endpoint, json=payload) as response:
+            async with self.session.post(endpoint, params=payload) as response:
                 if response.status == 200:
                     wav_data = await response.read()
                     source = discord.FFmpegPCMAudio(io.BytesIO(wav_data), pipe=True)
@@ -590,7 +589,7 @@ class TTSCog(commands.Cog, name="tts_cog"):
 
             music_cog: MusicCog = self.bot.get_cog("music_cog")
             if music_cog:
-                print(f"[TTSCog] 音楽を再開します (guild {guild_id}) 位置: {position}秒")
+                print(f"[TTSCog] 音楽を再開します (guild {guild.id}) 位置: {position}秒")
                 music_state = music_cog._get_guild_state(guild_id)
                 music_state.current_track = interrupted_track
                 await music_cog._play_next_song(guild_id, seek_seconds=position)
