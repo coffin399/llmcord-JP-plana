@@ -82,11 +82,39 @@ class TTSCog(commands.Cog, name="tts_cog"):
             async with self.session.get(f"{self.api_url}/models/info") as response:
                 if response.status == 200:
                     data = await response.json()
-                    self.available_models = data
+
+                    # データ構造を確認してログ出力
+                    print(f"[TTSCog Debug] API Response type: {type(data)}")
+
+                    # レスポンスがリストの場合とオブジェクトの場合で分岐
+                    if isinstance(data, list):
+                        self.available_models = data
+                    elif isinstance(data, dict):
+                        # {"models": [...]} のような形式の場合
+                        if "models" in data:
+                            self.available_models = data["models"]
+                        else:
+                            # キーバリューのペアをリストに変換
+                            self.available_models = [
+                                {"id": k, "name": v if isinstance(v, str) else str(v)}
+                                for k, v in data.items()
+                            ]
+                    else:
+                        print(f"✗ [TTSCog] 予期しないデータ形式: {data}")
+                        return False
+
                     self.models_loaded = True
                     print(f"✓ [TTSCog] {len(self.available_models)}個のモデルを検出")
+
+                    # モデル情報を表示
                     for model in self.available_models:
-                        print(f"  - Model ID {model['id']}: {model['name']}")
+                        if isinstance(model, dict):
+                            model_id = model.get('id', 'unknown')
+                            model_name = model.get('name', 'unknown')
+                            print(f"  - Model ID {model_id}: {model_name}")
+                        else:
+                            print(f"  - Model: {model}")
+
                     return True
                 else:
                     print(f"✗ [TTSCog] モデル情報取得失敗: {response.status}")
@@ -97,13 +125,20 @@ class TTSCog(commands.Cog, name="tts_cog"):
             return False
         except Exception as e:
             print(f"✗ [TTSCog] モデル情報取得中にエラー: {type(e).__name__}: {e}")
+            import traceback
+            traceback.print_exc()
             return False
 
     def get_model_name(self, model_id: int) -> str:
         """モデルIDから名前を取得"""
         for model in self.available_models:
-            if model['id'] == model_id:
-                return model['name']
+            if isinstance(model, dict):
+                # 辞書形式の場合
+                if model.get('id') == model_id or str(model.get('id')) == str(model_id):
+                    return model.get('name', f"Model {model_id}")
+            elif isinstance(model, str):
+                # 文字列形式の場合（モデル名のみ）
+                return model
         return f"Model {model_id}"
 
     # --- Event Listener ---
@@ -210,12 +245,27 @@ class TTSCog(commands.Cog, name="tts_cog"):
         )
 
         for model in self.available_models[:10]:  # 最大10個まで表示
-            styles = ", ".join(model.get('styles', ['Neutral']))
-            embed.add_field(
-                name=f"ID: {model['id']} - {model['name']}",
-                value=f"スタイル: {styles}",
-                inline=False
-            )
+            if isinstance(model, dict):
+                model_id = model.get('id', 'N/A')
+                model_name = model.get('name', 'Unknown')
+                styles = model.get('styles', ['Neutral'])
+                if isinstance(styles, list):
+                    styles_str = ", ".join(styles)
+                else:
+                    styles_str = str(styles)
+
+                embed.add_field(
+                    name=f"ID: {model_id} - {model_name}",
+                    value=f"スタイル: {styles_str}",
+                    inline=False
+                )
+            else:
+                # 文字列や単純な形式の場合
+                embed.add_field(
+                    name=f"Model: {model}",
+                    value="詳細情報なし",
+                    inline=False
+                )
 
         if len(self.available_models) > 10:
             embed.set_footer(text=f"... 他 {len(self.available_models) - 10} 個のモデル")
