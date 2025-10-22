@@ -4,7 +4,7 @@ from discord import app_commands
 import aiohttp
 import io
 import asyncio
-from typing import Dict, Tuple, Optional, Set
+from typing import Dict, Tuple, Optional, List
 
 # MusicCogのクラスやオブジェクトの型ヒントのため
 try:
@@ -18,7 +18,6 @@ except ImportError:
 try:
     from PLANA.tts.error.errors import TTSCogExceptionHandler
 except ImportError:
-    # フォールバック
     try:
         from error.errors import TTSCogExceptionHandler
     except ImportError as e:
@@ -35,27 +34,38 @@ class TTSCog(commands.Cog, name="tts_cog"):
         self.bot = bot
         self.config = bot.config.get('tts', {})
 
-        self.api_url = self.config.get('api_server_url')
-        self.api_key = self.config.get('api_key')
+        self.api_url = self.config.get('api_server_url', 'http://127.0.0.1:5000')
+        self.api_key = self.config.get('api_key')  # Style-Bert-VITS2では通常不要
 
-        if not self.api_url or not self.api_key:
-            raise ValueError("tts.api_server_url and tts.api_key must be set in the config.yaml file.")
+        # Style-Bert-VITS2用の設定
+        self.default_model_id = self.config.get('default_model_id', 0)
+        self.default_style = self.config.get('default_style', 'Neutral')
+        self.default_style_weight = self.config.get('default_style_weight', 5.0)
+        self.default_speed = self.config.get('default_speed', 1.0)
 
-        self.session = aiohttp.ClientSession(headers={"X-API-KEY": self.api_key})
+        # セッションの作成（APIキーがある場合のみヘッダーに追加）
+        headers = {}
+        if self.api_key:
+            headers["X-API-KEY"] = self.api_key
+
+        self.session = aiohttp.ClientSession(headers=headers)
         self.exception_handler = TTSCogExceptionHandler()
 
         self.interrupted_states: Dict[int, Tuple[Track, int]] = {}
         self.tts_locks: Dict[int, asyncio.Lock] = {}
-        self.model_initialized: bool = False  # モデル初期化状態を保持
-        self.initialization_lock = asyncio.Lock()  # 初期化の競合を防ぐ
 
-        print("TTSCog loaded (with auto-initialization, event listener, and music interruption support).")
+        # Style-Bert-VITS2では事前の初期化は不要（モデルは自動ロード）
+        self.available_models: List[Dict] = []
+        self.models_loaded: bool = False
+
+        print("TTSCog loaded (Style-Bert-VITS2 compatible)")
 
     # --- Cog Lifecycle Events ---
 
     async def cog_load(self):
-        """Cogがロードされたことを通知する。モデルの初期化はオンデマンドで行う。"""
-        print("TTSCog loaded. Model will be initialized on first use.")
+        """Cogがロードされたことを通知し、利用可能なモデルを取得"""
+        print("TTSCog loaded. Fetching available models...")
+        await self.fetch_available_models()
 
     async def cog_unload(self):
         """Cogがアンロードされる際にセッションを閉じる"""
@@ -64,43 +74,37 @@ class TTSCog(commands.Cog, name="tts_cog"):
 
     # --- Helper Functions ---
 
-    async def ensure_model_initialized(self) -> bool:
+    async def fetch_available_models(self) -> bool:
         """
-        モデルが初期化されているか確認し、されていなければ/initを呼び出す。
-        複数の同時呼び出しを防ぐためにロックを使用。
+        Style-Bert-VITS2サーバーから利用可能なモデル一覧を取得
         """
-        if self.model_initialized:
-            return True  # 既に初期化済み
+        try:
+            async with self.session.get(f"{self.api_url}/models/info") as response:
+                if response.status == 200:
+                    data = await response.json()
+                    self.available_models = data
+                    self.models_loaded = True
+                    print(f"✓ [TTSCog] {len(self.available_models)}個のモデルを検出")
+                    for model in self.available_models:
+                        print(f"  - Model ID {model['id']}: {model['name']}")
+                    return True
+                else:
+                    print(f"✗ [TTSCog] モデル情報取得失敗: {response.status}")
+                    return False
+        except aiohttp.ClientConnectorError as e:
+            print(f"✗ [TTSCog] APIサーバーに接続できません: {self.api_url}")
+            print(f"  エラー: {e}")
+            return False
+        except Exception as e:
+            print(f"✗ [TTSCog] モデル情報取得中にエラー: {type(e).__name__}: {e}")
+            return False
 
-        async with self.initialization_lock:
-            # ロック取得後に再チェック（他のタスクが既に初期化した可能性）
-            if self.model_initialized:
-                return True
-
-            print(f"[TTSCog] モデルを初期化しています...")
-            try:
-                async with self.session.post(f"{self.api_url}/init") as response:
-                    if response.status == 200:
-                        self.model_initialized = True
-                        result = await response.json()
-                        print(f"✓ [TTSCog] モデル初期化成功")
-                        print(f"  - デバイス: {result.get('device', 'unknown')}")
-                        print(f"  - API キー: {result.get('api_key_prefix', 'unknown')}...")
-                        return True
-                    else:
-                        error_text = await response.text()
-                        print(f"✗ [TTSCog] モデル初期化失敗")
-                        print(f"  - ステータス: {response.status}")
-                        print(f"  - エラー: {error_text}")
-                        return False
-            except aiohttp.ClientConnectorError as e:
-                print(f"✗ [TTSCog] APIサーバーに接続できません: {self.api_url}")
-                print(f"  エラー: {e}")
-                return False
-            except Exception as e:
-                print(f"✗ [TTSCog] モデル初期化中に予期しないエラーが発生:")
-                print(f"  {type(e).__name__}: {e}")
-                return False
+    def get_model_name(self, model_id: int) -> str:
+        """モデルIDから名前を取得"""
+        for model in self.available_models:
+            if model['id'] == model_id:
+                return model['name']
+        return f"Model {model_id}"
 
     # --- Event Listener ---
 
@@ -125,18 +129,28 @@ class TTSCog(commands.Cog, name="tts_cog"):
             text_to_say = template.format(member_name=member.display_name)
 
         if text_to_say:
-            if await self.ensure_model_initialized():
-                await self.trigger_tts_from_event(member.guild, text_to_say)
-            else:
-                print("[TTSCog] モデル初期化失敗のため、入退室通知をスキップします。")
+            await self.trigger_tts_from_event(member.guild, text_to_say)
 
-    # --- Slash Command ---
+    # --- Slash Commands ---
 
-    @app_commands.command(name="say", description="テキストを音声で読み上げます。(音楽再生中でも割り込みます)")
-    @app_commands.describe(text="読み上げるテキスト", language="言語 (例: JP, EN)", speaker_id="話者ID")
-    async def say(self, interaction: discord.Interaction, text: str, language: Optional[str] = None,
-                  speaker_id: Optional[int] = None):
-        if not self.config.get('enable_say_command', False):
+    @app_commands.command(name="say", description="テキストを音声で読み上げます")
+    @app_commands.describe(
+        text="読み上げるテキスト",
+        model_id="モデルID (省略時はデフォルト)",
+        style="スタイル名 (例: Neutral, Happy, Angry)",
+        style_weight="スタイルの強さ (0.0-10.0)",
+        speed="話速 (0.5-2.0)"
+    )
+    async def say(
+            self,
+            interaction: discord.Interaction,
+            text: str,
+            model_id: Optional[int] = None,
+            style: Optional[str] = None,
+            style_weight: Optional[float] = None,
+            speed: Optional[float] = None
+    ):
+        if not self.config.get('enable_say_command', True):
             await interaction.response.send_message("読み上げコマンドは現在無効化されています。", ephemeral=True)
             return
 
@@ -149,24 +163,64 @@ class TTSCog(commands.Cog, name="tts_cog"):
             await self.exception_handler.send_message(interaction, "tts_in_progress", ephemeral=True)
             return
 
-        final_lang = language if language is not None else self.config.get('default_language', 'JP')
-        final_spk_id = speaker_id if speaker_id is not None else self.config.get('default_speaker_id', 0)
+        # パラメータのデフォルト値設定
+        final_model_id = model_id if model_id is not None else self.default_model_id
+        final_style = style if style is not None else self.default_style
+        final_style_weight = style_weight if style_weight is not None else self.default_style_weight
+        final_speed = speed if speed is not None else self.default_speed
 
         async with lock:
             await interaction.response.defer()
 
-            # モデル初期化を確認
-            initialized = await self.ensure_model_initialized()
-            if not initialized:
-                await interaction.followup.send(
-                    "モデルの初期化に失敗しました。APIサーバーの状態を確認してください。",
-                    ephemeral=True
-                )
-                return
-
-            success = await self._handle_say_logic(interaction.guild, text, final_lang, final_spk_id, interaction)
+            success = await self._handle_say_logic(
+                interaction.guild,
+                text,
+                final_model_id,
+                final_style,
+                final_style_weight,
+                final_speed,
+                interaction
+            )
             if success:
-                await self.exception_handler.send_message(interaction, "tts_success", followup=True, text=text)
+                model_name = self.get_model_name(final_model_id)
+                await interaction.followup.send(
+                    f"🔊 読み上げ中: `{text}`\n"
+                    f"モデル: {model_name} | スタイル: {final_style} ({final_style_weight}) | 速度: {final_speed}x"
+                )
+
+    @app_commands.command(name="tts_models", description="利用可能な音声モデルの一覧を表示")
+    async def tts_models(self, interaction: discord.Interaction):
+        """利用可能なモデルとスタイルの一覧を表示"""
+        await interaction.response.defer(ephemeral=True)
+
+        if not self.models_loaded:
+            await self.fetch_available_models()
+
+        if not self.available_models:
+            await interaction.followup.send(
+                "❌ 利用可能なモデルが見つかりませんでした。",
+                ephemeral=True
+            )
+            return
+
+        embed = discord.Embed(
+            title="🎙️ 利用可能な音声モデル",
+            description=f"合計 {len(self.available_models)} 個のモデル",
+            color=discord.Color.blue()
+        )
+
+        for model in self.available_models[:10]:  # 最大10個まで表示
+            styles = ", ".join(model.get('styles', ['Neutral']))
+            embed.add_field(
+                name=f"ID: {model['id']} - {model['name']}",
+                value=f"スタイル: {styles}",
+                inline=False
+            )
+
+        if len(self.available_models) > 10:
+            embed.set_footer(text=f"... 他 {len(self.available_models) - 10} 個のモデル")
+
+        await interaction.followup.send(embed=embed, ephemeral=True)
 
     # --- Core Logic ---
 
@@ -180,22 +234,36 @@ class TTSCog(commands.Cog, name="tts_cog"):
         """イベントからTTSをトリガーするためのヘルパー関数"""
         lock = self._get_tts_lock(guild.id)
         async with lock:
-            lang = self.config.get('default_language', 'JP')
-            spk_id = self.config.get('default_speaker_id', 0)
-            await self._handle_say_logic(guild, text, lang, spk_id)
+            await self._handle_say_logic(
+                guild,
+                text,
+                self.default_model_id,
+                self.default_style,
+                self.default_style_weight,
+                self.default_speed
+            )
 
-    async def _handle_say_logic(self, guild: discord.Guild, text: str, language: str, speaker_id: int,
-                                interaction: Optional[discord.Interaction] = None) -> bool:
+    async def _handle_say_logic(
+            self,
+            guild: discord.Guild,
+            text: str,
+            model_id: int,
+            style: str,
+            style_weight: float,
+            speed: float,
+            interaction: Optional[discord.Interaction] = None
+    ) -> bool:
         """
-        読み上げのコアロジック。コマンドとイベントの両方から呼び出される。
-        interactionが渡された場合、エラーメッセージを送信する。
+        読み上げのコアロジック。Style-Bert-VITS2 API対応版
         """
         voice_client = guild.voice_client
-        if not voice_client: return False
+        if not voice_client:
+            return False
 
         music_cog: MusicCog = self.bot.get_cog("music_cog")
         music_state: MusicGuildState = music_cog._get_guild_state(guild.id) if music_cog else None
 
+        # 音楽再生中の場合は一時停止
         if music_state and music_state.is_playing and music_state.current_track:
             print(f"[TTSCog] 音楽を一時中断してTTSを再生します (guild {guild.id}): '{text}'")
             current_position = music_state.get_current_position()
@@ -206,15 +274,27 @@ class TTSCog(commands.Cog, name="tts_cog"):
             await asyncio.sleep(0.1)
             music_state.is_seeking = False
 
-        payload = {"text": text, "language": language, "speaker_id": speaker_id}
+        # Style-Bert-VITS2 APIのエンドポイント
+        endpoint = f"{self.api_url}/voice"
+
+        params = {
+            "text": text,
+            "model_id": model_id,
+            "style": style,
+            "style_weight": style_weight,
+            "speed": speed,
+            "encoding": "wav"  # WAV形式で取得
+        }
+
         try:
-            async with self.session.post(f"{self.api_url}/tts", json=payload) as response:
+            async with self.session.get(endpoint, params=params) as response:
                 if response.status == 200:
                     wav_data = await response.read()
                     source = discord.FFmpegPCMAudio(io.BytesIO(wav_data), pipe=True)
 
+                    # 既存の再生が完了するまで待機
                     while voice_client.is_playing():
-                        await asyncio.sleep(0.5)
+                        await asyncio.sleep(0.1)
 
                     voice_client.play(
                         source,
@@ -224,27 +304,35 @@ class TTSCog(commands.Cog, name="tts_cog"):
                     )
                     return True
                 else:
+                    error_text = await response.text()
+                    print(f"[TTSCog] APIエラー (guild {guild.id}): {response.status}")
+                    print(f"  詳細: {error_text}")
+
                     if interaction:
-                        await self.exception_handler.handle_api_error(interaction, response)
-                    else:
-                        error_text = await response.text()
-                        print(f"[TTSCog] APIエラー (guild {guild.id}): {response.status}")
-                        print(f"  詳細: {error_text}")
+                        await interaction.followup.send(
+                            f"❌ 音声生成エラー: {response.status}\n```{error_text[:200]}```",
+                            ephemeral=True
+                        )
+
                     self.interrupted_states.pop(guild.id, None)
                     return False
 
         except aiohttp.ClientConnectorError:
+            print(f"[TTSCog] API接続エラー (guild {guild.id}): {self.api_url}")
             if interaction:
-                await self.exception_handler.handle_connection_error(interaction)
-            else:
-                print(f"[TTSCog] API接続エラー (guild {guild.id})")
+                await interaction.followup.send(
+                    f"❌ APIサーバーに接続できません: {self.api_url}",
+                    ephemeral=True
+                )
             self.interrupted_states.pop(guild.id, None)
             return False
         except Exception as e:
+            print(f"[TTSCog] 予期しないエラー (guild {guild.id}): {type(e).__name__}: {e}")
             if interaction:
-                await self.exception_handler.handle_unexpected_error(interaction, e)
-            else:
-                print(f"[TTSCog] 予期しないエラー (guild {guild.id}): {e}")
+                await interaction.followup.send(
+                    f"❌ エラーが発生しました: {type(e).__name__}",
+                    ephemeral=True
+                )
             self.interrupted_states.pop(guild.id, None)
             return False
 

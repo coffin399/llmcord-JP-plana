@@ -261,29 +261,14 @@ music:
 # TTS Cog Settings (読み上げ機能に関する設定)
 # =============================================================================
 tts:
-  # --- API Server Settings ---
-  # 独自に立てたStyle-Bert-VITS2 APIサーバーのURL
-  api_server_url: "http://127.0.0.1:8000"
-
-  # APIサーバーの認証キー (APIサーバー側のconfig.yamlで設定したもの)
-  api_key: "your-secret-api-key-for-user1"
-
-  # --- Feature Toggles ---
-  # /say コマンドを有効にするか (true/false)
+  api_server_url: "http://127.0.0.1:5000"  # Style-Bert-VITS2のURL
+  api_key: null  # 通常は不要
+  default_model_id: 0  # デフォルトのモデルID
+  default_style: "Neutral"  # デフォルトのスタイル
+  default_style_weight: 5.0  # スタイルの強さ
+  default_speed: 1.0  # デフォルトの話速
   enable_say_command: true
-
-  # ボイスチャンネルへの入退出時に自動で読み上げを行うか (true/false)
   enable_join_leave_notice: true
-
-  # --- Default TTS Parameters ---
-  # /say コマンドで言語が指定されなかった場合のデフォルト言語 (JP, EN, ZHなど)
-  default_language: "JP"
-
-  # /say コマンドで話者IDが指定されなかった場合のデフォルト話者ID
-  default_speaker_id: 0
-
-  # --- Join/Leave Notice Templates ---
-  # {member_name} は参加/退出したユーザーの名前に置き換えられます
-  join_message_template: "{member_name}さんが起床しました。"
-  leave_message_template: "{member_name}さんが就寝しました。"
+  join_message_template: "{member_name}さんが参加しました。"
+  leave_message_template: "{member_name}さんが退出しました。"
 
