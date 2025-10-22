@@ -1,3 +1,4 @@
+# PLANA/tts/tts_cog.py
 import discord
 from discord.ext import commands
 from discord import app_commands
@@ -16,28 +17,40 @@ except ImportError:
 
 # エラーハンドラをインポート
 try:
-    from ..error.errors import TTSCogExceptionHandler
-except ImportError as e:
-    print(f"[CRITICAL] TTSCog: 必須コンポーネントのインポートに失敗しました。エラー: {e}")
-    TTSCogExceptionHandler = None
+    from PLANA.tts.error.errors import TTSCogExceptionHandler
+except ImportError:
+    # フォールバック
+    try:
+        from error.errors import TTSCogExceptionHandler
+    except ImportError as e:
+        print(f"[CRITICAL] TTSCog: 必須コンポーネントのインポートに失敗しました。エラー: {e}")
+        TTSCogExceptionHandler = None
 
 
-class TTSCog(commands.Cog):
-    def __init__(self, bot: commands.Bot, api_url: str, api_key: str):
+class TTSCog(commands.Cog, name="tts_cog"):
+    def __init__(self, bot: commands.Bot):
         if TTSCogExceptionHandler is None:
             raise commands.ExtensionFailed(self.qualified_name,
                                            "必須コンポーネントTTSCogExceptionHandlerのインポート失敗")
 
         self.bot = bot
-        self.api_url = api_url
-        self.api_key = api_key
+        # config.yamlからttsセクションを読み込む
+        self.config = bot.config.get('tts', {})
+
+        # config.yamlからAPI設定を取得
+        self.api_url = self.config.get('api_server_url')
+        self.api_key = self.config.get('api_key')
+
+        if not self.api_url or not self.api_key:
+            raise ValueError("tts.api_server_url and tts.api_key must be set in the config.yaml file.")
+
         self.session = aiohttp.ClientSession(headers={"X-API-KEY": self.api_key})
         self.exception_handler = TTSCogExceptionHandler()
 
         self.interrupted_states: Dict[int, Tuple[Track, int]] = {}
         self.tts_locks: Dict[int, asyncio.Lock] = {}
 
-        print("TTSCog loaded (with event listener and music interruption support).")
+        print("TTSCog loaded (with config.yaml integration, event listener, and music interruption support).")
 
     # --- Cog Lifecycle Events ---
 
@@ -66,6 +79,10 @@ class TTSCog(commands.Cog):
     @commands.Cog.listener()
     async def on_voice_state_update(self, member: discord.Member, before: discord.VoiceState,
                                     after: discord.VoiceState):
+        # config.yamlで機能が無効化されていれば何もしない
+        if not self.config.get('enable_join_leave_notice', False):
+            return
+
         # BOT自身のイベントや、BOTがVCにいない場合は無視
         if member.bot or not member.guild.voice_client:
             return
@@ -75,11 +92,13 @@ class TTSCog(commands.Cog):
 
         # ユーザーがBOTのいるVCに参加した時
         if before.channel != bot_channel and after.channel == bot_channel:
-            text_to_say = f"{member.display_name}さんが参加しました。"
+            template = self.config.get('join_message_template', "{member_name}さんが参加しました。")
+            text_to_say = template.format(member_name=member.display_name)
 
         # ユーザーがBOTのいるVCから退出した時
         elif before.channel == bot_channel and after.channel != bot_channel:
-            text_to_say = f"{member.display_name}さんが退出しました。"
+            template = self.config.get('leave_message_template', "{member_name}さんが退出しました。")
+            text_to_say = template.format(member_name=member.display_name)
 
         if text_to_say:
             # 読み上げ処理をトリガー
@@ -89,7 +108,13 @@ class TTSCog(commands.Cog):
 
     @app_commands.command(name="say", description="テキストを音声で読み上げます。(音楽再生中でも割り込みます)")
     @app_commands.describe(text="読み上げるテキスト", language="言語 (例: JP, EN)", speaker_id="話者ID")
-    async def say(self, interaction: discord.Interaction, text: str, language: str = "JP", speaker_id: int = 0):
+    async def say(self, interaction: discord.Interaction, text: str, language: Optional[str] = None,
+                  speaker_id: Optional[int] = None):
+        # config.yamlで機能が無効化されていればエラーメッセージを返す
+        if not self.config.get('enable_say_command', False):
+            await interaction.response.send_message("読み上げコマンドは現在無効化されています。", ephemeral=True)
+            return
+
         if not interaction.guild.voice_client:
             await self.exception_handler.send_message(interaction, "bot_not_in_voice", ephemeral=True)
             return
@@ -99,9 +124,13 @@ class TTSCog(commands.Cog):
             await self.exception_handler.send_message(interaction, "tts_in_progress", ephemeral=True)
             return
 
+        # 引数が指定されなかった場合、config.yamlのデフォルト値を使用
+        final_lang = language if language is not None else self.config.get('default_language', 'JP')
+        final_spk_id = speaker_id if speaker_id is not None else self.config.get('default_speaker_id', 0)
+
         async with lock:
             await interaction.response.defer()
-            success = await self._handle_say_logic(interaction.guild, text, language, speaker_id, interaction)
+            success = await self._handle_say_logic(interaction.guild, text, final_lang, final_spk_id, interaction)
             if success:
                 await self.exception_handler.send_message(interaction, "tts_success", followup=True, text=text)
 
@@ -117,7 +146,10 @@ class TTSCog(commands.Cog):
         """イベントからTTSをトリガーするためのヘルパー関数"""
         lock = self._get_tts_lock(guild.id)
         async with lock:
-            await self._handle_say_logic(guild, text, "JP", 0)
+            # イベントからの呼び出しでは、configのデフォルト値を使用
+            lang = self.config.get('default_language', 'JP')
+            spk_id = self.config.get('default_speaker_id', 0)
+            await self._handle_say_logic(guild, text, lang, spk_id)
 
     async def _handle_say_logic(self, guild: discord.Guild, text: str, language: str, speaker_id: int,
                                 interaction: Optional[discord.Interaction] = None) -> bool:
@@ -162,7 +194,7 @@ class TTSCog(commands.Cog):
                     if interaction:
                         await self.exception_handler.handle_api_error(interaction, response)
                     else:
-                        print(f"API Error in guild {guild.id}: {response.status}")
+                        print(f"[TTSCog] API Error in guild {guild.id}: {response.status}")
                     self.interrupted_states.pop(guild.id, None)
                     return False
 
@@ -170,43 +202,43 @@ class TTSCog(commands.Cog):
             if interaction:
                 await self.exception_handler.handle_connection_error(interaction)
             else:
-                print(f"API Connection Error in guild {guild.id}")
+                print(f"[TTSCog] API Connection Error in guild {guild.id}")
             self.interrupted_states.pop(guild.id, None)
             return False
         except Exception as e:
             if interaction:
                 await self.exception_handler.handle_unexpected_error(interaction, e)
             else:
-                print(f"Unexpected Error in guild {guild.id}: {e}")
+                print(f"[TTSCog] Unexpected Error in guild {guild.id}: {e}")
             self.interrupted_states.pop(guild.id, None)
             return False
 
     async def _tts_after_playback(self, error: Exception, guild_id: int):
         """読み上げ再生が完了したときに呼び出されるコールバック"""
         if error:
-            print(f"TTS playback error in guild {guild_id}: {error}")
+            print(f"[TTSCog] Playback error in guild {guild_id}: {error}")
 
         if guild_id in self.interrupted_states:
             interrupted_track, position = self.interrupted_states.pop(guild_id)
 
             music_cog: MusicCog = self.bot.get_cog("music_cog")
             if music_cog:
-                print(f"Resuming music in guild {guild_id} at {position}s.")
+                print(f"[TTSCog] Resuming music in guild {guild_id} at {position}s.")
                 music_state = music_cog._get_guild_state(guild_id)
                 music_state.current_track = interrupted_track
                 await music_cog._play_next_song(guild_id, seek_seconds=position)
         else:
-            print(f"TTS finished in guild {guild_id}. No music to resume.")
+            print(f"[TTSCog] TTS finished in guild {guild_id}. No music to resume.")
 
 
 async def setup(bot: commands.Bot):
-    import os
-    api_url = os.getenv("API_SERVER_URL")
-    api_key = os.getenv("API_KEY")
-    if not api_url or not api_key:
-        raise ValueError("API_SERVER_URL and API_KEY must be set in the .env file.")
+    # config.yamlに'tts'セクションがあるか確認
+    if 'tts' not in bot.config:
+        print("Warning: 'tts' section not found in config.yaml. TTSCog will not be loaded.")
+        return
 
+    # MusicCogがロードされているか確認
     if not bot.get_cog("music_cog"):
         print("Warning: MusicCog is not loaded. TTSCog may not function correctly with music.")
 
-    await bot.add_cog(TTSCog(bot, api_url, api_key))
+    await bot.add_cog(TTSCog(bot))

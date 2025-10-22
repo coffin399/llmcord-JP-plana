@@ -6,20 +6,29 @@ import openai
 logger = logging.getLogger(__name__)
 
 
-# Custom Exceptions for SearchAgent
+# --- MODIFIED: SearchAgent Exceptions ---
 class SearchAgentError(Exception):
     """Base exception for SearchAgent errors."""
-    pass
-
+    def __init__(self, message: str, original_exception: Exception | None = None):
+        super().__init__(message)
+        self.original_exception = original_exception
 
 class SearchAPIRateLimitError(SearchAgentError):
     """Raised when the Google Search API rate limit is exceeded."""
     pass
 
-
 class SearchAPIServerError(SearchAgentError):
     """Raised for 5xx server errors from the Google Search API."""
     pass
+
+class SearchAPIError(SearchAgentError):
+    """Raised for other, unexpected API errors."""
+    pass
+
+class SearchExecutionError(SearchAgentError):
+    """Raised for non-API errors during search execution."""
+    pass
+# --- END MODIFIED ---
 
 
 class LLMExceptionHandler:
@@ -50,10 +59,8 @@ class LLMExceptionHandler:
                 error_body = exception.response.json()
                 error_data = error_body.get('error')
 
-                # Handle cases where the error is wrapped in a list
                 if isinstance(error_data, list) and error_data:
                     error_dict = error_data[0]
-                    # Handle further nesting
                     error_data = error_dict.get('error', error_dict)
 
                 detail = "No details provided."
@@ -77,6 +84,6 @@ class LLMExceptionHandler:
                                        "APIからエラーが返されましたが、内容を解析できませんでした。").format(
                     status_code=status_code)
 
-        # Other unexpected errors
+        # その他の予期せぬエラー
         logger.error(f"An unexpected error occurred during LLM interaction: {exception}", exc_info=True)
         return self.config.get('unexpected_error', "予期せぬエラーが発生しました。開発者に連絡してください。")

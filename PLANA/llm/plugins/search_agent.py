@@ -5,21 +5,24 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING
 
-from google import genai
+import google.generativeai as genai
 
 # 作成したカスタム例外をインポート
 from PLANA.llm.error.errors import (
     SearchAPIRateLimitError,
     SearchAPIServerError,
     SearchAPIError,
-    SearchExecutionError
+    SearchExecutionError,
+    SearchAgentError
 )
 
 if TYPE_CHECKING:
     from discord.ext import commands
 
+logger = logging.getLogger(__name__)
 
-class SearchAgent():
+
+class SearchAgent:
     name = "search"
     tool_spec = {
         "type": "function",
@@ -36,59 +39,65 @@ class SearchAgent():
 
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
+        gcfg = self.bot.cfg.get("search_agent")
+        if not gcfg or not gcfg.get("api_key"):
+            logger.error("SearchAgent config (api_key) is missing. Search will be disabled.")
+            self.model = None
+            return
+
+        try:
+            genai.configure(api_key=gcfg["api_key"])
+            self.model = genai.GenerativeModel(gcfg["model"])
+            self.format_control = gcfg["format_control"]
+            self.tools = [{"google_search": {}}]
+            logger.info("SearchAgent initialized successfully with Google GenAI.")
+        except Exception as e:
+            logger.error(f"Failed to initialize Google GenAI for SearchAgent: {e}", exc_info=True)
+            self.model = None
 
     async def _google_search(self, query: str) -> str:
-        gcfg = self.bot.cfg["search_agent"]
+        if not self.model:
+            raise SearchExecutionError("SearchAgent is not properly initialized.")
 
-        client = genai.Client(api_key=gcfg["api_key"])
         retries = 2
         delay = 1.5
-        last_exception = None
 
         for attempt in range(retries + 1):
             try:
+                # generate_contentは同期メソッドのため、asyncio.to_threadで実行
                 response = await asyncio.to_thread(
-                    client.models.generate_content,
-                    model=gcfg["model"],
-                    contents="**[DeepResearch Request]:** " + query + "\n" + gcfg["format_control"],
-                    config={"tools": [{"google_search": {}}]},
+                    self.model.generate_content,
+                    "**[DeepResearch Request]:** " + query + "\n" + self.format_control,
+                    tools=self.tools,
                 )
                 return response.text
-            except genai.errors.APIError as e:
-                code = getattr(e, "code", None)
-                if code == 429:
-                    # エラー文字列を返す代わりに例外を発生させる
-                    raise SearchAPIRateLimitError("Google Search API rate limit (429) was reached.",
-                                                  original_exception=e)
-                elif code in [500, 502, 503]:
-                    last_exception = e
-                    if attempt < retries:
-                        await asyncio.sleep(delay)
-                        continue
-                    # リトライ後も失敗した場合に例外を発生させる
-                    raise SearchAPIServerError(f"Google Search API server-side error ({code}).", original_exception=e)
-                else:
-                    logging.error(f"Search Agent unexpected API error: {e}")
-                    raise SearchAPIError(f"An unexpected API error occurred: {str(e)}", original_exception=e)
+            except genai.errors.ResourceExhaustedError as e:
+                # 429 Rate Limit Error
+                raise SearchAPIRateLimitError("Google Search API rate limit was reached.", original_exception=e)
+            except (genai.errors.InternalServerError, genai.errors.ServiceUnavailableError) as e:
+                # 5xx Server-side Errors
+                logger.warning(f"SearchAgent server error (attempt {attempt + 1}/{retries + 1}): {e}")
+                if attempt < retries:
+                    await asyncio.sleep(delay * (attempt + 1))
+                    continue
+                raise SearchAPIServerError("Google Search API server-side error after retries.", original_exception=e)
+            except genai.errors.GoogleAPICallError as e:
+                # その他のGoogle API関連エラー
+                logger.error(f"Search Agent unexpected API error: {e}")
+                raise SearchAPIError(f"An unexpected API error occurred: {str(e)}", original_exception=e)
             except Exception as e:
-                logging.error(f"Search Agent unexpected error: {e}")
-                # 予期しないエラーもカスタム例外でラップする
+                # API以外の予期しない実行時エラー
+                logger.error(f"Search Agent unexpected execution error: {e}", exc_info=True)
                 raise SearchExecutionError(f"An unexpected error occurred during search: {str(e)}",
                                            original_exception=e)
 
-        # ループが正常に完了しなかった場合 (リトライが尽きた場合など)
-        if last_exception:
-            raise SearchAPIServerError(f"Google Search failed after multiple retries.",
-                                       original_exception=last_exception)
-
+        # ループがリトライを尽くしても完了しなかった場合
         raise SearchExecutionError("Search failed for an unknown reason after all retries.")
 
     async def run(self, *, arguments: dict, bot, channel_id: int) -> str:
         query = arguments.get("query", "")
         if not query:
-            # queryが空の場合も例外を発生させるのが一貫性がある
-            raise SearchExecutionError("Query is empty.")
+            raise SearchExecutionError("Query cannot be empty.")
 
-        # _google_searchが例外を発生させるようになったため、このtry-exceptは不要かもしれないが、
-        # runメソッドの呼び出し側でハンドリングする想定のため、ここではそのまま呼び出す。
+        # _google_searchは例外を発生させる可能性があるため、呼び出し側(llm_cog.py)で処理する
         return await self._google_search(query)
