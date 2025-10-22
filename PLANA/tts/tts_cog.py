@@ -16,7 +16,7 @@ except ImportError:
 
 # エラーハンドラをインポート
 try:
-    from ..error.errors import TTSCogExceptionHandler
+    from PLANA.tts.error.errors import TTSCogExceptionHandler
 except ImportError:
     try:
         from error.errors import TTSCogExceptionHandler
