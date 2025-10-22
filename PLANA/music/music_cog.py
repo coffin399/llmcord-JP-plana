@@ -73,7 +73,7 @@ class GuildState:
         self.voice_client: Optional[discord.VoiceClient] = None
         self.current_track: Optional[Track] = None
         self.queue: asyncio.Queue[Track] = asyncio.Queue()
-        self.volume: float = cog_config.get('music', {}).get('default_volume', 50) / 100.0
+        self.volume: float = cog_config.get('music', {}).get('default_volume', 20) / 100.0
         self.loop_mode: LoopMode = LoopMode.OFF
         self.is_playing: bool = False
         self.is_paused: bool = False

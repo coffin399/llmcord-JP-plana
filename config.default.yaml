@@ -202,7 +202,7 @@ valorant:
   api_key: YOUR_API_KEY_HERE
 
 music:
-  default_volume: 50
+  default_volume: 20
   max_queue_size: 10000
   auto_leave_timeout: 3
   max_playlist_items: 5000
@@ -256,3 +256,34 @@ music:
     error_fetching_song: "❌ Error fetching song: {error}"
     search_no_results: "🔍 No results found for **{query}**."
     error_message_wrapper: "❌ {error}"
+
+# =============================================================================
+# TTS Cog Settings (読み上げ機能に関する設定)
+# =============================================================================
+tts:
+  # --- API Server Settings ---
+  # 独自に立てたStyle-Bert-VITS2 APIサーバーのURL
+  api_server_url: "http://127.0.0.1:8000"
+
+  # APIサーバーの認証キー (APIサーバー側のconfig.yamlで設定したもの)
+  api_key: "your-secret-api-key-for-user1"
+
+  # --- Feature Toggles ---
+  # /say コマンドを有効にするか (true/false)
+  enable_say_command: true
+
+  # ボイスチャンネルへの入退出時に自動で読み上げを行うか (true/false)
+  enable_join_leave_notice: true
+
+  # --- Default TTS Parameters ---
+  # /say コマンドで言語が指定されなかった場合のデフォルト言語 (JP, EN, ZHなど)
+  default_language: "JP"
+
+  # /say コマンドで話者IDが指定されなかった場合のデフォルト話者ID
+  default_speaker_id: 0
+
+  # --- Join/Leave Notice Templates ---
+  # {member_name} は参加/退出したユーザーの名前に置き換えられます
+  join_message_template: "{member_name}さんが起床しました。"
+  leave_message_template: "{member_name}さんが就寝しました。"
+
