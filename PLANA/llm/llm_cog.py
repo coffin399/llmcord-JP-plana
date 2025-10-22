@@ -1234,9 +1234,20 @@ class LLMCog(commands.Cog, name="LLM"):
                     logger.debug(f"Stream connection established successfully.")
                     break  # 成功したらループを抜ける
 
-                except openai.RateLimitError as e:
-                    logger.warning(
-                        f"⚠️ Rate limit error for provider '{provider_name}' with key index {current_key_index}. Details: {e}")
+
+                except (openai.RateLimitError, openai.InternalServerError) as e:
+
+                    # 429 RateLimitError または 5xx InternalServerError をキャッチ
+
+                    if isinstance(e, openai.RateLimitError):
+
+                        log_message = f"⚠️ Rate limit error (429) for provider '{provider_name}' with key index {current_key_index}. Details: {e}"
+
+                    else:  # InternalServerError
+
+                        log_message = f"⚠️ Server error ({getattr(e, 'status_code', '5xx')}) for provider '{provider_name}' with key index {current_key_index}. Details: {e}"
+
+                    logger.warning(log_message)
 
                     # すべてのキーを試した場合
                     if attempt + 1 >= num_keys:
