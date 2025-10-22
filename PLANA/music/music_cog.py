@@ -366,6 +366,7 @@ class MusicCog(commands.Cog, name="music_cog"):
         if not track_to_play:
             state.current_track = None
             state.is_playing = False
+            state.is_seeking = False  # 追加: シークフラグをクリア
             state.reset_playback_tracking()
             guild = self.bot.get_guild(guild_id)
             logger.info(f"Guild {guild_id} ({guild.name if guild else ''}): Queue has ended. Disconnecting.")
@@ -410,6 +411,10 @@ class MusicCog(commands.Cog, name="music_cog"):
             )
             state.voice_client.play(source, after=lambda e: self._song_finished_callback(e, guild_id))
 
+            # シーク操作が完了したのでフラグをクリア
+            if is_seek_operation:
+                state.is_seeking = False
+
             guild = self.bot.get_guild(guild_id)
             seek_info = f" (seeking to {format_duration(seek_seconds)})" if seek_seconds > 0 else ""
             logger.info(
@@ -438,6 +443,7 @@ class MusicCog(commands.Cog, name="music_cog"):
             if state.loop_mode == LoopMode.ALL and track_to_play and not is_seek_operation:
                 await state.queue.put(track_to_play)
             state.current_track = None
+            state.is_seeking = False  # 追加: エラー時もシークフラグをクリア
             state.reset_playback_tracking()
             asyncio.create_task(self._play_next_song(guild_id))
 
