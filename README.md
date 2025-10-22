@@ -12,7 +12,7 @@
 
 <div align="center">
 
-![access counter](https://counter.seku.su/cmoe?name=PLANAv1&theme=gb)
+![access counter](https://count.getloli.com/@PLANAv3?name=PLANAv3&theme=moebooru&padding=7&offset=0&align=center&scale=1&pixelated=1&darkmode=0)
 
 ### [日本語](docs/README_ja.md) | [English](docs/README_en.md) | [中文](docs/README_zh.md) | [繁體中文](docs/README_zh-TW.md) | [한국어](docs/README_ko.md)
 
