@@ -1,11 +1,10 @@
-# PLANA/tts/tts_cog.py
 import discord
 from discord.ext import commands
 from discord import app_commands
 import aiohttp
 import io
 import asyncio
-from typing import Dict, Tuple, Optional
+from typing import Dict, Tuple, Optional, Set
 
 # MusicCogのクラスやオブジェクトの型ヒントのため
 try:
@@ -17,7 +16,8 @@ except ImportError:
 
 # エラーハンドラをインポート
 try:
-    from PLANA.tts.error.errors import TTSCogExceptionHandler
+    # PLANA/tts/tts_cog.py から PLANA/error/errors.py を参照する場合
+    from ..error.errors import TTSCogExceptionHandler
 except ImportError:
     # フォールバック
     try:
@@ -34,10 +34,8 @@ class TTSCog(commands.Cog, name="tts_cog"):
                                            "必須コンポーネントTTSCogExceptionHandlerのインポート失敗")
 
         self.bot = bot
-        # config.yamlからttsセクションを読み込む
         self.config = bot.config.get('tts', {})
 
-        # config.yamlからAPI設定を取得
         self.api_url = self.config.get('api_server_url')
         self.api_key = self.config.get('api_key')
 
@@ -49,60 +47,76 @@ class TTSCog(commands.Cog, name="tts_cog"):
 
         self.interrupted_states: Dict[int, Tuple[Track, int]] = {}
         self.tts_locks: Dict[int, asyncio.Lock] = {}
+        self.initialized_models: Set[str] = set()  # 初期化済みAPIキーを保持するセット
 
-        print("TTSCog loaded (with config.yaml integration, event listener, and music interruption support).")
+        print("TTSCog loaded (with auto-initialization, event listener, and music interruption support).")
 
     # --- Cog Lifecycle Events ---
 
     async def cog_load(self):
-        """Cogがロードされた際にAPIサーバーのモデルを初期化する"""
-        print("Initializing TTS model via API...")
-        try:
-            async with self.session.post(f"{self.api_url}/init") as response:
-                if response.status == 200:
-                    print("TTS Model initialized successfully.")
-                else:
-                    error_text = await response.text()
-                    print(f"Failed to initialize TTS model. Status: {response.status}, Response: {error_text}")
-        except aiohttp.ClientConnectorError:
-            print(f"Error: Could not connect to the TTS API server at {self.api_url}. Is it running?")
-        except Exception as e:
-            print(f"An unexpected error occurred during TTS model initialization: {e}")
+        """Cogがロードされたことを通知する。モデルの初期化はオンデマンドで行う。"""
+        print("TTSCog loaded. Models will be initialized on demand.")
 
     async def cog_unload(self):
         """Cogがアンロードされる際にセッションを閉じる"""
         await self.session.close()
         print("TTSCog unloaded and session closed.")
 
+    # --- Helper Functions ---
+
+    async def ensure_model_initialized(self) -> bool:
+        """
+        現在のAPIキーに対応するモデルが初期化されているか確認し、
+        されていなければ/initを呼び出す。
+        """
+        if self.api_key in self.initialized_models:
+            return True  # 既に初期化済み
+
+        print(f"Model for API key {self.api_key[:8]}... is not initialized. Initializing now...")
+        try:
+            async with self.session.post(f"{self.api_url}/init") as response:
+                if response.status == 200:
+                    self.initialized_models.add(self.api_key)
+                    print(f"✓ Model for API key {self.api_key[:8]}... initialized successfully.")
+                    return True
+                else:
+                    error_text = await response.text()
+                    print(f"✗ Failed to initialize model. Status: {response.status}, Response: {error_text}")
+                    return False
+        except aiohttp.ClientConnectorError:
+            print(f"✗ Error: Could not connect to the API server at {self.api_url}.")
+            return False
+        except Exception as e:
+            print(f"✗ An unexpected error occurred during model initialization: {e}")
+            return False
+
     # --- Event Listener ---
 
     @commands.Cog.listener()
     async def on_voice_state_update(self, member: discord.Member, before: discord.VoiceState,
                                     after: discord.VoiceState):
-        # config.yamlで機能が無効化されていれば何もしない
         if not self.config.get('enable_join_leave_notice', False):
             return
 
-        # BOT自身のイベントや、BOTがVCにいない場合は無視
         if member.bot or not member.guild.voice_client:
             return
 
         text_to_say = None
         bot_channel = member.guild.voice_client.channel
 
-        # ユーザーがBOTのいるVCに参加した時
         if before.channel != bot_channel and after.channel == bot_channel:
             template = self.config.get('join_message_template', "{member_name}さんが参加しました。")
             text_to_say = template.format(member_name=member.display_name)
 
-        # ユーザーがBOTのいるVCから退出した時
         elif before.channel == bot_channel and after.channel != bot_channel:
             template = self.config.get('leave_message_template', "{member_name}さんが退出しました。")
             text_to_say = template.format(member_name=member.display_name)
 
         if text_to_say:
-            # 読み上げ処理をトリガー
-            await self.trigger_tts_from_event(member.guild, text_to_say)
+            if await self.ensure_model_initialized():
+                await self.trigger_tts_from_event(member.guild, text_to_say)
+            else:
+                print("[TTSCog] Skipping join/leave notice because model initialization failed.")
 
     # --- Slash Command ---
 
@@ -110,7 +124,6 @@ class TTSCog(commands.Cog, name="tts_cog"):
     @app_commands.describe(text="読み上げるテキスト", language="言語 (例: JP, EN)", speaker_id="話者ID")
     async def say(self, interaction: discord.Interaction, text: str, language: Optional[str] = None,
                   speaker_id: Optional[int] = None):
-        # config.yamlで機能が無効化されていればエラーメッセージを返す
         if not self.config.get('enable_say_command', False):
             await interaction.response.send_message("読み上げコマンドは現在無効化されています。", ephemeral=True)
             return
@@ -124,12 +137,18 @@ class TTSCog(commands.Cog, name="tts_cog"):
             await self.exception_handler.send_message(interaction, "tts_in_progress", ephemeral=True)
             return
 
-        # 引数が指定されなかった場合、config.yamlのデフォルト値を使用
         final_lang = language if language is not None else self.config.get('default_language', 'JP')
         final_spk_id = speaker_id if speaker_id is not None else self.config.get('default_speaker_id', 0)
 
         async with lock:
             await interaction.response.defer()
+
+            initialized = await self.ensure_model_initialized()
+            if not initialized:
+                await interaction.followup.send("モデルの初期化に失敗しました。APIサーバーの状態を確認してください。",
+                                                ephemeral=True)
+                return
+
             success = await self._handle_say_logic(interaction.guild, text, final_lang, final_spk_id, interaction)
             if success:
                 await self.exception_handler.send_message(interaction, "tts_success", followup=True, text=text)
@@ -146,7 +165,6 @@ class TTSCog(commands.Cog, name="tts_cog"):
         """イベントからTTSをトリガーするためのヘルパー関数"""
         lock = self._get_tts_lock(guild.id)
         async with lock:
-            # イベントからの呼び出しでは、configのデフォルト値を使用
             lang = self.config.get('default_language', 'JP')
             spk_id = self.config.get('default_speaker_id', 0)
             await self._handle_say_logic(guild, text, lang, spk_id)
@@ -164,7 +182,7 @@ class TTSCog(commands.Cog, name="tts_cog"):
         music_state: MusicGuildState = music_cog._get_guild_state(guild.id) if music_cog else None
 
         if music_state and music_state.is_playing and music_state.current_track:
-            print(f"Interrupting music in guild {guild.id} for TTS: '{text}'")
+            print(f"[TTSCog] Interrupting music in guild {guild.id} for TTS: '{text}'")
             current_position = music_state.get_current_position()
             self.interrupted_states[guild.id] = (music_state.current_track, current_position)
 
@@ -232,12 +250,10 @@ class TTSCog(commands.Cog, name="tts_cog"):
 
 
 async def setup(bot: commands.Bot):
-    # config.yamlに'tts'セクションがあるか確認
     if 'tts' not in bot.config:
         print("Warning: 'tts' section not found in config.yaml. TTSCog will not be loaded.")
         return
 
-    # MusicCogがロードされているか確認
     if not bot.get_cog("music_cog"):
         print("Warning: MusicCog is not loaded. TTSCog may not function correctly with music.")
 
