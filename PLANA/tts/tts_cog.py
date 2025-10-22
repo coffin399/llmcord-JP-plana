@@ -16,8 +16,7 @@ except ImportError:
 
 # エラーハンドラをインポート
 try:
-    # PLANA/tts/tts_cog.py から PLANA/error/errors.py を参照する場合
-    from ..error.errors import TTSCogExceptionHandler
+    from PLANA.tts.error.errors import TTSCogExceptionHandler
 except ImportError:
     # フォールバック
     try:
