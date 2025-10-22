@@ -269,7 +269,7 @@ class Shittim(commands.Bot):
                                                                     "operating on {guild_count} servers",
                                                                     "PLANA Ver.2025-10-22",
                                                                     "Ask @PLANA <image generation>"
-                                                                    "/tts <audio generation>"
+                                                                    "/say <audio generation>"
                                                                     ])
         self.rotate_status.start()
 
