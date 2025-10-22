@@ -16,7 +16,7 @@ except ImportError:
 
 # エラーハンドラをインポート
 try:
-    from PLANA.tts.error.errors import TTSCogExceptionHandler
+    from ..error.errors import TTSCogExceptionHandler
 except ImportError:
     try:
         from error.errors import TTSCogExceptionHandler
@@ -40,7 +40,6 @@ class TTSCog(commands.Cog, name="tts_cog"):
         if not self.api_url or not self.api_key:
             raise ValueError("tts.api_server_url and tts.api_key must be set in the config.yaml file.")
 
-        # 自前APIサーバー用のヘッダー設定
         self.session = aiohttp.ClientSession(headers={"X-API-KEY": self.api_key})
         self.exception_handler = TTSCogExceptionHandler()
 
@@ -176,7 +175,9 @@ class TTSCog(commands.Cog, name="tts_cog"):
             async with self.session.post(endpoint_url, json=payload) as response:
                 if response.status == 200:
                     wav_data = await response.read()
-                    source = discord.FFmpegPCMAudio(io.BytesIO(wav_data))
+
+                    # --- ★★★ ここが修正点 ★★★ ---
+                    source = discord.FFmpegPCMAudio(io.BytesIO(wav_data), pipe=True)
 
                     while voice_client.is_playing():
                         await asyncio.sleep(0.5)
