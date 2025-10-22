@@ -46,7 +46,8 @@ class TTSCog(commands.Cog, name="tts_cog"):
 
         self.interrupted_states: Dict[int, Tuple[Track, int]] = {}
         self.tts_locks: Dict[int, asyncio.Lock] = {}
-        self.initialized_models: Set[str] = set()  # 初期化済みAPIキーを保持するセット
+        self.model_initialized: bool = False  # モデル初期化状態を保持
+        self.initialization_lock = asyncio.Lock()  # 初期化の競合を防ぐ
 
         print("TTSCog loaded (with auto-initialization, event listener, and music interruption support).")
 
@@ -54,7 +55,7 @@ class TTSCog(commands.Cog, name="tts_cog"):
 
     async def cog_load(self):
         """Cogがロードされたことを通知する。モデルの初期化はオンデマンドで行う。"""
-        print("TTSCog loaded. Models will be initialized on demand.")
+        print("TTSCog loaded. Model will be initialized on first use.")
 
     async def cog_unload(self):
         """Cogがアンロードされる際にセッションを閉じる"""
@@ -65,29 +66,41 @@ class TTSCog(commands.Cog, name="tts_cog"):
 
     async def ensure_model_initialized(self) -> bool:
         """
-        現在のAPIキーに対応するモデルが初期化されているか確認し、
-        されていなければ/initを呼び出す。
+        モデルが初期化されているか確認し、されていなければ/initを呼び出す。
+        複数の同時呼び出しを防ぐためにロックを使用。
         """
-        if self.api_key in self.initialized_models:
+        if self.model_initialized:
             return True  # 既に初期化済み
 
-        print(f"Model for API key {self.api_key[:8]}... is not initialized. Initializing now...")
-        try:
-            async with self.session.post(f"{self.api_url}/init") as response:
-                if response.status == 200:
-                    self.initialized_models.add(self.api_key)
-                    print(f"✓ Model for API key {self.api_key[:8]}... initialized successfully.")
-                    return True
-                else:
-                    error_text = await response.text()
-                    print(f"✗ Failed to initialize model. Status: {response.status}, Response: {error_text}")
-                    return False
-        except aiohttp.ClientConnectorError:
-            print(f"✗ Error: Could not connect to the API server at {self.api_url}.")
-            return False
-        except Exception as e:
-            print(f"✗ An unexpected error occurred during model initialization: {e}")
-            return False
+        async with self.initialization_lock:
+            # ロック取得後に再チェック（他のタスクが既に初期化した可能性）
+            if self.model_initialized:
+                return True
+
+            print(f"[TTSCog] モデルを初期化しています...")
+            try:
+                async with self.session.post(f"{self.api_url}/init") as response:
+                    if response.status == 200:
+                        self.model_initialized = True
+                        result = await response.json()
+                        print(f"✓ [TTSCog] モデル初期化成功")
+                        print(f"  - デバイス: {result.get('device', 'unknown')}")
+                        print(f"  - API キー: {result.get('api_key_prefix', 'unknown')}...")
+                        return True
+                    else:
+                        error_text = await response.text()
+                        print(f"✗ [TTSCog] モデル初期化失敗")
+                        print(f"  - ステータス: {response.status}")
+                        print(f"  - エラー: {error_text}")
+                        return False
+            except aiohttp.ClientConnectorError as e:
+                print(f"✗ [TTSCog] APIサーバーに接続できません: {self.api_url}")
+                print(f"  エラー: {e}")
+                return False
+            except Exception as e:
+                print(f"✗ [TTSCog] モデル初期化中に予期しないエラーが発生:")
+                print(f"  {type(e).__name__}: {e}")
+                return False
 
     # --- Event Listener ---
 
@@ -115,7 +128,7 @@ class TTSCog(commands.Cog, name="tts_cog"):
             if await self.ensure_model_initialized():
                 await self.trigger_tts_from_event(member.guild, text_to_say)
             else:
-                print("[TTSCog] Skipping join/leave notice because model initialization failed.")
+                print("[TTSCog] モデル初期化失敗のため、入退室通知をスキップします。")
 
     # --- Slash Command ---
 
@@ -142,10 +155,13 @@ class TTSCog(commands.Cog, name="tts_cog"):
         async with lock:
             await interaction.response.defer()
 
+            # モデル初期化を確認
             initialized = await self.ensure_model_initialized()
             if not initialized:
-                await interaction.followup.send("モデルの初期化に失敗しました。APIサーバーの状態を確認してください。",
-                                                ephemeral=True)
+                await interaction.followup.send(
+                    "モデルの初期化に失敗しました。APIサーバーの状態を確認してください。",
+                    ephemeral=True
+                )
                 return
 
             success = await self._handle_say_logic(interaction.guild, text, final_lang, final_spk_id, interaction)
@@ -181,7 +197,7 @@ class TTSCog(commands.Cog, name="tts_cog"):
         music_state: MusicGuildState = music_cog._get_guild_state(guild.id) if music_cog else None
 
         if music_state and music_state.is_playing and music_state.current_track:
-            print(f"[TTSCog] Interrupting music in guild {guild.id} for TTS: '{text}'")
+            print(f"[TTSCog] 音楽を一時中断してTTSを再生します (guild {guild.id}): '{text}'")
             current_position = music_state.get_current_position()
             self.interrupted_states[guild.id] = (music_state.current_track, current_position)
 
@@ -195,7 +211,7 @@ class TTSCog(commands.Cog, name="tts_cog"):
             async with self.session.post(f"{self.api_url}/tts", json=payload) as response:
                 if response.status == 200:
                     wav_data = await response.read()
-                    source = discord.FFmpegPCMAudio(io.BytesIO(wav_data))
+                    source = discord.FFmpegPCMAudio(io.BytesIO(wav_data), pipe=True)
 
                     while voice_client.is_playing():
                         await asyncio.sleep(0.5)
@@ -211,7 +227,9 @@ class TTSCog(commands.Cog, name="tts_cog"):
                     if interaction:
                         await self.exception_handler.handle_api_error(interaction, response)
                     else:
-                        print(f"[TTSCog] API Error in guild {guild.id}: {response.status}")
+                        error_text = await response.text()
+                        print(f"[TTSCog] APIエラー (guild {guild.id}): {response.status}")
+                        print(f"  詳細: {error_text}")
                     self.interrupted_states.pop(guild.id, None)
                     return False
 
@@ -219,33 +237,33 @@ class TTSCog(commands.Cog, name="tts_cog"):
             if interaction:
                 await self.exception_handler.handle_connection_error(interaction)
             else:
-                print(f"[TTSCog] API Connection Error in guild {guild.id}")
+                print(f"[TTSCog] API接続エラー (guild {guild.id})")
             self.interrupted_states.pop(guild.id, None)
             return False
         except Exception as e:
             if interaction:
                 await self.exception_handler.handle_unexpected_error(interaction, e)
             else:
-                print(f"[TTSCog] Unexpected Error in guild {guild.id}: {e}")
+                print(f"[TTSCog] 予期しないエラー (guild {guild.id}): {e}")
             self.interrupted_states.pop(guild.id, None)
             return False
 
     async def _tts_after_playback(self, error: Exception, guild_id: int):
         """読み上げ再生が完了したときに呼び出されるコールバック"""
         if error:
-            print(f"[TTSCog] Playback error in guild {guild_id}: {error}")
+            print(f"[TTSCog] 再生エラー (guild {guild_id}): {error}")
 
         if guild_id in self.interrupted_states:
             interrupted_track, position = self.interrupted_states.pop(guild_id)
 
             music_cog: MusicCog = self.bot.get_cog("music_cog")
             if music_cog:
-                print(f"[TTSCog] Resuming music in guild {guild_id} at {position}s.")
+                print(f"[TTSCog] 音楽を再開します (guild {guild_id}) 位置: {position}秒")
                 music_state = music_cog._get_guild_state(guild_id)
                 music_state.current_track = interrupted_track
                 await music_cog._play_next_song(guild_id, seek_seconds=position)
         else:
-            print(f"[TTSCog] TTS finished in guild {guild_id}. No music to resume.")
+            print(f"[TTSCog] TTS再生完了 (guild {guild_id}). 再開する音楽はありません。")
 
 
 async def setup(bot: commands.Bot):
