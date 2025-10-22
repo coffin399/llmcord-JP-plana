@@ -11,7 +11,7 @@ import re
 import time
 from datetime import datetime, timezone, timedelta
 from types import SimpleNamespace
-from typing import List, Dict, Any, Tuple, Optional, AsyncGenerator
+from typing import List, Dict, Any, Tuple, Optional, AsyncGenerator, Union
 
 import aiohttp
 import discord
@@ -219,10 +219,8 @@ class LLMCog(commands.Cog, name="LLM"):
         self.message_to_thread: Dict[int, int] = {}
         self.llm_clients: Dict[str, openai.AsyncOpenAI] = {}
 
-        ### ADDED ### - APIキーの管理用
         self.provider_api_keys: Dict[str, List[str]] = {}
         self.provider_key_index: Dict[str, int] = {}
-        ### END ADDED ###
 
         self.model_reset_tasks: Dict[int, asyncio.Task] = {}
 
@@ -239,7 +237,7 @@ class LLMCog(commands.Cog, name="LLM"):
         self.bio_manager = self._initialize_bio_manager()
         self.memory_manager = self._initialize_memory_manager()
         self.command_manager = self._initialize_command_manager()
-        self.image_generator = self._initialize_image_generator()  # ← 追加
+        self.image_generator = self._initialize_image_generator()
 
         default_model_string = self.llm_config.get('model')
         if default_model_string:
@@ -258,7 +256,6 @@ class LLMCog(commands.Cog, name="LLM"):
             task.cancel()
         logger.info(f"Cancelled {len(self.model_reset_tasks)} pending model reset tasks.")
 
-        # 画像生成プラグインのクリーンアップを追加
         if self.image_generator:
             await self.image_generator.close()
 
@@ -290,7 +287,6 @@ class LLMCog(commands.Cog, name="LLM"):
     async def _save_channel_models(self) -> None:
         await self._save_json_data(self.channel_models, self.channel_settings_path)
 
-    ### MODIFIED ### - 複数APIキーを読み込むように変更
     def _initialize_llm_client(self, model_string: Optional[str]) -> Optional[openai.AsyncOpenAI]:
         if not model_string or '/' not in model_string:
             logger.error(f"Invalid model format: '{model_string}'. Expected 'provider_name/model_name'.")
@@ -302,10 +298,8 @@ class LLMCog(commands.Cog, name="LLM"):
                 logger.error(f"Configuration for LLM provider '{provider_name}' not found.")
                 return None
 
-            # プロバイダーのAPIキーをまだ読み込んでいない場合、収集する
             if provider_name not in self.provider_api_keys:
                 api_keys = []
-                # 'api_key1', 'api_key2', ... という形式のキーを収集
                 i = 1
                 while True:
                     key_name = f'api_key{i}'
@@ -315,25 +309,22 @@ class LLMCog(commands.Cog, name="LLM"):
                     else:
                         break
 
-                # 上記のキーがない場合、単一の 'api_key' を試す
                 if not api_keys and provider_config.get('api_key'):
                     api_keys.append(provider_config['api_key'])
 
                 if not api_keys:
-                    # ローカルモデルなど、キーが不要な場合を考慮
-                    logger.warning(f"No API keys found for provider '{provider_name}'. Using a dummy key.")
-                    self.provider_api_keys[provider_name] = ["local-dummy-key"]
+                    logger.info(
+                        f"No API keys found for provider '{provider_name}'. Assuming local model or keyless API.")
+                    self.provider_api_keys[provider_name] = ["no-key-required"]
                 else:
                     self.provider_api_keys[provider_name] = api_keys
                     logger.info(f"Loaded {len(api_keys)} API key(s) for provider '{provider_name}'.")
 
-            # 現在使用するキーのインデックスを初期化または取得
             self.provider_key_index.setdefault(provider_name, 0)
 
             key_list = self.provider_api_keys[provider_name]
             current_key_index = self.provider_key_index[provider_name]
 
-            # インデックスがリストの範囲外になっていないか安全確認
             if current_key_index >= len(key_list):
                 current_key_index = 0
                 self.provider_key_index[provider_name] = 0
@@ -343,7 +334,7 @@ class LLMCog(commands.Cog, name="LLM"):
             client = openai.AsyncOpenAI(base_url=provider_config.get('base_url'),
                                         api_key=api_key_to_use)
             client.model_name_for_api_calls = model_name
-            client.provider_name = provider_name  # 再試行のためにプロバイダー名をクライアントに保存
+            client.provider_name = provider_name
 
             logger.info(
                 f"Initialized LLM client for provider '{provider_name}' with model '{model_name}' using key index {current_key_index}.")
@@ -351,8 +342,6 @@ class LLMCog(commands.Cog, name="LLM"):
         except Exception as e:
             logger.error(f"Error initializing LLM client for '{model_string}': {e}", exc_info=True)
             return None
-
-    ### END MODIFIED ###
 
     async def _get_llm_client_for_channel(self, channel_id: int) -> Optional[openai.AsyncOpenAI]:
         channel_id_str = str(channel_id)
@@ -443,7 +432,6 @@ class LLMCog(commands.Cog, name="LLM"):
 
             lang_name = lang_map.get(lang_code, lang_code)
 
-            # --- ログ修正 ---
             logger.info(f"🌐 [LANG] Detected: {lang_code} ({lang_name})")
 
             # より強力な言語指示プロンプト
@@ -475,7 +463,6 @@ class LLMCog(commands.Cog, name="LLM"):
             user_display_name=user_display_name
         )
 
-        # システムプロンプトから言語に関する指示を削除または弱める
         system_prompt_template = system_prompt_template.replace(
             "必ず日本語で応答してください", ""
         ).replace(
@@ -523,7 +510,6 @@ class LLMCog(commands.Cog, name="LLM"):
         if formatted_memories := self.memory_manager.get_formatted_memories():
             system_prompt += f"\n\n{formatted_memories}"
 
-        # --- ログ修正 ---
         logger.info(f"🔧 [SYSTEM] System prompt prepared ({len(system_prompt)} chars)")
         return system_prompt
 
@@ -537,7 +523,7 @@ class LLMCog(commands.Cog, name="LLM"):
             definitions.append(self.bio_manager.tool_spec)
         if 'memory' in active_tools and self.memory_manager:
             definitions.append(self.memory_manager.tool_spec)
-        if 'image_generator' in active_tools and self.image_generator:  # ← 追加
+        if 'image_generator' in active_tools and self.image_generator:
             definitions.append(self.image_generator.tool_spec)
 
         return definitions or None
@@ -610,15 +596,12 @@ class LLMCog(commands.Cog, name="LLM"):
                 if response.status == 200:
                     image_bytes = await response.read()
 
-                    # 画像サイズチェック（20MB制限）
                     if len(image_bytes) > 20 * 1024 * 1024:
                         logger.warning(f"Image too large ({len(image_bytes)} bytes): {url}")
                         return None
 
-                    # MIME typeの正確な判定
                     mime_type = response.content_type
                     if not mime_type or not mime_type.startswith('image/'):
-                        # Content-Typeが不正確な場合、拡張子から推測
                         ext = url.split('.')[-1].lower().split('?')[0]
                         mime_mapping = {
                             'png': 'image/png',
@@ -629,34 +612,23 @@ class LLMCog(commands.Cog, name="LLM"):
                         }
                         mime_type = mime_mapping.get(ext, 'image/jpeg')
 
-                    # アニメーションGIFの検出と最初のフレームへの変換
                     if mime_type == 'image/gif':
                         try:
                             from PIL import Image
 
-                            # GIF画像を開く
                             gif_image = Image.open(io.BytesIO(image_bytes))
-
-                            # アニメーションGIFかどうかを確認
                             is_animated = getattr(gif_image, 'is_animated', False)
 
                             if is_animated:
                                 logger.info(
                                     f"🎬 [IMAGE] Detected animated GIF. Converting to static image: {url[:100]}...")
-
-                                # 最初のフレームを取得
                                 gif_image.seek(0)
-
-                                # RGBAモードに変換（透過対応）
                                 if gif_image.mode != 'RGBA':
                                     gif_image = gif_image.convert('RGBA')
-
-                                # PNGとして再エンコード
                                 output_buffer = io.BytesIO()
                                 gif_image.save(output_buffer, format='PNG', optimize=True)
                                 image_bytes = output_buffer.getvalue()
                                 mime_type = 'image/png'
-
                                 logger.debug(
                                     f"🖼️ [IMAGE] Converted animated GIF to PNG (Size: {len(image_bytes)} bytes)")
                             else:
@@ -671,16 +643,13 @@ class LLMCog(commands.Cog, name="LLM"):
                             return None
 
                     encoded_image = base64.b64encode(image_bytes).decode('utf-8')
-
                     logger.debug(
                         f"🖼️ [IMAGE] Successfully processed image: {url[:100]}... (MIME: {mime_type}, Size: {len(image_bytes)} bytes)")
-
-                    # OpenAI Vision API互換フォーマット
                     return {
                         "type": "image_url",
                         "image_url": {
                             "url": f"data:{mime_type};base64,{encoded_image}",
-                            "detail": "auto"  # "low", "high", "auto" が選択可能
+                            "detail": "auto"
                         }
                     }
                 else:
@@ -703,13 +672,10 @@ class LLMCog(commands.Cog, name="LLM"):
         for i in range(max_depth):
             if not current_msg or current_msg.id in visited_ids:
                 break
-
             if isinstance(current_msg, discord.DeletedReferencedMessage):
                 break
-
             messages_to_scan.append(current_msg)
             visited_ids.add(current_msg.id)
-
             if current_msg.reference and current_msg.reference.message_id:
                 try:
                     parent_msg = current_msg.reference.resolved or await message.channel.fetch_message(
@@ -733,13 +699,11 @@ class LLMCog(commands.Cog, name="LLM"):
                 if url not in processed_urls:
                     source_urls.append(url)
                     processed_urls.add(url)
-
             for attachment in msg.attachments:
                 if attachment.content_type and attachment.content_type.startswith(
                         'image/') and attachment.url not in processed_urls:
                     source_urls.append(attachment.url)
                     processed_urls.add(attachment.url)
-
             for embed in msg.embeds:
                 if embed.image and embed.image.url and embed.image.url not in processed_urls:
                     source_urls.append(embed.image.url)
@@ -763,7 +727,6 @@ class LLMCog(commands.Cog, name="LLM"):
                 pass
 
         clean_text = "\n".join(text_parts)
-
         return image_inputs, clean_text
 
     @commands.Cog.listener()
@@ -795,7 +758,7 @@ class LLMCog(commands.Cog, name="LLM"):
             return
 
         guild_log = f"guild='{message.guild.name}({message.guild.id})'" if message.guild else "guild='DM'"
-        user_log = f"user='{message.author.name}({message.author.id})'"  #
+        user_log = f"user='{message.author.name}({message.author.id})'"
         model_in_use = llm_client.model_name_for_api_calls
 
         image_contents, text_content = await self._prepare_multimodal_content(message)
@@ -809,10 +772,10 @@ class LLMCog(commands.Cog, name="LLM"):
             return
 
         logger.info(
-            f"📨 Received LLM request | {guild_log} | {user_log} | model='{model_in_use}' | text_length={len(text_content)} chars | images={len(image_contents)}")  #
+            f"📨 Received LLM request | {guild_log} | {user_log} | model='{model_in_use}' | text_length={len(text_content)} chars | images={len(image_contents)}")
         if text_content:
             log_text = (text_content[:200] + '...') if len(text_content) > 203 else text_content
-            guild_info = f"{message.guild.name}({message.guild.id})" if message.guild else "DM"  #
+            guild_info = f"{message.guild.name}({message.guild.id})" if message.guild else "DM"
             user_info = f"{message.author.name}({message.author.id})"
             logger.info(f"[on_message] {guild_info},{user_info}💬 [USER_INPUT] {log_text.replace(chr(10), ' ')}")
 
@@ -908,199 +871,24 @@ class LLMCog(commands.Cog, name="LLM"):
             client: openai.AsyncOpenAI
     ) -> Tuple[Optional[List[discord.Message]], str, Optional[int]]:
         """
-        ストリーミング + 長文分割対応版
+        ストリーミング応答の準備と例外処理を行うラッパー。
+        実際の処理は _process_streaming_and_send_response に移譲。
         """
         sent_message = None
-        full_response_text = ""
-        last_update = 0.0
-        last_displayed_length = 0
-        chunk_count = 0
-        update_interval = 0.5
-        min_update_chars = 15
-        retry_sleep_time = 2.0
         placeholder = ":incoming_envelope: Thinking...:incoming_envelope:"
-        emoji_prefix = ":incoming_envelope: "
-        emoji_suffix = " :incoming_envelope:"
-
-        max_final_retries = 3
-        final_retry_delay = 2.0
-
-        logger.debug(f"Starting LLM stream for message {message.id}")
-
         try:
-            sent_message = await message.reply(placeholder, silent=True)
-        except discord.HTTPException:
-            sent_message = await message.channel.send(placeholder, silent=True)
+            try:
+                sent_message = await message.reply(placeholder, silent=True)
+            except discord.HTTPException:
+                sent_message = await message.channel.send(placeholder, silent=True)
 
-        try:
-            stream_generator = self._llm_stream_and_tool_handler(
-                initial_messages, client, message.channel.id, message.author.id
+            return await self._process_streaming_and_send_response(
+                sent_message=sent_message,
+                channel=message.channel,
+                user=message.author,
+                messages_for_api=initial_messages,
+                llm_client=client
             )
-
-            async for content_chunk in stream_generator:
-                chunk_count += 1
-                full_response_text += content_chunk
-
-                if chunk_count % 100 == 0:
-                    logger.debug(
-                        f"Stream chunk #{chunk_count}, total length: {len(full_response_text)} chars")
-
-                current_time = time.time()
-                chars_accumulated = len(full_response_text) - last_displayed_length
-
-                should_update = (
-                        current_time - last_update > update_interval and
-                        chars_accumulated >= min_update_chars
-                )
-
-                if should_update and full_response_text:
-                    display_length = len(full_response_text)
-
-                    if display_length > SAFE_MESSAGE_LENGTH:
-                        max_content_length = SAFE_MESSAGE_LENGTH - len(emoji_prefix) - len(emoji_suffix) - 100
-                        display_text = (
-                                emoji_prefix +
-                                full_response_text[:max_content_length] +
-                                "\n\n⚠️ (Output is long, will be split...)\n⚠️ (出力が長いため分割します...)" +
-                                emoji_suffix
-                        )
-                    else:
-                        max_content_length = SAFE_MESSAGE_LENGTH - len(emoji_prefix) - len(emoji_suffix)
-                        display_text = emoji_prefix + full_response_text[:max_content_length] + emoji_suffix
-
-                    if display_text != sent_message.content:
-                        try:
-                            await sent_message.edit(content=display_text)
-                            last_update = current_time
-                            last_displayed_length = len(full_response_text)
-                            logger.debug(
-                                f"Updated Discord message (displayed: {len(display_text)} chars)")
-                        except discord.NotFound:
-                            logger.warning(
-                                f"⚠️ Message deleted during stream (ID: {sent_message.id}). Aborting.")
-                            return None, "", None
-                        except discord.HTTPException as e:
-                            if e.status == 429:
-                                retry_after = (e.retry_after or 1.0) + 0.5
-                                logger.warning(
-                                    f"⚠️ Rate limited on message edit (ID: {sent_message.id}). "
-                                    f"Waiting {retry_after:.2f}s"
-                                )
-                                await asyncio.sleep(retry_after)
-                                last_update = time.time()
-                            else:
-                                logger.warning(
-                                    f"⚠️ Failed to edit message (ID: {sent_message.id}): "
-                                    f"{e.status} - {getattr(e, 'text', str(e))}"
-                                )
-                                await asyncio.sleep(retry_sleep_time)
-
-            logger.debug(
-                f"Stream completed | Total chunks: {chunk_count} | Final length: {len(full_response_text)} chars")
-
-            if full_response_text:
-                if len(full_response_text) <= SAFE_MESSAGE_LENGTH:
-                    for attempt in range(max_final_retries):
-                        try:
-                            if full_response_text != sent_message.content:
-                                await sent_message.edit(content=full_response_text, embed=None, view=None)
-                                logger.debug(f"Final message updated successfully (attempt {attempt + 1})")
-                            break
-                        except discord.NotFound:
-                            logger.error(f"❌ Message was deleted before final update")
-                            return None, "", None
-                        except discord.HTTPException as e:
-                            if e.status == 429:
-                                retry_after = (e.retry_after or 1.0) + 0.5
-                                logger.warning(
-                                    f"⚠️ Rate limited on final update (attempt {attempt + 1}/{max_final_retries}). "
-                                    f"Waiting {retry_after:.2f}s"
-                                )
-                                await asyncio.sleep(retry_after)
-                            else:
-                                logger.warning(
-                                    f"⚠️ Failed to update final message (attempt {attempt + 1}/{max_final_retries}): "
-                                    f"{e.status} - {getattr(e, 'text', str(e))}"
-                                )
-                                if attempt < max_final_retries - 1:
-                                    await asyncio.sleep(final_retry_delay)
-                                else:
-                                    logger.error(
-                                        f"❌ Failed to update final message after {max_final_retries} attempts. "
-                                        f"Message ID: {sent_message.id}"
-                                    )
-                        except Exception as e:
-                            logger.error(f"❌ Unexpected error during final update: {e}", exc_info=True)
-                            if attempt < max_final_retries - 1:
-                                await asyncio.sleep(final_retry_delay)
-
-                    return [sent_message], full_response_text, getattr(client, 'last_used_key_index', None)
-
-                else:
-                    logger.debug(
-                        f"Response is {len(full_response_text)} chars, splitting into multiple messages")
-
-                    chunks = _split_message_smartly(full_response_text, SAFE_MESSAGE_LENGTH)
-                    all_messages = []
-
-                    first_chunk = chunks[0]
-                    for attempt in range(max_final_retries):
-                        try:
-                            await sent_message.edit(content=first_chunk, embed=None, view=None)
-                            all_messages.append(sent_message)
-                            logger.debug(f"Updated first message (1/{len(chunks)})")
-                            break
-                        except discord.HTTPException as e:
-                            if e.status == 429:
-                                retry_after = (e.retry_after or 1.0) + 0.5
-                                logger.warning(f"⚠️ Rate limited on first chunk update, waiting {retry_after:.2f}s")
-                                await asyncio.sleep(retry_after)
-                            else:
-                                logger.error(f"❌ Failed to update first message: {e}")
-                                if attempt < max_final_retries - 1:
-                                    await asyncio.sleep(final_retry_delay)
-
-                    for i, chunk in enumerate(chunks[1:], start=2):
-                        for attempt in range(max_final_retries):
-                            try:
-                                continuation_msg = await message.channel.send(chunk)
-                                all_messages.append(continuation_msg)
-                                logger.debug(f"Sent continuation message {i}/{len(chunks)}")
-                                break
-                            except discord.HTTPException as e:
-                                if e.status == 429:
-                                    retry_after = (e.retry_after or 1.0) + 0.5
-                                    logger.warning(f"⚠️ Rate limited on continuation {i}, waiting {retry_after:.2f}s")
-                                    await asyncio.sleep(retry_after)
-                                else:
-                                    logger.error(f"❌ Failed to send continuation message {i}: {e}")
-                                    if attempt < max_final_retries - 1:
-                                        await asyncio.sleep(final_retry_delay)
-                                    else:
-                                        break
-
-                    return all_messages, full_response_text, getattr(client, 'last_used_key_index', None)
-            else:
-                # MODIFIED: 空応答時のエラーハンドリングを改善
-                finish_reason = getattr(client, 'last_finish_reason', None)
-
-                if finish_reason == 'content_filter':
-                    error_msg = self.llm_config.get('error_msg', {}).get(
-                        'content_filter_error',
-                        "The response was blocked by the content filter.\nAIの応答がコンテンツフィルターによってブロックされました。"
-                    )
-                    logger.warning(f"⚠️ Empty response from LLM due to content filter.")
-                else:
-                    error_msg = self.llm_config.get('error_msg', {}).get(
-                        'empty_response_error',
-                        "There was no response from the AI. Please try rephrasing your message.\nAIから応答がありませんでした。表現を変えてもう一度お試しください。"
-                    )
-                    logger.warning(f"⚠️ Empty response from LLM (Finish reason: {finish_reason})")
-
-                final_error_msg = f"❌ **Error / エラー** ❌\n\n{error_msg}"
-                await sent_message.edit(content=final_error_msg, embed=None, view=self._create_support_view())
-                return None, "", None
-
         except Exception as e:
             logger.error(f"❌ Error during LLM streaming response: {e}", exc_info=True)
             error_msg = self.exception_handler.handle_exception(e)
@@ -1114,19 +902,170 @@ class LLMCog(commands.Cog, name="LLM"):
                 await message.reply(content=final_error_msg, view=self._create_support_view(), silent=True)
             return None, "", None
 
-    # for gemini
+    async def _process_streaming_and_send_response(
+            self,
+            sent_message: discord.Message,
+            channel: discord.abc.Messageable,
+            user: Union[discord.User, discord.Member],
+            messages_for_api: List[Dict[str, Any]],
+            llm_client: openai.AsyncOpenAI
+    ) -> Tuple[Optional[List[discord.Message]], str, Optional[int]]:
+        """
+        LLMからのストリーミング応答を処理し、Discordメッセージを更新/送信する共通メソッド。
+        """
+        full_response_text = ""
+        last_update = 0.0
+        last_displayed_length = 0
+        chunk_count = 0
+        update_interval = 0.5
+        min_update_chars = 15
+        retry_sleep_time = 2.0
+        emoji_prefix = ":incoming_envelope: "
+        emoji_suffix = " :incoming_envelope:"
+        max_final_retries = 3
+        final_retry_delay = 2.0
+
+        logger.debug(f"Starting LLM stream for message {sent_message.id}")
+
+        stream_generator = self._llm_stream_and_tool_handler(
+            messages_for_api, llm_client, channel.id, user.id
+        )
+
+        async for content_chunk in stream_generator:
+            chunk_count += 1
+            full_response_text += content_chunk
+
+            if chunk_count % 100 == 0:
+                logger.debug(
+                    f"Stream chunk #{chunk_count}, total length: {len(full_response_text)} chars")
+
+            current_time = time.time()
+            chars_accumulated = len(full_response_text) - last_displayed_length
+
+            should_update = (
+                    current_time - last_update > update_interval and
+                    chars_accumulated >= min_update_chars
+            )
+
+            if should_update and full_response_text:
+                display_length = len(full_response_text)
+                if display_length > SAFE_MESSAGE_LENGTH:
+                    max_content_length = SAFE_MESSAGE_LENGTH - len(emoji_prefix) - len(emoji_suffix) - 100
+                    display_text = (
+                            emoji_prefix +
+                            full_response_text[:max_content_length] +
+                            "\n\n⚠️ (Output is long, will be split...)\n⚠️ (出力が長いため分割します...)" +
+                            emoji_suffix
+                    )
+                else:
+                    max_content_length = SAFE_MESSAGE_LENGTH - len(emoji_prefix) - len(emoji_suffix)
+                    display_text = emoji_prefix + full_response_text[:max_content_length] + emoji_suffix
+
+                if display_text != sent_message.content:
+                    try:
+                        await sent_message.edit(content=display_text)
+                        last_update = current_time
+                        last_displayed_length = len(full_response_text)
+                        logger.debug(f"Updated Discord message (displayed: {len(display_text)} chars)")
+                    except discord.NotFound:
+                        logger.warning(f"⚠️ Message deleted during stream (ID: {sent_message.id}). Aborting.")
+                        return None, "", None
+                    except discord.HTTPException as e:
+                        if e.status == 429:
+                            retry_after = (e.retry_after or 1.0) + 0.5
+                            logger.warning(
+                                f"⚠️ Rate limited on message edit (ID: {sent_message.id}). Waiting {retry_after:.2f}s")
+                            await asyncio.sleep(retry_after)
+                            last_update = time.time()
+                        else:
+                            logger.warning(
+                                f"⚠️ Failed to edit message (ID: {sent_message.id}): {e.status} - {getattr(e, 'text', str(e))}")
+                            await asyncio.sleep(retry_sleep_time)
+
+        logger.debug(
+            f"Stream completed | Total chunks: {chunk_count} | Final length: {len(full_response_text)} chars")
+
+        if full_response_text:
+            if len(full_response_text) <= SAFE_MESSAGE_LENGTH:
+                for attempt in range(max_final_retries):
+                    try:
+                        if full_response_text != sent_message.content:
+                            await sent_message.edit(content=full_response_text, embed=None, view=None)
+                            logger.debug(f"Final message updated successfully (attempt {attempt + 1})")
+                        break
+                    except discord.NotFound:
+                        logger.error(f"❌ Message was deleted before final update")
+                        return None, "", None
+                    except discord.HTTPException as e:
+                        if e.status == 429:
+                            retry_after = (e.retry_after or 1.0) + 0.5
+                            logger.warning(
+                                f"⚠️ Rate limited on final update (attempt {attempt + 1}/{max_final_retries}). Waiting {retry_after:.2f}s")
+                            await asyncio.sleep(retry_after)
+                        else:
+                            logger.warning(
+                                f"⚠️ Failed to update final message (attempt {attempt + 1}/{max_final_retries}): {e.status} - {getattr(e, 'text', str(e))}")
+                            if attempt < max_final_retries - 1: await asyncio.sleep(final_retry_delay)
+                return [sent_message], full_response_text, getattr(llm_client, 'last_used_key_index', None)
+            else:
+                logger.debug(f"Response is {len(full_response_text)} chars, splitting into multiple messages")
+                chunks = _split_message_smartly(full_response_text, SAFE_MESSAGE_LENGTH)
+                all_messages = []
+                first_chunk = chunks[0]
+                for attempt in range(max_final_retries):
+                    try:
+                        await sent_message.edit(content=first_chunk, embed=None, view=None)
+                        all_messages.append(sent_message)
+                        logger.debug(f"Updated first message (1/{len(chunks)})")
+                        break
+                    except discord.HTTPException as e:
+                        if e.status == 429:
+                            retry_after = (e.retry_after or 1.0) + 0.5
+                            logger.warning(f"⚠️ Rate limited on first chunk update, waiting {retry_after:.2f}s")
+                            await asyncio.sleep(retry_after)
+                        else:
+                            logger.error(f"❌ Failed to update first message: {e}")
+                            if attempt < max_final_retries - 1: await asyncio.sleep(final_retry_delay)
+
+                for i, chunk in enumerate(chunks[1:], start=2):
+                    for attempt in range(max_final_retries):
+                        try:
+                            continuation_msg = await channel.send(chunk)
+                            all_messages.append(continuation_msg)
+                            logger.debug(f"Sent continuation message {i}/{len(chunks)}")
+                            break
+                        except discord.HTTPException as e:
+                            if e.status == 429:
+                                retry_after = (e.retry_after or 1.0) + 0.5
+                                logger.warning(f"⚠️ Rate limited on continuation {i}, waiting {retry_after:.2f}s")
+                                await asyncio.sleep(retry_after)
+                            else:
+                                logger.error(f"❌ Failed to send continuation message {i}: {e}")
+                                if attempt < max_final_retries - 1: await asyncio.sleep(final_retry_delay)
+                return all_messages, full_response_text, getattr(llm_client, 'last_used_key_index', None)
+        else:
+            finish_reason = getattr(llm_client, 'last_finish_reason', None)
+            if finish_reason == 'content_filter':
+                error_msg = self.llm_config.get('error_msg', {}).get(
+                    'content_filter_error',
+                    "The response was blocked by the content filter.\nAIの応答がコンテンツフィルターによってブロックされました。"
+                )
+                logger.warning(f"⚠️ Empty response from LLM due to content filter.")
+            else:
+                error_msg = self.llm_config.get('error_msg', {}).get(
+                    'empty_response_error',
+                    "There was no response from the AI. Please try rephrasing your message.\nAIから応答がありませんでした。表現を変えてもう一度お試しください。"
+                )
+                logger.warning(f"⚠️ Empty response from LLM (Finish reason: {finish_reason})")
+            final_error_msg = f"❌ **Error / エラー** ❌\n\n{error_msg}"
+            await sent_message.edit(content=final_error_msg, embed=None, view=self._create_support_view())
+            return None, "", None
+
     def _convert_messages_for_gemini(self, messages: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], str]:
         """
         OpenAI形式のメッセージを、Geminiモデルと互換性のある形式に変換します。
         'system'ロールをネイティブにサポートしないため、システムメッセージを結合して
         会話の先頭にユーザーメッセージとして挿入し、モデルに指示として認識させます。
-
-        Args:
-            messages: OpenAI形式のメッセージリスト。
-
-        Returns:
-            変換後のメッセージリストと、結合されたシステムプロンプトの文字列のタプル。
-            変換が不要だった場合、元のメッセージリストと空文字列を返します。
         """
         system_prompts_content = []
         other_messages = []
@@ -1134,40 +1073,24 @@ class LLMCog(commands.Cog, name="LLM"):
 
         for message in messages:
             if message.get("role") == "system":
-                # contentが文字列で、空でないことを確認
                 if isinstance(message.get("content"), str) and message["content"].strip():
                     system_prompts_content.append(message["content"])
                     has_system_message = True
             else:
                 other_messages.append(message)
 
-        # 変換が不要な場合（システムメッセージが存在しない場合）は元のリストを返す
         if not has_system_message:
             return messages, ""
 
         combined_system_prompt = "\n\n".join(system_prompts_content)
-
-        # 新しいメッセージリストを作成
-        converted_messages = []
-
-        # 結合したシステムプロンプトを最初のユーザーメッセージとして挿入
-        converted_messages.append({
-            "role": "user",
-            "content": combined_system_prompt
-        })
-
-        # モデルに役割を理解させ、会話のターンを整えるための短い応答を追加
-        converted_messages.append({
-            "role": "assistant",
-            "content": "承知いたしました。指示に従います。"
-        })
-
-        # 元の会話履歴（システムメッセージ以外）を追加
+        converted_messages = [
+            {"role": "user", "content": combined_system_prompt},
+            {"role": "assistant", "content": "承知いたしました。指示に従います。"}
+        ]
         converted_messages.extend(other_messages)
 
         return converted_messages, combined_system_prompt
 
-    ### MODIFIED ### - レート制限時にAPIキーを切り替えて再試行するロジックを追加
     async def _llm_stream_and_tool_handler(
             self,
             messages: List[Dict[str, Any]],
@@ -1175,15 +1098,13 @@ class LLMCog(commands.Cog, name="LLM"):
             channel_id: int,
             user_id: int
     ) -> AsyncGenerator[str, None]:
-        # for gemini
         model_string = self.channel_models.get(str(channel_id)) or self.llm_config.get('model')
-        # モデル名に 'gemini' が含まれているかで判定（例: 'gemini/gemini-pro', 'google/gemini-1.5-pro'）
         is_gemini = model_string and 'gemini' in model_string.lower()
 
-        original_messages_for_log = messages  # ログ出力用に変換前のメッセージを保持
         if is_gemini:
+            original_messages_for_log = messages
             messages, combined_system_prompt = self._convert_messages_for_gemini(messages)
-            if combined_system_prompt:  # 実際に変換が行われた場合のみログを出力
+            if combined_system_prompt:
                 logger.info(f"🔄 [GEMINI ADAPTER] Converting system prompts for Gemini model '{model_string}'.")
                 log_prompt = combined_system_prompt.replace('\n', ' ')
                 logger.debug(
@@ -1196,8 +1117,7 @@ class LLMCog(commands.Cog, name="LLM"):
         extra_params = self.llm_config.get('extra_api_parameters', {})
 
         for iteration in range(max_iterations):
-            logger.debug(
-                f"Starting LLM API call (iteration {iteration + 1}/{max_iterations})")
+            logger.debug(f"Starting LLM API call (iteration {iteration + 1}/{max_iterations})")
 
             tools_def = self.get_tools_definition()
             api_kwargs = {
@@ -1212,7 +1132,6 @@ class LLMCog(commands.Cog, name="LLM"):
                 api_kwargs["tool_choice"] = "auto"
                 logger.debug(f"Available tools: {[t['function']['name'] for t in tools_def]}")
 
-            # --- API呼び出しとキーローテーションによる再試行ロジック ---
             stream = None
             provider_name = client.provider_name
             api_keys = self.provider_api_keys.get(provider_name, [])
@@ -1222,124 +1141,86 @@ class LLMCog(commands.Cog, name="LLM"):
                 logger.error(f"FATAL: No API keys configured for provider '{provider_name}'.")
                 raise Exception(f"No API keys available for provider {provider_name}")
 
-            # 現在のキーから始めて、最大 num_keys 回試行する
             for attempt in range(num_keys):
                 try:
                     current_key_index = self.provider_key_index.get(provider_name, 0)
-                    client.last_used_key_index = current_key_index  # どのキーを使ったか記録
+                    client.last_used_key_index = current_key_index
                     logger.debug(
                         f"Attempting API call to '{provider_name}' with key index {current_key_index} (Attempt {attempt + 1}/{num_keys}).")
-
                     stream = await client.chat.completions.create(**api_kwargs)
                     logger.debug(f"Stream connection established successfully.")
-                    break  # 成功したらループを抜ける
-
-
+                    break
                 except (openai.RateLimitError, openai.InternalServerError) as e:
+                    error_type = "Rate limit" if isinstance(e, openai.RateLimitError) else "Server"
+                    status_code = getattr(e, 'status_code', 'N/A')
+                    logger.warning(
+                        f"⚠️ {error_type} error ({status_code}) for provider '{provider_name}' with key index {current_key_index}. Details: {e}")
 
-                    # 429 RateLimitError または 5xx InternalServerError をキャッチ
-
-                    if isinstance(e, openai.RateLimitError):
-
-                        log_message = f"⚠️ Rate limit error (429) for provider '{provider_name}' with key index {current_key_index}. Details: {e}"
-
-                    else:  # InternalServerError
-
-                        log_message = f"⚠️ Server error ({getattr(e, 'status_code', '5xx')}) for provider '{provider_name}' with key index {current_key_index}. Details: {e}"
-
-                    logger.warning(log_message)
-
-                    # すべてのキーを試した場合
                     if attempt + 1 >= num_keys:
                         logger.error(
-                            f"❌ All {num_keys} API keys for provider '{provider_name}' are rate-limited. Aborting.")
-                        raise e  # エラーを再発生させて上位で処理
+                            f"❌ All {num_keys} API keys for provider '{provider_name}' have failed. Aborting.")
+                        raise e
 
-                    # 次のキーに切り替える
                     next_key_index = (current_key_index + 1) % num_keys
                     self.provider_key_index[provider_name] = next_key_index
                     next_key = api_keys[next_key_index]
+                    logger.info(
+                        f"🔄 Switching to next API key for provider '{provider_name}' (index: {next_key_index}) and retrying.")
 
-                    logger.info(f"🔄 Switching to next API key for '{provider_name}' (index: {next_key_index}).")
-
-                    # 新しいキーでクライアントを再生成
                     new_client = openai.AsyncOpenAI(base_url=client.base_url, api_key=next_key)
                     new_client.model_name_for_api_calls = client.model_name_for_api_calls
                     new_client.provider_name = client.provider_name
-                    client = new_client  # このハンドラ内で使用するクライアントを差し替える
+                    client = new_client
 
-                    # グローバルなクライアントキャッシュも更新
                     current_model_string = f"{provider_name}/{client.model_name_for_api_calls}"
                     self.llm_clients[current_model_string] = new_client
-
-                    await asyncio.sleep(1)  # APIに少し猶予を与える
-
+                    await asyncio.sleep(1)
                 except Exception as e:
                     logger.error(f"❌ Unhandled error calling LLM API: {e}", exc_info=True)
-                    raise  # RateLimitError 以外はそのままエラーを発生させる
+                    raise
 
             if stream is None:
-                # ループが完了しても stream が None の場合 (通常は発生しない)
                 raise Exception("Failed to establish stream with any API key.")
-            # --- ここまでが再試行ロジック ---
 
             tool_calls_buffer = []
             assistant_response_content = ""
-            finish_reason = None  # MODIFIED: finish_reason を初期化
+            finish_reason = None
 
-            # ストリーミング中のデータを収集
             async for chunk in stream:
-                # MODIFIED: finish_reason を取得
                 if chunk.choices[0].finish_reason:
                     finish_reason = chunk.choices[0].finish_reason
-
                 delta = chunk.choices[0].delta
-
-                # テキストコンテンツを処理
                 if delta and delta.content:
                     assistant_response_content += delta.content
                     yield delta.content
-
-                # ツールコールを収集（yieldはしない）
                 if delta and delta.tool_calls:
                     for tool_call_chunk in delta.tool_calls:
                         chunk_index = tool_call_chunk.index if tool_call_chunk.index is not None else 0
-
                         if len(tool_calls_buffer) <= chunk_index:
                             tool_calls_buffer.append(
                                 {"id": "", "type": "function", "function": {"name": "", "arguments": ""}})
-
                         buffer = tool_calls_buffer[chunk_index]
-                        if tool_call_chunk.id:
-                            buffer["id"] = tool_call_chunk.id
+                        if tool_call_chunk.id: buffer["id"] = tool_call_chunk.id
                         if tool_call_chunk.function:
-                            if tool_call_chunk.function.name:
-                                buffer["function"]["name"] = tool_call_chunk.function.name
-                            if tool_call_chunk.function.arguments:
-                                buffer["function"]["arguments"] += tool_call_chunk.function.arguments
+                            if tool_call_chunk.function.name: buffer["function"]["name"] = tool_call_chunk.function.name
+                            if tool_call_chunk.function.arguments: buffer["function"]["arguments"] += tool_call_chunk.function.arguments
 
-            # MODIFIED: clientオブジェクトにfinish_reasonを保存
             client.last_finish_reason = finish_reason
 
-            # ストリーミング完了後にアシスタントメッセージを構築
             assistant_message = {"role": "assistant", "content": assistant_response_content or None}
             if tool_calls_buffer:
                 assistant_message["tool_calls"] = tool_calls_buffer
-
             current_messages.append(assistant_message)
 
-            # ツールコールがない場合は終了
             if not tool_calls_buffer:
                 logger.debug(f"No tool calls, returning final response (Finish reason: {finish_reason})")
                 return
 
-            # ツールコールがある場合、ログ出力とツール実行
             logger.info(f"🔧 [TOOL] LLM requested {len(tool_calls_buffer)} tool call(s)")
             for tc in tool_calls_buffer:
                 logger.debug(
                     f"Tool call details: {tc['function']['name']} with args: {tc['function']['arguments'][:200]}")
 
-            # ツールコールオブジェクトを構築して実行
             tool_calls_obj = [
                 SimpleNamespace(
                     id=tc['id'],
@@ -1348,12 +1229,9 @@ class LLMCog(commands.Cog, name="LLM"):
             ]
             await self._process_tool_calls(tool_calls_obj, current_messages, channel_id, user_id)
 
-        # 最大反復回数を超えた場合
         logger.warning(f"⚠️ Tool processing exceeded max iterations ({max_iterations})")
         yield self.llm_config.get('error_msg', {}).get('tool_loop_timeout',
                                                        "Tool processing exceeded max iterations.\nツールの処理が最大反復回数を超えました。")
-
-    ### END MODIFIED ###
 
     async def _process_tool_calls(self, tool_calls: List[Any], messages: List[Dict[str, Any]],
                                   channel_id: int, user_id: int) -> None:
@@ -1372,20 +1250,16 @@ class LLMCog(commands.Cog, name="LLM"):
                                                                         channel_id=channel_id)
                     logger.debug(
                         f"🔧 [TOOL] Result (length: {len(str(tool_response_content))} chars):\n{str(tool_response_content)[:1000]}")
-
                 elif self.bio_manager and function_name == self.bio_manager.name:
                     tool_response_content = await self.bio_manager.run_tool(arguments=function_args, user_id=user_id)
                     logger.debug(f"🔧 [TOOL] Result:\n{tool_response_content}")
-
                 elif self.memory_manager and function_name == self.memory_manager.name:
                     tool_response_content = await self.memory_manager.run_tool(arguments=function_args)
                     logger.debug(f"🔧 [TOOL] Result:\n{tool_response_content}")
-
-                elif self.image_generator and function_name == self.image_generator.name:  # ← 追加
+                elif self.image_generator and function_name == self.image_generator.name:
                     tool_response_content = await self.image_generator.run(arguments=function_args,
                                                                            channel_id=channel_id)
                     logger.debug(f"🔧 [TOOL] Result:\n{tool_response_content}")
-
                 else:
                     logger.warning(f"⚠️ Unsupported tool called: {function_name}")
                     error_content = f"Error: Tool '{function_name}' is not available."
@@ -1417,25 +1291,17 @@ class LLMCog(commands.Cog, name="LLM"):
             })
 
     async def _schedule_model_reset(self, channel_id: int):
-        """
-        Schedules a task to reset the channel's model to default after 3 hours.
-        指定されたチャンネルのモデルを3時間後にデフォルトに戻すタスク。
-        """
         try:
             await asyncio.sleep(3 * 60 * 60)
-
             logger.info(f"Executing scheduled model reset for channel {channel_id}.")
-
             channel_id_str = str(channel_id)
             if channel_id_str in self.channel_models:
                 default_model = self.llm_config.get('model')
                 current_model = self.channel_models.get(channel_id_str)
-
                 if current_model and current_model != default_model:
                     del self.channel_models[channel_id_str]
                     await self._save_channel_models()
                     logger.info(f"Model for channel {channel_id} automatically reset to default '{default_model}'.")
-
                     channel = self.bot.get_channel(channel_id)
                     if channel and isinstance(channel, discord.TextChannel):
                         try:
@@ -1449,11 +1315,6 @@ class LLMCog(commands.Cog, name="LLM"):
                             await channel.send(embed=embed, view=self._create_support_view())
                         except discord.HTTPException as e:
                             logger.warning(f"Failed to send model reset notification to channel {channel_id}: {e}")
-                else:
-                    logger.info(f"Model for channel {channel_id} was already default. No auto-reset needed.")
-            else:
-                logger.info(f"Channel {channel_id} no longer has a custom model set. No auto-reset needed.")
-
         except asyncio.CancelledError:
             logger.info(f"Model reset task for channel {channel_id} was cancelled.")
         except Exception as e:
@@ -1461,7 +1322,6 @@ class LLMCog(commands.Cog, name="LLM"):
         finally:
             self.model_reset_tasks.pop(channel_id, None)
 
-    # ( ... ここから下のコマンド部分は変更ありません ... )
     @app_commands.command(
         name="chat",
         description="Chat with the AI without needing to mention.\nAIと対話します。メンション不要で会話できます。"
@@ -1471,260 +1331,108 @@ class LLMCog(commands.Cog, name="LLM"):
         image_url="URL of an image (optional).\n画像のURL（オプション）"
     )
     async def chat_slash(self, interaction: discord.Interaction, message: str, image_url: str = None):
-        """
-        /chat command: Allows interaction with the LLM without mentions or replies.
-        /chatコマンド: メンションや返信なしでLLMと対話できるコマンド
-        """
         await interaction.response.defer(ephemeral=False)
-
+        temp_message = None
         try:
             llm_client = await self._get_llm_client_for_channel(interaction.channel_id)
             if not llm_client:
                 error_msg = self.llm_config.get('error_msg', {}).get('general_error',
                                                                      "LLM client is not available for this channel.\nこのチャンネルではLLMクライアントが利用できません。")
                 final_error_msg = f"❌ **Error / エラー** ❌\n\n{error_msg}"
-                await interaction.followup.send(content=final_error_msg, view=self._create_support_view(),
-                                                ephemeral=False)
-                return
-        except Exception as e:
-            logger.error(f"Failed to get LLM client for channel {interaction.channel_id}: {e}", exc_info=True)
-            error_msg = self.exception_handler.handle_exception(e)
-            final_error_msg = f"❌ **Error / エラー** ❌\n\n{error_msg}"
-            await interaction.followup.send(content=final_error_msg, view=self._create_support_view(), ephemeral=False)
-            return
-
-        if not message.strip():
-            error_msg = "⚠️ **Input Required / 入力が必要です** ⚠️\n\nPlease enter a message.\nメッセージを入力してください。"
-            await interaction.followup.send(content=error_msg, view=self._create_support_view(), ephemeral=False)
-            return
-
-        guild_log = f"guild='{interaction.guild.name}({interaction.guild.id})'" if interaction.guild else "guild='DM'"
-        user_log = f"user='{interaction.user.name}({interaction.user.id})'"
-        model_in_use = llm_client.model_name_for_api_calls
-
-        image_contents = []
-        if image_url:
-            if image_data := await self._process_image_url(image_url):
-                image_contents.append(image_data)
-            else:
-                error_msg = "⚠️ **Image Error / 画像エラー** ⚠️\n\nFailed to process the specified image URL.\n指定された画像URLの処理に失敗しました。"
-                await interaction.followup.send(content=error_msg, view=self._create_support_view(), ephemeral=False)
+                await interaction.followup.send(content=final_error_msg, view=self._create_support_view())
                 return
 
-        logger.info(
-            f"📨 Received /chat request | {guild_log} | {user_log} | model='{model_in_use}' | text_length={len(message)} chars | images={len(image_contents)}")
-        log_text = (message[:200] + '...') if len(message) > 203 else message
-        guild_info = f"{interaction.guild.name}({interaction.guild.id})" if interaction.guild else "DM"
-        user_info = f"{interaction.user.name}({interaction.user.id})"
-        logger.info(f"[/chat] {guild_info},{user_info}💬 [USER_INPUT] {log_text.replace(chr(10), ' ')}")
+            if not message.strip():
+                error_msg = "⚠️ **Input Required / 入力が必要です** ⚠️\n\nPlease enter a message.\nメッセージを入力してください。"
+                await interaction.followup.send(content=error_msg, view=self._create_support_view())
+                return
 
-        if not self.bio_manager or not self.memory_manager:
-            error_msg = "Cannot respond because required plugins are not initialized.\n必要なプラグインが初期化されていないため、応答できません。"
-            final_error_msg = f"❌ **Plugin Error / プラグインエラー** ❌\n\n{error_msg}"
-            await interaction.followup.send(content=final_error_msg, view=self._create_support_view(), ephemeral=False)
-            return
+            model_in_use = llm_client.model_name_for_api_calls
+            image_contents = []
+            if image_url:
+                if image_data := await self._process_image_url(image_url):
+                    image_contents.append(image_data)
+                else:
+                    error_msg = "⚠️ **Image Error / 画像エラー** ⚠️\n\nFailed to process the specified image URL.\n指定された画像URLの処理に失敗しました。"
+                    await interaction.followup.send(content=error_msg, view=self._create_support_view())
+                    return
 
-        system_prompt = await self._prepare_system_prompt(
-            interaction.channel_id,
-            interaction.user.id,
-            interaction.user.display_name
-        )
+            guild_log = f"guild='{interaction.guild.name}({interaction.guild.id})'" if interaction.guild else "guild='DM'"
+            user_log = f"user='{interaction.user.name}({interaction.user.id})'"
+            logger.info(
+                f"📨 Received /chat request | {guild_log} | {user_log} | model='{model_in_use}' | text_length={len(message)} chars | images={len(image_contents)}")
+            log_text = (message[:200] + '...') if len(message) > 203 else message
+            guild_info = f"{interaction.guild.name}({interaction.guild.id})" if interaction.guild else "DM"
+            user_info = f"{interaction.user.name}({interaction.user.id})"
+            logger.info(f"[/chat] {guild_info},{user_info}💬 [USER_INPUT] {log_text.replace(chr(10), ' ')}")
 
-        messages_for_api: List[Dict[str, Any]] = [{"role": "system", "content": system_prompt}]
+            if not self.bio_manager or not self.memory_manager:
+                error_msg = "Cannot respond because required plugins are not initialized.\n必要なプラグインが初期化されていないため、応答できません。"
+                final_error_msg = f"❌ **Plugin Error / プラグインエラー** ❌\n\n{error_msg}"
+                await interaction.followup.send(content=final_error_msg, view=self._create_support_view())
+                return
 
-        user_content_parts = []
-        timestamp = interaction.created_at.astimezone(self.jst).strftime('[%H:%M]')
-        formatted_text = f"{timestamp} {message}"
-        user_content_parts.append({"type": "text", "text": formatted_text})
-        user_content_parts.extend(image_contents)
+            system_prompt = await self._prepare_system_prompt(
+                interaction.channel_id,
+                interaction.user.id,
+                interaction.user.display_name
+            )
+            messages_for_api: List[Dict[str, Any]] = [{"role": "system", "content": system_prompt}]
 
-        if detected_lang_prompt := self._detect_language_and_create_prompt(message):
-            messages_for_api.append({"role": "system", "content": detected_lang_prompt})
-            logger.info("🌐 [LANG] Injecting language override prompt")
-        elif self.language_prompt:
-            messages_for_api.append({"role": "system", "content": self.language_prompt})
-            logger.info("🌐 [LANG] Using default language prompt as fallback")
+            user_content_parts = []
+            timestamp = interaction.created_at.astimezone(self.jst).strftime('[%H:%M]')
+            formatted_text = f"{timestamp} {message}"
+            user_content_parts.append({"type": "text", "text": formatted_text})
+            user_content_parts.extend(image_contents)
 
-        user_message_for_api = {"role": "user", "content": user_content_parts}
-        messages_for_api.append(user_message_for_api)
+            if detected_lang_prompt := self._detect_language_and_create_prompt(message):
+                messages_for_api.append({"role": "system", "content": detected_lang_prompt})
+                logger.info("🌐 [LANG] Injecting language override prompt")
+            elif self.language_prompt:
+                messages_for_api.append({"role": "system", "content": self.language_prompt})
+                logger.info("🌐 [LANG] Using default language prompt as fallback")
 
-        logger.info(f"🔵 [API] Sending {len(messages_for_api)} messages to LLM")
+            user_message_for_api = {"role": "user", "content": user_content_parts}
+            messages_for_api.append(user_message_for_api)
 
-        try:
+            logger.info(f"🔵 [API] Sending {len(messages_for_api)} messages to LLM")
+
             temp_message = await interaction.followup.send(
                 ":incoming_envelope: Thinking...:incoming_envelope:",
                 ephemeral=False,
                 wait=True
             )
 
-            full_response_text = ""
-            last_update = 0.0
-            last_displayed_length = 0
-            chunk_count = 0
-            update_interval = 0.5
-            min_update_chars = 15
-            emoji_prefix = ":incoming_envelope: "
-            emoji_suffix = " :incoming_envelope:"
-            max_final_retries = 3
-            final_retry_delay = 2.0
-
-            logger.debug(f"Starting LLM stream for /chat command")
-
-            stream_generator = self._llm_stream_and_tool_handler(
-                messages_for_api, llm_client, interaction.channel_id, interaction.user.id
+            sent_messages, full_response_text, used_key_index = await self._process_streaming_and_send_response(
+                sent_message=temp_message,
+                channel=interaction.channel,
+                user=interaction.user,
+                messages_for_api=messages_for_api,
+                llm_client=llm_client
             )
 
-            async for content_chunk in stream_generator:
-                chunk_count += 1
-                full_response_text += content_chunk
-
-                if chunk_count % 100 == 0:
-                    logger.debug(
-                        f"Stream chunk #{chunk_count}, total length: {len(full_response_text)} chars")
-
-                current_time = time.time()
-                chars_accumulated = len(full_response_text) - last_displayed_length
-
-                should_update = (
-                        current_time - last_update > update_interval and
-                        chars_accumulated >= min_update_chars
-                )
-
-                if should_update and full_response_text:
-                    display_length = len(full_response_text)
-
-                    if display_length > SAFE_MESSAGE_LENGTH:
-                        max_content_length = SAFE_MESSAGE_LENGTH - len(emoji_prefix) - len(emoji_suffix) - 100
-                        display_text = (
-                                emoji_prefix +
-                                full_response_text[:max_content_length] +
-                                "\n\n⚠️ (Output is long, will be split...)\n⚠️ (出力が長いため分割します...)" +
-                                emoji_suffix
-                        )
-                    else:
-                        max_content_length = SAFE_MESSAGE_LENGTH - len(emoji_prefix) - len(emoji_suffix)
-                        display_text = emoji_prefix + full_response_text[:max_content_length] + emoji_suffix
-
-                    if display_text != temp_message.content:
-                        try:
-                            await temp_message.edit(content=display_text)
-                            last_update = current_time
-                            last_displayed_length = len(full_response_text)
-                            logger.debug(
-                                f"Updated Discord message (displayed: {len(display_text)} chars)")
-                        except discord.NotFound:
-                            logger.warning(f"⚠️ Message deleted during stream. Aborting.")
-                            return
-                        except discord.HTTPException as e:
-                            if e.status == 429:
-                                retry_after = (e.retry_after or 1.0) + 0.5
-                                logger.warning(f"⚠️ Rate limited. Waiting {retry_after:.2f}s")
-                                await asyncio.sleep(retry_after)
-                                last_update = time.time()
-                            else:
-                                logger.warning(f"⚠️ Failed to edit message: {e.status}")
-                                await asyncio.sleep(2.0)
-
-            logger.debug(
-                f"Stream completed | Total chunks: {chunk_count} | Final length: {len(full_response_text)} chars")
-
-            if full_response_text:
+            if sent_messages and full_response_text:
                 logger.info(
                     f"✅ LLM response completed | model='{model_in_use}' | response_length={len(full_response_text)} chars")
                 log_response = (full_response_text[:200] + '...') if len(
                     full_response_text) > 203 else full_response_text
-
-                key_log_str = ""
-                used_key_index = getattr(llm_client, 'last_used_key_index', None)
-                if used_key_index is not None:
-                    key_log_str = f" [key{used_key_index + 1}]"
-
+                key_log_str = f" [key{used_key_index + 1}]" if used_key_index is not None else ""
                 logger.info(f"🤖 [LLM_RESPONSE]{key_log_str} {log_response.replace(chr(10), ' ')}")
                 logger.debug(
                     f"LLM full response for /chat (length: {len(full_response_text)} chars):\n{full_response_text}")
-
-                if len(full_response_text) <= SAFE_MESSAGE_LENGTH:
-                    for attempt in range(max_final_retries):
-                        try:
-                            if full_response_text != temp_message.content:
-                                await temp_message.edit(content=full_response_text, embed=None, view=None)
-                            break
-                        except discord.HTTPException as e:
-                            if e.status == 429:
-                                retry_after = (e.retry_after or 1.0) + 0.5
-                                logger.warning(f"⚠️ Rate limited on final update, waiting {retry_after:.2f}s")
-                                await asyncio.sleep(retry_after)
-                            else:
-                                logger.error(f"❌ Failed to update final message: {e}")
-                                if attempt < max_final_retries - 1:
-                                    await asyncio.sleep(final_retry_delay)
-                else:
-                    logger.debug(f"/chat response is {len(full_response_text)} chars, splitting")
-
-                    chunks = _split_message_smartly(full_response_text, SAFE_MESSAGE_LENGTH)
-
-                    for attempt in range(max_final_retries):
-                        try:
-                            await temp_message.edit(content=chunks[0], embed=None, view=None)
-                            logger.debug(f"Updated first message (1/{len(chunks)})")
-                            break
-                        except discord.HTTPException as e:
-                            if e.status == 429:
-                                retry_after = (e.retry_after or 1.0) + 0.5
-                                logger.warning(f"⚠️ Rate limited, waiting {retry_after:.2f}s")
-                                await asyncio.sleep(retry_after)
-                            else:
-                                logger.error(f"❌ Failed to update first message: {e}")
-                                if attempt < max_final_retries - 1:
-                                    await asyncio.sleep(final_retry_delay)
-
-                    for i, chunk in enumerate(chunks[1:], start=2):
-                        for attempt in range(max_final_retries):
-                            try:
-                                await interaction.channel.send(chunk)
-                                logger.debug(f"Sent continuation message {i}/{len(chunks)}")
-                                break
-                            except discord.HTTPException as e:
-                                if e.status == 429:
-                                    retry_after = (e.retry_after or 1.0) + 0.5
-                                    logger.warning(f"⚠️ Rate limited, waiting {retry_after:.2f}s")
-                                    await asyncio.sleep(retry_after)
-                                else:
-                                    logger.error(f"❌ Failed to send continuation {i}: {e}")
-                                    if attempt < max_final_retries - 1:
-                                        await asyncio.sleep(final_retry_delay)
-                                    else:
-                                        break
-            else:
-                # MODIFIED: 空応答時のエラーハンドリングを改善
-                finish_reason = getattr(client, 'last_finish_reason', None)
-
-                if finish_reason == 'content_filter':
-                    error_msg = self.llm_config.get('error_msg', {}).get(
-                        'content_filter_error',
-                        "The response was blocked by the content filter.\nAIの応答がコンテンツフィルターによってブロックされました。"
-                    )
-                    logger.warning(f"⚠️ Empty response from LLM for /chat due to content filter.")
-                else:
-                    error_msg = self.llm_config.get('error_msg', {}).get(
-                        'empty_response_error',
-                        "There was no response from the AI. Please try rephrasing your message.\nAIから応答がありませんでした。表現を変えてもう一度お試しください。"
-                    )
-                    logger.warning(f"⚠️ Empty response from LLM for /chat (Finish reason: {finish_reason})")
-
-                final_error_msg = f"❌ **Error / エラー** ❌\n\n{error_msg}"
-                await temp_message.edit(content=final_error_msg, embed=None, view=self._create_support_view())
+            elif not sent_messages:
+                # エラーメッセージはヘルパー内で送信済み
+                logger.warning("LLM response for /chat was empty or an error occurred.")
 
         except Exception as e:
-            logger.error(f"❌ Error during /chat LLM streaming response: {e}", exc_info=True)
+            logger.error(f"❌ Error during /chat command execution: {e}", exc_info=True)
             error_msg = self.exception_handler.handle_exception(e)
             final_error_msg = f"❌ **Error / エラー** ❌\n\n{error_msg}"
             try:
-                if 'temp_message' in locals() and temp_message:
+                if temp_message:
                     await temp_message.edit(content=final_error_msg, embed=None, view=self._create_support_view())
                 else:
-                    await interaction.followup.send(content=final_error_msg, view=self._create_support_view(),
-                                                    ephemeral=False)
+                    await interaction.followup.send(content=final_error_msg, view=self._create_support_view())
             except discord.HTTPException:
                 pass
 
@@ -2263,39 +1971,21 @@ class LLMCog(commands.Cog, name="LLM"):
             return []
 
         available_models = self.image_generator.get_available_models()
-
-        # 検索文字列を小文字化
         current_lower = current.lower()
+        filtered = [model for model in available_models if current_lower in model.lower()]
 
-        # フィルタリング: モデル名全体 or プロバイダー名が一致
-        filtered = [
-            model for model in available_models
-            if current_lower in model.lower()
-        ]
-
-        # 結果が多い場合は、プロバイダーごとにグループ化して表示
         if len(filtered) > 25:
-            # プロバイダーで絞り込む
             models_by_provider = self.image_generator.get_models_by_provider()
             choices = []
-
             for provider, models in sorted(models_by_provider.items()):
                 if current_lower in provider.lower():
-                    # プロバイダー名が一致する場合は、そのプロバイダーのモデルを優先
-                    for model in models[:5]:  # 各プロバイダー最大5個
-                        if len(choices) >= 25:
-                            break
+                    for model in models[:5]:
+                        if len(choices) >= 25: break
                         choices.append(app_commands.Choice(name=model, value=model))
-                    if len(choices) >= 25:
-                        break
-
+                    if len(choices) >= 25: break
             return choices[:25]
 
-        # 通常のフィルタリング結果を返す
-        return [
-            app_commands.Choice(name=model, value=model)
-            for model in filtered
-        ][:25]
+        return [app_commands.Choice(name=model, value=model) for model in filtered][:25]
 
     @app_commands.command(
         name="switch-image-model",
@@ -2331,10 +2021,8 @@ class LLMCog(commands.Cog, name="LLM"):
 
         try:
             await self.image_generator.set_model_for_channel(interaction.channel_id, model)
-
             default_model = self.image_generator.default_model
 
-            # モデル情報を解析
             try:
                 provider, model_name = model.split('/', 1)
             except ValueError:
@@ -2349,18 +2037,12 @@ class LLMCog(commands.Cog, name="LLM"):
                     ),
                     color=discord.Color.green()
                 )
-                embed.add_field(
-                    name="New Model / 新しいモデル",
-                    value=f"```\n{model}\n```",
-                    inline=False
-                )
+                embed.add_field(name="New Model / 新しいモデル", value=f"```\n{model}\n```", inline=False)
                 embed.add_field(name="Provider / プロバイダー", value=f"`{provider}`", inline=True)
                 embed.add_field(name="Model Name / モデル名", value=f"`{model_name}`", inline=True)
-                embed.add_field(
-                    name="💡 Tip / ヒント",
-                    value=f"To reset to default (`{default_model}`), use `/reset-image-model`\nデフォルト (`{default_model}`) に戻すには `/reset-image-model`",
-                    inline=False
-                )
+                embed.add_field(name="💡 Tip / ヒント",
+                                value=f"To reset to default (`{default_model}`), use `/reset-image-model`\nデフォルト (`{default_model}`) に戻すには `/reset-image-model`",
+                                inline=False)
             else:
                 embed = discord.Embed(
                     title="✅ Image Model Set to Default / 画像生成モデルをデフォルトに設定しました",
@@ -2372,8 +2054,7 @@ class LLMCog(commands.Cog, name="LLM"):
             self._add_support_footer(embed)
             await interaction.followup.send(embed=embed, view=self._create_support_view(), ephemeral=False)
             logger.info(
-                f"Image model for channel {interaction.channel_id} switched to '{model}' by {interaction.user.name}"
-            )
+                f"Image model for channel {interaction.channel_id} switched to '{model}' by {interaction.user.name}")
 
         except Exception as e:
             logger.error(f"Failed to save channel image model settings: {e}", exc_info=True)
@@ -2410,16 +2091,11 @@ class LLMCog(commands.Cog, name="LLM"):
                     description=f"The image generation model for this channel has been reset to the default.\nこのチャンネルの画像生成モデルをデフォルトに戻しました。",
                     color=discord.Color.green()
                 )
-                embed.add_field(
-                    name="Default Model / デフォルトモデル",
-                    value=f"```\n{default_model}\n```",
-                    inline=False
-                )
+                embed.add_field(name="Default Model / デフォルトモデル", value=f"```\n{default_model}\n```", inline=False)
                 self._add_support_footer(embed)
                 await interaction.followup.send(embed=embed, view=self._create_support_view(), ephemeral=False)
                 logger.info(
-                    f"Image model for channel {interaction.channel_id} reset to default by {interaction.user.name}"
-                )
+                    f"Image model for channel {interaction.channel_id} reset to default by {interaction.user.name}")
             else:
                 embed = discord.Embed(
                     title="ℹ️ No Custom Model Set / 専用モデルはありません",
@@ -2459,7 +2135,6 @@ class LLMCog(commands.Cog, name="LLM"):
         default_model = self.image_generator.default_model
         is_default = current_model == default_model
 
-        # モデル情報を解析
         try:
             provider, model_name = current_model.split('/', 1)
         except ValueError:
@@ -2470,29 +2145,16 @@ class LLMCog(commands.Cog, name="LLM"):
             color=discord.Color.blue() if is_default else discord.Color.purple()
         )
 
-        embed.add_field(
-            name="Current Model / 現在のモデル",
-            value=f"```\n{current_model}\n```",
-            inline=False
-        )
+        embed.add_field(name="Current Model / 現在のモデル", value=f"```\n{current_model}\n```", inline=False)
         embed.add_field(name="Provider / プロバイダー", value=f"`{provider}`", inline=True)
-        embed.add_field(name="Status / 状態", value='`Default / デフォルト`' if is_default else '`Custom / カスタム`',
-                        inline=True)
+        embed.add_field(name="Status / 状態", value='`Default / デフォルト`' if is_default else '`Custom / カスタム`', inline=True)
 
-        # 利用可能なモデル一覧をプロバイダーごとに表示
         models_by_provider = self.image_generator.get_models_by_provider()
-
         for provider_name, models in sorted(models_by_provider.items()):
-            model_list = "\n".join([f"• `{m.split('/', 1)[1]}`" for m in models[:5]])  # 各プロバイダー最大5個表示
-
+            model_list = "\n".join([f"• `{m.split('/', 1)[1]}`" for m in models[:5]])
             if len(models) > 5:
                 model_list += f"\n• ... and {len(models) - 5} more"
-
-            embed.add_field(
-                name=f"📦 {provider_name.title()} Models",
-                value=model_list or "None",
-                inline=True
-            )
+            embed.add_field(name=f"📦 {provider_name.title()} Models", value=model_list or "None", inline=True)
 
         embed.add_field(
             name="💡 Commands / コマンド",
@@ -2502,7 +2164,6 @@ class LLMCog(commands.Cog, name="LLM"):
             ),
             inline=False
         )
-
         self._add_support_footer(embed)
         await interaction.followup.send(embed=embed, view=self._create_support_view(), ephemeral=False)
 
@@ -2528,14 +2189,9 @@ class LLMCog(commands.Cog, name="LLM"):
 
         models_by_provider = self.image_generator.get_models_by_provider()
 
-        # プロバイダーフィルター
         if provider:
             provider_lower = provider.lower()
-            models_by_provider = {
-                k: v for k, v in models_by_provider.items()
-                if provider_lower in k.lower()
-            }
-
+            models_by_provider = {k: v for k, v in models_by_provider.items() if provider_lower in k.lower()}
             if not models_by_provider:
                 embed = discord.Embed(
                     title="⚠️ No Models Found / モデルが見つかりません",
@@ -2546,35 +2202,26 @@ class LLMCog(commands.Cog, name="LLM"):
                 await interaction.followup.send(embed=embed, view=self._create_support_view())
                 return
 
+        total_models = sum(len(models) for models in models_by_provider.values())
         embed = discord.Embed(
             title="🎨 Available Image Generation Models / 利用可能な画像生成モデル",
-            description=f"Total: {sum(len(models) for models in models_by_provider.values())} models across {len(models_by_provider)} provider(s)\n合計: {len(models_by_provider)}プロバイダー、{sum(len(models) for models in models_by_provider.values())}モデル",
+            description=f"Total: {total_models} models across {len(models_by_provider)} provider(s)\n合計: {len(models_by_provider)}プロバイダー、{total_models}モデル",
             color=discord.Color.blue()
         )
 
         for provider_name, models in sorted(models_by_provider.items()):
-            # モデル名からプロバイダープレフィックスを除去して表示
             model_names = [m.split('/', 1)[1] for m in models]
-
-            # 長すぎる場合は分割
             if len(model_names) > 10:
                 model_text = "\n".join([f"{i + 1}. `{m}`" for i, m in enumerate(model_names[:10])])
                 model_text += f"\n... and {len(model_names) - 10} more"
             else:
                 model_text = "\n".join([f"{i + 1}. `{m}`" for i, m in enumerate(model_names)])
+            embed.add_field(name=f"📦 {provider_name.title()} ({len(models)} models)", value=model_text or "None",
+                            inline=False)
 
-            embed.add_field(
-                name=f"📦 {provider_name.title()} ({len(models)} models)",
-                value=model_text or "None",
-                inline=False
-            )
-
-        embed.add_field(
-            name="💡 How to Use / 使い方",
-            value="Use `/switch-image-model` to change the model for this channel.\n`/switch-image-model` でこのチャンネルのモデルを変更できます。",
-            inline=False
-        )
-
+        embed.add_field(name="💡 How to Use / 使い方",
+                        value="Use `/switch-image-model` to change the model for this channel.\n`/switch-image-model` でこのチャンネルのモデルを変更できます。",
+                        inline=False)
         self._add_support_footer(embed)
         await interaction.followup.send(embed=embed, view=self._create_support_view(), ephemeral=False)
 

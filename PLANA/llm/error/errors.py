@@ -6,6 +6,22 @@ import openai
 logger = logging.getLogger(__name__)
 
 
+# Custom Exceptions for SearchAgent
+class SearchAgentError(Exception):
+    """Base exception for SearchAgent errors."""
+    pass
+
+
+class SearchAPIRateLimitError(SearchAgentError):
+    """Raised when the Google Search API rate limit is exceeded."""
+    pass
+
+
+class SearchAPIServerError(SearchAgentError):
+    """Raised for 5xx server errors from the Google Search API."""
+    pass
+
+
 class LLMExceptionHandler:
     def __init__(self, config: dict):
         self.config = config.get('error_msg', {})
@@ -31,23 +47,17 @@ class LLMExceptionHandler:
         if isinstance(exception, openai.APIStatusError):
             status_code = exception.status_code
             try:
-                # エラーレスポンスのボディを取得
                 error_body = exception.response.json()
-                # 'error'キーの中身を取得
                 error_data = error_body.get('error')
 
-                # --- ここからが修正箇所 ---
-                # APIからのエラーがリストでラップされている場合に対応
+                # Handle cases where the error is wrapped in a list
                 if isinstance(error_data, list) and error_data:
-                    # リストの最初の要素を辞書として扱う
                     error_dict = error_data[0]
-                    # さらに 'error' キーでネストされている場合も考慮
+                    # Handle further nesting
                     error_data = error_dict.get('error', error_dict)
-                # --- ここまでが修正箇所 ---
 
                 detail = "No details provided."
                 if isinstance(error_data, dict):
-                    # 詳細メッセージを複数のキーから探す
                     detail = error_data.get('detail') or error_data.get('message') or error_data.get('title') or str(
                         error_data)
 
@@ -67,6 +77,6 @@ class LLMExceptionHandler:
                                        "APIからエラーが返されましたが、内容を解析できませんでした。").format(
                     status_code=status_code)
 
-        # その他の予期せぬエラー
+        # Other unexpected errors
         logger.error(f"An unexpected error occurred during LLM interaction: {exception}", exc_info=True)
         return self.config.get('unexpected_error', "予期せぬエラーが発生しました。開発者に連絡してください。")
