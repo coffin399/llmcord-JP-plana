@@ -4,6 +4,9 @@ from discord import app_commands
 import aiohttp
 import io
 import asyncio
+import json
+import os
+from pathlib import Path
 from typing import Dict, Tuple, Optional, List
 
 # MusicCogのクラスやオブジェクトの型ヒントのため
@@ -19,7 +22,7 @@ try:
     from PLANA.tts.error.errors import TTSCogExceptionHandler
 except ImportError:
     try:
-        from error.errors import TTSCogExceptionHandler
+        from PLANA.tts.error.errors import TTSCogExceptionHandler
     except ImportError as e:
         print(f"[CRITICAL] TTSCog: 必須コンポーネントのインポートに失敗しました。エラー: {e}")
         TTSCogExceptionHandler = None
@@ -58,6 +61,11 @@ class TTSCog(commands.Cog, name="tts_cog"):
         self.available_models: List[Dict] = []
         self.models_loaded: bool = False
 
+        # チャンネルごとのモデル設定を保存
+        self.settings_file = Path("data/tts_settings.json")
+        self.channel_settings: Dict[int, Dict] = {}
+        self._load_settings()
+
         print("TTSCog loaded (Style-Bert-VITS2 compatible)")
 
     # --- Cog Lifecycle Events ---
@@ -69,8 +77,56 @@ class TTSCog(commands.Cog, name="tts_cog"):
 
     async def cog_unload(self):
         """Cogがアンロードされる際にセッションを閉じる"""
+        self._save_settings()
         await self.session.close()
         print("TTSCog unloaded and session closed.")
+
+    # --- Settings Management ---
+
+    def _load_settings(self):
+        """チャンネル設定をファイルから読み込む"""
+        try:
+            if self.settings_file.exists():
+                with open(self.settings_file, 'r', encoding='utf-8') as f:
+                    # キーを整数に変換
+                    data = json.load(f)
+                    self.channel_settings = {int(k): v for k, v in data.items()}
+                print(f"✓ [TTSCog] 設定を読み込みました: {len(self.channel_settings)}チャンネル")
+            else:
+                # dataディレクトリが存在しない場合は作成
+                self.settings_file.parent.mkdir(parents=True, exist_ok=True)
+                print("[TTSCog] 設定ファイルが見つかりません。新規作成します。")
+        except Exception as e:
+            print(f"✗ [TTSCog] 設定読み込みエラー: {e}")
+            self.channel_settings = {}
+
+    def _save_settings(self):
+        """チャンネル設定をファイルに保存"""
+        try:
+            self.settings_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(self.settings_file, 'w', encoding='utf-8') as f:
+                # キーを文字列に変換してJSON保存
+                data = {str(k): v for k, v in self.channel_settings.items()}
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            print(f"✓ [TTSCog] 設定を保存しました: {len(self.channel_settings)}チャンネル")
+        except Exception as e:
+            print(f"✗ [TTSCog] 設定保存エラー: {e}")
+
+    def _get_channel_settings(self, channel_id: int) -> Dict:
+        """チャンネルの設定を取得（なければデフォルト値を返す）"""
+        if channel_id not in self.channel_settings:
+            return {
+                "model_id": self.default_model_id,
+                "style": self.default_style,
+                "style_weight": self.default_style_weight,
+                "speed": self.default_speed
+            }
+        return self.channel_settings[channel_id]
+
+    def _set_channel_settings(self, channel_id: int, settings: Dict):
+        """チャンネルの設定を保存"""
+        self.channel_settings[channel_id] = settings
+        self._save_settings()
 
     # --- Helper Functions ---
 
@@ -146,7 +202,7 @@ class TTSCog(commands.Cog, name="tts_cog"):
     @commands.Cog.listener()
     async def on_voice_state_update(self, member: discord.Member, before: discord.VoiceState,
                                     after: discord.VoiceState):
-        if not self.config.get('enable_join_leave_notice', False):
+        if not self.config.get('enable_join_leave_notice', True):
             return
 
         if member.bot or not member.guild.voice_client:
@@ -171,7 +227,7 @@ class TTSCog(commands.Cog, name="tts_cog"):
     @app_commands.command(name="say", description="テキストを音声で読み上げます")
     @app_commands.describe(
         text="読み上げるテキスト",
-        model_id="モデルID (省略時はデフォルト)",
+        model_id="モデルID (省略時はチャンネル設定)",
         style="スタイル名 (例: Neutral, Happy, Angry)",
         style_weight="スタイルの強さ (0.0-10.0)",
         speed="話速 (0.5-2.0)"
@@ -198,11 +254,15 @@ class TTSCog(commands.Cog, name="tts_cog"):
             await self.exception_handler.send_message(interaction, "tts_in_progress", ephemeral=True)
             return
 
-        # パラメータのデフォルト値設定
-        final_model_id = model_id if model_id is not None else self.default_model_id
-        final_style = style if style is not None else self.default_style
-        final_style_weight = style_weight if style_weight is not None else self.default_style_weight
-        final_speed = speed if speed is not None else self.default_speed
+        # チャンネル設定を取得
+        voice_channel_id = interaction.guild.voice_client.channel.id
+        channel_settings = self._get_channel_settings(voice_channel_id)
+
+        # パラメータのデフォルト値設定（チャンネル設定を優先）
+        final_model_id = model_id if model_id is not None else channel_settings["model_id"]
+        final_style = style if style is not None else channel_settings["style"]
+        final_style_weight = style_weight if style_weight is not None else channel_settings["style_weight"]
+        final_speed = speed if speed is not None else channel_settings["speed"]
 
         async with lock:
             await interaction.response.defer()
@@ -249,20 +309,36 @@ class TTSCog(commands.Cog, name="tts_cog"):
                 model_id = model.get('id', 'N/A')
                 model_name = model.get('name', 'Unknown')
                 styles = model.get('styles', ['Neutral'])
+
+                # 名前を256文字以内に制限
+                display_name = f"ID: {model_id}"
+                if len(str(model_name)) > 200:
+                    display_name += f" - {str(model_name)[:200]}..."
+                else:
+                    display_name += f" - {model_name}"
+
+                # スタイルの文字列化
                 if isinstance(styles, list):
-                    styles_str = ", ".join(styles)
+                    styles_str = ", ".join(str(s) for s in styles[:10])
+                    if len(styles) > 10:
+                        styles_str += f" ... (他{len(styles) - 10}個)"
                 else:
                     styles_str = str(styles)
 
+                # valueも1024文字制限があるので念のため制限
+                if len(styles_str) > 1000:
+                    styles_str = styles_str[:1000] + "..."
+
                 embed.add_field(
-                    name=f"ID: {model_id} - {model_name}",
+                    name=display_name[:256],  # 256文字制限
                     value=f"スタイル: {styles_str}",
                     inline=False
                 )
             else:
                 # 文字列や単純な形式の場合
+                model_str = str(model)[:240]  # 余裕を持って240文字
                 embed.add_field(
-                    name=f"Model: {model}",
+                    name=f"Model: {model_str}",
                     value="詳細情報なし",
                     inline=False
                 )
@@ -271,6 +347,123 @@ class TTSCog(commands.Cog, name="tts_cog"):
             embed.set_footer(text=f"... 他 {len(self.available_models) - 10} 個のモデル")
 
         await interaction.followup.send(embed=embed, ephemeral=True)
+
+    @app_commands.command(name="change-tts-model", description="このチャンネルのTTSモデル設定を変更します")
+    @app_commands.describe(
+        model_id="使用するモデルID",
+        style="スタイル名 (省略時は現在の設定を維持)",
+        style_weight="スタイルの強さ (0.0-10.0, 省略時は現在の設定を維持)",
+        speed="話速 (0.5-2.0, 省略時は現在の設定を維持)"
+    )
+    async def change_tts_model(
+            self,
+            interaction: discord.Interaction,
+            model_id: int,
+            style: Optional[str] = None,
+            style_weight: Optional[float] = None,
+            speed: Optional[float] = None
+    ):
+        """チャンネルごとのTTSモデル設定を変更"""
+        # ボイスチャンネルに接続しているか確認
+        if not interaction.guild.voice_client:
+            await interaction.response.send_message(
+                "❌ Botがボイスチャンネルに接続していません。",
+                ephemeral=True
+            )
+            return
+
+        voice_channel = interaction.guild.voice_client.channel
+        channel_id = voice_channel.id
+
+        # 現在の設定を取得
+        current_settings = self._get_channel_settings(channel_id)
+
+        # 新しい設定を作成（指定されたパラメータのみ更新）
+        new_settings = {
+            "model_id": model_id,
+            "style": style if style is not None else current_settings["style"],
+            "style_weight": style_weight if style_weight is not None else current_settings["style_weight"],
+            "speed": speed if speed is not None else current_settings["speed"]
+        }
+
+        # 設定を保存
+        self._set_channel_settings(channel_id, new_settings)
+
+        # モデル名を取得
+        model_name = self.get_model_name(model_id)
+
+        # 確認メッセージを送信
+        embed = discord.Embed(
+            title="✅ TTS設定を更新しました",
+            description=f"チャンネル: {voice_channel.mention}",
+            color=discord.Color.green()
+        )
+        embed.add_field(name="モデル", value=f"ID: {model_id} - {model_name}", inline=False)
+        embed.add_field(name="スタイル", value=new_settings["style"], inline=True)
+        embed.add_field(name="スタイル強度", value=f"{new_settings['style_weight']}", inline=True)
+        embed.add_field(name="速度", value=f"{new_settings['speed']}x", inline=True)
+
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    @app_commands.command(name="show-tts-settings", description="現在のチャンネルのTTS設定を表示します")
+    async def show_tts_settings(self, interaction: discord.Interaction):
+        """現在のチャンネルのTTS設定を表示"""
+        if not interaction.guild.voice_client:
+            await interaction.response.send_message(
+                "❌ Botがボイスチャンネルに接続していません。",
+                ephemeral=True
+            )
+            return
+
+        voice_channel = interaction.guild.voice_client.channel
+        channel_id = voice_channel.id
+
+        # 現在の設定を取得
+        settings = self._get_channel_settings(channel_id)
+        model_name = self.get_model_name(settings["model_id"])
+
+        # 設定が保存されているかチェック
+        is_custom = channel_id in self.channel_settings
+
+        embed = discord.Embed(
+            title="🎙️ 現在のTTS設定",
+            description=f"チャンネル: {voice_channel.mention}\n"
+                        f"{'(カスタム設定)' if is_custom else '(デフォルト設定)'}",
+            color=discord.Color.blue() if is_custom else discord.Color.greyple()
+        )
+        embed.add_field(name="モデル", value=f"ID: {settings['model_id']} - {model_name}", inline=False)
+        embed.add_field(name="スタイル", value=settings["style"], inline=True)
+        embed.add_field(name="スタイル強度", value=f"{settings['style_weight']}", inline=True)
+        embed.add_field(name="速度", value=f"{settings['speed']}x", inline=True)
+
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    @app_commands.command(name="reset-tts-settings", description="このチャンネルのTTS設定をデフォルトに戻します")
+    async def reset_tts_settings(self, interaction: discord.Interaction):
+        """チャンネルのTTS設定をリセット"""
+        if not interaction.guild.voice_client:
+            await interaction.response.send_message(
+                "❌ Botがボイスチャンネルに接続していません。",
+                ephemeral=True
+            )
+            return
+
+        voice_channel = interaction.guild.voice_client.channel
+        channel_id = voice_channel.id
+
+        # 設定が存在する場合のみ削除
+        if channel_id in self.channel_settings:
+            del self.channel_settings[channel_id]
+            self._save_settings()
+            await interaction.response.send_message(
+                f"✅ {voice_channel.mention} のTTS設定をデフォルトに戻しました。",
+                ephemeral=True
+            )
+        else:
+            await interaction.response.send_message(
+                f"ℹ️ {voice_channel.mention} はすでにデフォルト設定を使用しています。",
+                ephemeral=True
+            )
 
     # --- Core Logic ---
 
@@ -324,10 +517,10 @@ class TTSCog(commands.Cog, name="tts_cog"):
             await asyncio.sleep(0.1)
             music_state.is_seeking = False
 
-        # Style-Bert-VITS2 APIのエンドポイント
+        # Style-Bert-VITS2 APIのエンドポイント (POSTメソッドを使用)
         endpoint = f"{self.api_url}/voice"
 
-        params = {
+        payload = {
             "text": text,
             "model_id": model_id,
             "style": style,
@@ -337,7 +530,8 @@ class TTSCog(commands.Cog, name="tts_cog"):
         }
 
         try:
-            async with self.session.get(endpoint, params=params) as response:
+            # POSTメソッドでリクエスト
+            async with self.session.post(endpoint, json=payload) as response:
                 if response.status == 200:
                     wav_data = await response.read()
                     source = discord.FFmpegPCMAudio(io.BytesIO(wav_data), pipe=True)
