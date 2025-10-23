@@ -164,7 +164,12 @@ llm:
 
   # --- 検索エージェント設定 ---
   search_agent:
-    api_key: "YOUR_GOOGLE_GEMINI_API_KEY_HERE"
+    api_key1: "YOUR_GOOGLE_GEMINI_API_KEY_HERE"
+    api_key2: "YOUR_GOOGLE_GEMINI_API_KEY_HERE"
+    api_key3: "YOUR_GOOGLE_GEMINI_API_KEY_HERE"
+    api_key4: "YOUR_GOOGLE_GEMINI_API_KEY_HERE"
+    api_key5: "YOUR_GOOGLE_GEMINI_API_KEY_HERE"
+    #you can add more api keys here
     model: "gemini-2.5-flash"
     timeout: 60.0
     format_control: "検索結果に基づき、ユーザーの質問に直接回答する形で、構造化された詳細なレポートを作成してください。"
