@@ -407,7 +407,7 @@ class TTSCog(commands.Cog, name="tts_cog"):
             if success:
                 model_name = self.get_model_name(final_model_id)
                 await interaction.followup.send(
-                    f"🔊 読み上げ中: `{text}`\nモデル: {model_name} | スタイル: {final_style} ({final_style_weight}) | 速度: {final_speed}x")
+                    f"🔊 読み上げ中: `{text}`\n速度: {final_speed}x")
 
     @app_commands.command(name="tts_models", description="利用可能な音声モデルの一覧を表示")
     async def tts_models(self, interaction: discord.Interaction):
