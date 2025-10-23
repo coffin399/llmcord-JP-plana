@@ -214,15 +214,22 @@ class TTSCog(commands.Cog, name="tts_cog"):
             )
 
     @commands.Cog.listener()
-    async def on_llm_response_complete(self, response_message: discord.Message, text_to_speak: str):
-        guild = response_message.guild
+    async def on_llm_response_complete(self, response_messages: list, text_to_speak: str):
+        # response_messagesはリストなので、空でないか確認し、最初の要素を取得します
+        if not response_messages:
+            print("[TTSCog] on_llm_response_complete received an empty message list.")
+            return
+
+        first_message = response_messages[0]
+        guild = first_message.guild
         if not guild:
             return
 
         guild_settings = self._get_guild_speech_settings(guild.id)
         speech_channel_id = guild_settings.get("speech_channel_id")
 
-        if response_message.channel.id != speech_channel_id:
+        # response_message.channel.id を first_message.channel.id に変更
+        if first_message.channel.id != speech_channel_id:
             return
 
         voice_client = guild.voice_client

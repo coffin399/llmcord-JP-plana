@@ -501,6 +501,7 @@ class LLMCog(commands.Cog, name="LLM"):
                 pass
         return image_inputs, "\n".join(text_parts)
 
+
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
         if message.author.bot: return
@@ -562,7 +563,8 @@ class LLMCog(commands.Cog, name="LLM"):
         messages_for_api.append(user_message_for_api)
         logger.info(f"🔵 [API] Sending {len(messages_for_api)} messages to LLM")
         logger.debug(
-            f"Messages structure: system={len(messages_for_api['content'])} chars, lang_override={'present' if len(messages_for_api) > 1 and 'CRITICAL' in str(messages_for_api) else 'absent'}")
+            # FIX IS HERE
+            f"Messages structure: system={len(messages_for_api[0]['content'])} chars, lang_override={'present' if len(messages_for_api) > 1 and 'CRITICAL' in str(messages_for_api) else 'absent'}")
         try:
             sent_messages, llm_response, used_key_index = await self._handle_llm_streaming_response(message,
                                                                                                     messages_for_api,
@@ -576,7 +578,7 @@ class LLMCog(commands.Cog, name="LLM"):
                 logger.debug(f"LLM full response (length: {len(llm_response)} chars):\n{llm_response}")
                 if thread_id not in self.conversation_threads: self.conversation_threads[thread_id] = []
                 self.conversation_threads[thread_id].append(user_message_for_api)
-                assistant_message = {"role": "assistant", "content": llm_response, "message_id": sent_messages.id}
+                assistant_message = {"role": "assistant", "content": llm_response, "message_id": sent_messages[0].id}
                 self.conversation_threads[thread_id].append(assistant_message)
                 for msg in sent_messages: self.message_to_thread[msg.id] = thread_id
                 self._cleanup_old_threads()
@@ -587,7 +589,6 @@ class LLMCog(commands.Cog, name="LLM"):
                     logger.info("📢 Dispatched 'llm_response_complete' event for TTS.")
                 except Exception as e:
                     logger.error(f"Failed to dispatch 'llm_response_complete' event: {e}", exc_info=True)
-                # --- ▲▲▲ 新規追加箇所 ▲▲▲ ---
 
         except Exception as e:
             await message.reply(content=f"❌ **Error / エラー** ❌\n\n{self.exception_handler.handle_exception(e)}",
@@ -815,8 +816,11 @@ class LLMCog(commands.Cog, name="LLM"):
             if stream is None: raise Exception("Failed to establish stream with any API key.")
             tool_calls_buffer, assistant_response_content, finish_reason = [], "", None
             async for chunk in stream:
-                if chunk.choices.finish_reason: finish_reason = chunk.choices.finish_reason
-                delta = chunk.choices.delta
+                if not chunk.choices:
+                    continue
+                choice = chunk.choices[0]
+                if choice.finish_reason: finish_reason = choice.finish_reason
+                delta = choice.delta
                 if delta and delta.content: assistant_response_content += delta.content; yield delta.content
                 if delta and delta.tool_calls:
                     for tool_call_chunk in delta.tool_calls:
