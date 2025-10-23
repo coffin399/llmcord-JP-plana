@@ -11,7 +11,7 @@ import discord
 
 if TYPE_CHECKING:
     # 循環参照を避けるための型チェック用インポート
-    from ..twitch_notification import TwitchNotification
+    from ..twitch_notification_cog import TwitchNotification
 
 logger = logging.getLogger(__name__)
 
