@@ -36,7 +36,6 @@ def format_duration(duration_seconds: int) -> str:
 
 
 def parse_time_to_seconds(time_str: str) -> Optional[int]:
-    """時刻文字列(MM:SS or HH:MM:SS or 秒数)を秒数に変換"""
     try:
         time_str = time_str.strip()
 
@@ -85,7 +84,7 @@ class GuildState:
         self.playback_start_time: Optional[float] = None
         self.seek_position: int = 0
         self.paused_at: Optional[float] = None
-        self.is_seeking: bool = False  # 追加: シーク中フラグ
+        self.is_seeking: bool = False
 
     def update_activity(self):
         self.last_activity = datetime.now()
@@ -95,7 +94,6 @@ class GuildState:
         self.update_activity()
 
     def get_current_position(self) -> int:
-        """現在の再生位置を秒単位で取得"""
         if not self.is_playing:
             return self.seek_position
 
@@ -110,7 +108,6 @@ class GuildState:
         return self.seek_position
 
     def reset_playback_tracking(self):
-        """再生トラッキングをリセット"""
         self.playback_start_time = None
         self.seek_position = 0
         self.paused_at = None
@@ -332,9 +329,6 @@ class MusicCog(commands.Cog, name="music_cog"):
             return vc
 
     async def _play_next_song(self, guild_id: int, seek_seconds: int = 0):
-        """
-        次の曲を再生する。seek_secondsが指定された場合、その位置から再生を開始。
-        """
         state = self._get_guild_state(guild_id)
         if not state:
             return
@@ -344,14 +338,12 @@ class MusicCog(commands.Cog, name="music_cog"):
 
         is_seek_operation = seek_seconds > 0
 
-        # シーク操作でない場合のみ再生状態をチェック
         if not is_seek_operation:
             if state.is_paused or (state.voice_client and state.voice_client.is_playing()):
                 return
 
         track_to_play: Optional[Track] = None
 
-        # seek操作の場合は常に現在の曲を使用
         if is_seek_operation and state.current_track:
             track_to_play = state.current_track
         elif state.loop_mode == LoopMode.ONE and state.current_track and not is_seek_operation:
@@ -366,7 +358,7 @@ class MusicCog(commands.Cog, name="music_cog"):
         if not track_to_play:
             state.current_track = None
             state.is_playing = False
-            state.is_seeking = False  # 追加: シークフラグをクリア
+            state.is_seeking = False
             state.reset_playback_tracking()
             guild = self.bot.get_guild(guild_id)
             logger.info(f"Guild {guild_id} ({guild.name if guild else ''}): Queue has ended. Disconnecting.")
@@ -375,7 +367,6 @@ class MusicCog(commands.Cog, name="music_cog"):
             await state.cleanup_voice_client()
             return
 
-        # seek操作でない場合のみcurrent_trackを更新
         if not is_seek_operation:
             state.current_track = track_to_play
 
@@ -383,7 +374,6 @@ class MusicCog(commands.Cog, name="music_cog"):
         state.is_paused = False
         state.update_activity()
 
-        # シーク位置を設定
         state.seek_position = seek_seconds
         state.playback_start_time = time.time()
         state.paused_at = None
@@ -395,7 +385,6 @@ class MusicCog(commands.Cog, name="music_cog"):
                     raise RuntimeError("ストリームURLの取得/更新に失敗しました。")
                 track_to_play.stream_url = updated_track.stream_url
 
-            # シーク位置を適用
             ffmpeg_before_opts = self.ffmpeg_before_options
             if seek_seconds > 0:
                 ffmpeg_before_opts = f"-ss {seek_seconds} {ffmpeg_before_opts}"
@@ -411,7 +400,6 @@ class MusicCog(commands.Cog, name="music_cog"):
             )
             state.voice_client.play(source, after=lambda e: self._song_finished_callback(e, guild_id))
 
-            # シーク操作が完了したのでフラグをクリア
             if is_seek_operation:
                 state.is_seeking = False
 
@@ -420,7 +408,6 @@ class MusicCog(commands.Cog, name="music_cog"):
             logger.info(
                 f"Guild {guild_id} ({guild.name if guild else ''}): Now playing - {track_to_play.title}{seek_info}")
 
-            # シーク時はメッセージを送らない
             if state.last_text_channel_id and track_to_play.requester_id and not is_seek_operation:
                 try:
                     requester = self.bot.get_user(track_to_play.requester_id) or await self.bot.fetch_user(
@@ -443,7 +430,7 @@ class MusicCog(commands.Cog, name="music_cog"):
             if state.loop_mode == LoopMode.ALL and track_to_play and not is_seek_operation:
                 await state.queue.put(track_to_play)
             state.current_track = None
-            state.is_seeking = False  # 追加: エラー時もシークフラグをクリア
+            state.is_seeking = False
             state.reset_playback_tracking()
             asyncio.create_task(self._play_next_song(guild_id))
 
@@ -452,9 +439,7 @@ class MusicCog(commands.Cog, name="music_cog"):
         if not state:
             return
 
-        # シーク中の場合はコールバックを無視
         if state.is_seeking:
-            state.is_seeking = False
             return
 
         finished_track = state.current_track
@@ -615,17 +600,13 @@ class MusicCog(commands.Cog, name="music_cog"):
                                       duration=format_duration(state.current_track.duration))
             return
 
-        # シーク中フラグを設定してコールバックを無視
         state.is_seeking = True
 
-        # 現在の再生を停止
         if state.voice_client and state.voice_client.is_playing():
             state.voice_client.stop()
 
-        # FFmpegプロセスの完全終了を待つ（重要：短すぎるとプロセス競合が発生）
         await asyncio.sleep(0.5)
 
-        # ストリームURLを再取得して最新の状態にする
         try:
             updated_track = await ensure_stream(state.current_track)
             if updated_track and updated_track.stream_url:
@@ -633,7 +614,6 @@ class MusicCog(commands.Cog, name="music_cog"):
         except Exception as e:
             logger.warning(f"Guild {interaction.guild.id}: Stream refresh failed during seek: {e}")
 
-        # シーク再生を開始（フラグは_play_next_song内でクリアされる）
         await self._send_response(interaction, "seeked_to_position", position=format_duration(seek_seconds))
         await self._play_next_song(interaction.guild.id, seek_seconds=seek_seconds)
 
@@ -668,7 +648,6 @@ class MusicCog(commands.Cog, name="music_cog"):
 
         state.voice_client.resume()
         state.is_paused = False
-        # 再開時は再生開始時刻を調整
         if state.paused_at and state.playback_start_time:
             pause_duration = time.time() - state.paused_at
             state.playback_start_time += pause_duration
@@ -782,10 +761,8 @@ class MusicCog(commands.Cog, name="music_cog"):
             return embed
 
         def get_queue_view(current_page: int, total_pages: int, user_id: int):
-            """キュー操作用のボタンビューを作成"""
             view = discord.ui.View(timeout=60.0)
 
-            # First Page ボタン
             first_button = discord.ui.Button(
                 style=discord.ButtonStyle.primary,
                 emoji="⏪",
@@ -807,7 +784,6 @@ class MusicCog(commands.Cog, name="music_cog"):
             first_button.callback = first_callback
             view.add_item(first_button)
 
-            # Previous ボタン
             prev_button = discord.ui.Button(
                 style=discord.ButtonStyle.primary,
                 emoji="◀️",
@@ -829,7 +805,6 @@ class MusicCog(commands.Cog, name="music_cog"):
             prev_button.callback = prev_callback
             view.add_item(prev_button)
 
-            # Stop ボタン
             stop_button = discord.ui.Button(
                 style=discord.ButtonStyle.danger,
                 emoji="⏹️",
@@ -846,7 +821,6 @@ class MusicCog(commands.Cog, name="music_cog"):
             stop_button.callback = stop_callback
             view.add_item(stop_button)
 
-            # Next ボタン
             next_button = discord.ui.Button(
                 style=discord.ButtonStyle.primary,
                 emoji="▶️",
@@ -868,7 +842,6 @@ class MusicCog(commands.Cog, name="music_cog"):
             next_button.callback = next_callback
             view.add_item(next_button)
 
-            # Last Page ボタン
             last_button = discord.ui.Button(
                 style=discord.ButtonStyle.primary,
                 emoji="⏩",
@@ -930,7 +903,6 @@ class MusicCog(commands.Cog, name="music_cog"):
         await interaction.response.send_message(embed=embed)
 
     def _create_progress_bar(self, current: int, total: int, length: int = 20) -> str:
-        """再生進捗バーを作成"""
         if total <= 0:
             return "─" * length
         progress = min(current / total, 1.0)
@@ -1079,7 +1051,6 @@ class MusicCog(commands.Cog, name="music_cog"):
     @reload_group.command(name="music_cog",
                           description="音楽Cogを再読み込みして、問題をリセットします。/ Reloads the music cog to fix issues.")
     async def reload_music_cog_subcommand(self, interaction: discord.Interaction):
-        """音楽Cogを再読み込みします。"""
         await interaction.response.defer(ephemeral=False)
         module_name = self.__module__
         logger.info(f"音楽Cog ({module_name}) の再読み込みを試みます。リクエスト者: {interaction.user}")
@@ -1101,7 +1072,6 @@ class MusicCog(commands.Cog, name="music_cog"):
     @reload_music_cog_subcommand.error
     async def reload_music_cog_subcommand_error(self, interaction: discord.Interaction,
                                                 error: app_commands.AppCommandError):
-        """reload music_cogコマンドのエラーハンドラ"""
         await self.exception_handler.handle_generic_command_error(interaction, error)
 
 
