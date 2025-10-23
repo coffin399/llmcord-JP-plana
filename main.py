@@ -57,6 +57,20 @@ class Shittim(commands.Bot):
         self.config = None
         self.status_templates = []
         self.status_index = 0
+        #ロードする順序を指定
+        self.cogs_to_load = [
+            'PLANA.images.image_commands_cog',
+            'PLANA.llm.llm_cog',
+            'PLANA.media_downloader.ytdlp_downloader_cog',
+            'PLANA.music.music_cog',
+            'PLANA.notifications.earthquake_notification_cog',
+            'PLANA.notifications.twitch_notification_cog',
+            'PLANA.timer.timer_cog',
+            'PLANA.tracker.r6s_tracker_cog',
+            'PLANA.tracker.valorant_tracker_cog',
+            'PLANA.tts.tts_cog',
+            'PLANA.utilities.slash_command_cog',
+        ]
 
     def is_admin(self, user_id: int) -> bool:
         """ユーザーが管理者かどうかをチェック"""
@@ -149,26 +163,21 @@ class Shittim(commands.Bot):
         # ===== ロギング設定ここまで =====================================
         # ================================================================
 
-        plana_dir = 'PLANA'
-        if not os.path.isdir(plana_dir):
-            logging.error(f"Cogを格納する '{plana_dir}' ディレクトリが見つかりません。Cogはロードされません。")
-            return
-        logging.info(f"'{plana_dir}' ディレクトリからCogのロードを開始します...")
+        logging.info("Cogのロードを開始します...")
         loaded_cogs_count = 0
-        for root, _, files in os.walk(plana_dir):
-            for file in files:
-                if file.endswith('.py') and not file.startswith('_'):
-                    module_path = os.path.join(root, file[:-3]).replace(os.sep, '.')
-                    try:
-                        await self.load_extension(module_path)
-                        logging.info(f"  > Cog '{module_path}' のロードに成功しました。")
-                        loaded_cogs_count += 1
-                    except commands.NoEntryPointError:
-                        logging.debug(f"ファイル '{module_path}' はCogではないためスキップしました。")
-                    except commands.ExtensionAlreadyLoaded:
-                        logging.debug(f"Cog '{module_path}' は既にロードされています。")
-                    except Exception as e:
-                        logging.error(f"  > Cog '{module_path}' のロード中にエラーが発生しました: {e}", exc_info=True)
+        for module_path in self.cogs_to_load:
+            try:
+                await self.load_extension(module_path)
+                logging.info(f"  > Cog '{module_path}' のロードに成功しました。")
+                loaded_cogs_count += 1
+            except commands.ExtensionAlreadyLoaded:
+                logging.debug(f"Cog '{module_path}' は既にロードされています。")
+            except commands.ExtensionNotFound:
+                logging.error(f"  > Cog '{module_path}' が見つかりません。ファイルパスを確認してください。")
+            except commands.NoEntryPointError:
+                logging.error(f"  > Cog '{module_path}' に setup 関数が見つかりません。Cogとして正しく実装されていますか？")
+            except Exception as e:
+                logging.error(f"  > Cog '{module_path}' のロード中に予期しないエラーが発生しました: {e}", exc_info=True)
         logging.info(f"Cogのロードが完了しました。合計 {loaded_cogs_count} 個のCogをロードしました。")
 
         if self.config.get('sync_slash_commands', True):
@@ -387,28 +396,23 @@ if __name__ == "__main__":
                 await interaction.followup.send(f"❌ Cog `{cog_name}` のリロードに失敗しました: {e}", ephemeral=False)
                 logging.error(f"Cog '{cog_name}' のリロードに失敗しました: {e}")
         else:
-            # 全Cogをリロード
-            plana_dir = 'PLANA'
             reloaded = []
             failed = []
 
-            for root, _, files in os.walk(plana_dir):
-                for file in files:
-                    if file.endswith('_cog.py'):
-                        module_path = os.path.join(root, file[:-3]).replace(os.sep, '.')
-                        try:
-                            await bot_instance.reload_extension(module_path)
-                            reloaded.append(module_path)
-                        except commands.ExtensionNotLoaded:
-                            try:
-                                await bot_instance.load_extension(module_path)
-                                reloaded.append(f"{module_path} (新規)")
-                            except Exception as e:
-                                failed.append(f"{module_path}: {e}")
-                        except Exception as e:
-                            failed.append(f"{module_path}: {e}")
+            for module_path in bot_instance.cogs_to_load:
+                try:
+                    await bot_instance.reload_extension(module_path)
+                    reloaded.append(module_path)
+                except commands.ExtensionNotLoaded:
+                    try:
+                        await bot_instance.load_extension(module_path)
+                        reloaded.append(f"{module_path} (新規ロード)")
+                    except Exception as e:
+                        failed.append(f"{module_path}: {e}")
+                except Exception as e:
+                    failed.append(f"{module_path}: {e}")
 
-            result_msg = f"✅ {len(reloaded)}個のCogをリロードしました。"
+            result_msg = f"✅ {len(reloaded)}個のCogをリロード/ロードしました。"
             if failed:
                 result_msg += f"\n❌ {len(failed)}個のCogでエラーが発生しました。"
 
