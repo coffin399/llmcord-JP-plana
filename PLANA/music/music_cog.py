@@ -16,14 +16,16 @@ from discord import app_commands
 from discord.ext import commands, tasks
 
 try:
-    from .ytdlp_wrapper import Track, extract as extract_audio_data, ensure_stream
-    from .error.errors import MusicCogExceptionHandler
+    from PLANA.music.plugin.ytdlp_wrapper import Track, extract as extract_audio_data, ensure_stream
+    from PLANA.music.error.errors import MusicCogExceptionHandler
+    from PLANA.music.plugin.audio_mixer import AudioMixer
 except ImportError as e:
     print(f"[CRITICAL] MusicCog: 必須コンポーネントのインポートに失敗しました。エラー: {e}")
     Track = None
     extract_audio_data = None
     ensure_stream = None
     MusicCogExceptionHandler = None
+    AudioMixer = None
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +89,7 @@ class GuildState:
         self.paused_at: Optional[float] = None
         self.is_seeking: bool = False
         self.is_loading: bool = False
+        self.mixer: Optional[AudioMixer] = None
 
     def update_activity(self):
         self.last_activity = datetime.now()
@@ -128,6 +131,9 @@ class GuildState:
             return
         self.cleanup_in_progress = True
         try:
+            if self.mixer:
+                self.mixer.stop()
+                self.mixer = None
             if self.voice_client:
                 try:
                     if self.voice_client.is_playing():
@@ -146,7 +152,7 @@ class GuildState:
 class MusicCog(commands.Cog, name="music_cog"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-        if not all((Track, extract_audio_data, ensure_stream, MusicCogExceptionHandler)):
+        if not all((Track, extract_audio_data, ensure_stream, MusicCogExceptionHandler, AudioMixer)):
             raise commands.ExtensionFailed(self.qualified_name, "必須コンポーネントのインポート失敗")
         self.config = self._load_bot_config()
         self.music_config = self.config.get('music', {})
@@ -188,6 +194,8 @@ class MusicCog(commands.Cog, name="music_cog"):
         for guild_id in list(self.guild_states.keys()):
             try:
                 state = self.guild_states[guild_id]
+                if state.mixer:
+                    state.mixer.stop()
                 if state.voice_client and state.voice_client.is_connected():
                     asyncio.create_task(state.voice_client.disconnect(force=True))
                 if state.auto_leave_task and not state.auto_leave_task.done():
@@ -330,34 +338,23 @@ class MusicCog(commands.Cog, name="music_cog"):
                 return None
             return vc
 
-    async def _wait_for_playback_to_finish(self, vc: discord.VoiceClient):
-        """ボイスクライアントの再生が終わるまで待機するヘルパー関数"""
-        while vc.is_playing():
-            await asyncio.sleep(0.2)
+    def mixer_finished_callback(self, error: Optional[Exception], guild_id: int):
+        if error:
+            logger.error(f"Guild {guild_id}: Mixer unexpectedly finished with error: {error}")
+        logger.info(f"Guild {guild_id}: Mixer has finished.")
+        state = self._get_guild_state(guild_id)
+        if state:
+            state.mixer = None
 
     async def _play_next_song(self, guild_id: int, seek_seconds: int = 0):
         state = self._get_guild_state(guild_id)
         if not state:
             return
 
-        if state.auto_leave_task and not state.auto_leave_task.done():
-            state.auto_leave_task.cancel()
-
-        is_seek_operation = seek_seconds > 0
-
-        # 1. MusicCogが「音楽再生中」と認識している場合は、シーク操作でない限り何もしない
-        if state.is_playing and not is_seek_operation:
+        if state.is_playing and not seek_seconds > 0:
             return
 
-        # 2. ボイスクライアントが何か（主にTTS）を再生中の場合、それが終わるまで待機する
-        if state.voice_client and state.voice_client.is_playing():
-            try:
-                await asyncio.wait_for(self._wait_for_playback_to_finish(state.voice_client), timeout=30.0)
-            except asyncio.TimeoutError:
-                logger.warning(f"Guild {guild_id}: TTS等の再生終了待機がタイムアウトしました。再生を強制します。")
-                if state.voice_client.is_connected():
-                    state.voice_client.stop()
-
+        is_seek_operation = seek_seconds > 0
         track_to_play: Optional[Track] = None
 
         if is_seek_operation and state.current_track:
@@ -374,14 +371,9 @@ class MusicCog(commands.Cog, name="music_cog"):
         if not track_to_play:
             state.current_track = None
             state.is_playing = False
-            state.is_seeking = False
             state.reset_playback_tracking()
-            guild = self.bot.get_guild(guild_id)
-            if state.voice_client and state.voice_client.is_connected():
-                logger.info(f"Guild {guild_id} ({guild.name if guild else ''}): Queue has ended. Disconnecting.")
-                if state.last_text_channel_id:
-                    await self._send_background_message(state.last_text_channel_id, "queue_ended")
-                await state.cleanup_voice_client()
+            if state.last_text_channel_id:
+                await self._send_background_message(state.last_text_channel_id, "queue_ended")
             return
 
         if not is_seek_operation:
@@ -396,79 +388,46 @@ class MusicCog(commands.Cog, name="music_cog"):
         state.paused_at = None
 
         try:
-            # ===== デバッグログ開始 =====
-            logger.info(f"[DEBUG] Guild {guild_id}: Track title: {track_to_play.title}")
-            logger.info(f"[DEBUG] Guild {guild_id}: Track URL: {track_to_play.url}")
-            logger.info(f"[DEBUG] Guild {guild_id}: Current stream_url: {track_to_play.stream_url}")
-
-            # ★★★ ニコニコ動画のローカルファイルチェック ★★★
             is_local_file = False
             if track_to_play.stream_url:
                 try:
                     is_local_file = Path(track_to_play.stream_url).is_file()
-                    logger.info(f"[DEBUG] Guild {guild_id}: Is local file check: {is_local_file}")
-                except Exception as path_error:
-                    logger.warning(f"[DEBUG] Guild {guild_id}: Path check error: {path_error}")
+                except Exception:
+                    pass
 
             if not is_local_file:
-                # ★★★ ローカルファイル以外は必ず ensure_stream で最新URLを取得 ★★★
-                logger.info(f"Guild {guild_id}: Fetching fresh stream URL for '{track_to_play.title}'")
-
-                try:
-                    updated_track = await ensure_stream(track_to_play)
-
-                    logger.info(f"[DEBUG] Guild {guild_id}: ensure_stream returned: {updated_track is not None}")
-                    if updated_track:
-                        logger.info(
-                            f"[DEBUG] Guild {guild_id}: New stream_url length: {len(updated_track.stream_url) if updated_track.stream_url else 0}")
-
-                    if not updated_track or not updated_track.stream_url:
-                        raise RuntimeError(
-                            f"'{track_to_play.title}' の有効なストリームURLを取得できませんでした。"
-                        )
-
-                    track_to_play.stream_url = updated_track.stream_url
-                    logger.info(
-                        f"Guild {guild_id}: Stream URL obtained successfully (length: {len(track_to_play.stream_url)})")
-
-                except Exception as stream_error:
-                    logger.error(
-                        f"Guild {guild_id}: Stream URL fetch failed: {stream_error}",
-                        exc_info=True
-                    )
-                    raise RuntimeError(
-                        f"ストリームURL取得エラー: {stream_error}"
-                    ) from stream_error
-            else:
-                logger.info(f"Guild {guild_id}: Using local file: {track_to_play.stream_url}")
-
-            # FFmpegでの再生開始
-            logger.info(
-                f"[DEBUG] Guild {guild_id}: Starting FFmpeg with stream_url length: {len(track_to_play.stream_url)}")
+                updated_track = await ensure_stream(track_to_play)
+                if not updated_track or not updated_track.stream_url:
+                    raise RuntimeError(f"'{track_to_play.title}' の有効なストリームURLを取得できませんでした。")
+                track_to_play.stream_url = updated_track.stream_url
 
             ffmpeg_before_opts = self.ffmpeg_before_options
             if seek_seconds > 0:
                 ffmpeg_before_opts = f"-ss {seek_seconds} {ffmpeg_before_opts}"
 
-            source = discord.PCMVolumeTransformer(
-                discord.FFmpegPCMAudio(
-                    track_to_play.stream_url,
-                    executable=self.ffmpeg_path,
-                    before_options=ffmpeg_before_opts,
-                    options=self.ffmpeg_options,
-                    stderr=subprocess.PIPE
-                ),
-                volume=state.volume
+            source = discord.FFmpegPCMAudio(
+                track_to_play.stream_url,
+                executable=self.ffmpeg_path,
+                before_options=ffmpeg_before_opts,
+                options=self.ffmpeg_options,
+                stderr=subprocess.PIPE
             )
-            state.voice_client.play(source, after=lambda e: self._song_finished_callback(e, guild_id))
+
+            if state.mixer is None:
+                state.mixer = AudioMixer()
+
+            await state.mixer.add_source('music', source, volume=state.volume)
+
+            # ▼▼▼ BUG FIX 1 ▼▼▼
+            # "Already playing audio"エラーを防ぐための修正。
+            # voice_client.play()は、ミキサーがまだ再生ソースとして設定されていない場合にのみ呼び出す。
+            # 一度設定されれば、以降は曲の追加/削除のみで対応する。
+            if state.voice_client and state.voice_client.source is not state.mixer:
+                state.voice_client.play(state.mixer, after=lambda e: self.mixer_finished_callback(e, guild_id))
+            # ▲▲▲ BUG FIX 1 END ▲▲▲
 
             if is_seek_operation:
                 state.is_seeking = False
-
-            guild = self.bot.get_guild(guild_id)
-            seek_info = f" (seeking to {format_duration(seek_seconds)})" if seek_seconds > 0 else ""
-            logger.info(
-                f"Guild {guild_id} ({guild.name if guild else ''}): Now playing - {track_to_play.title}{seek_info}")
 
             if state.last_text_channel_id and track_to_play.requester_id and not is_seek_operation:
                 try:
@@ -477,9 +436,7 @@ class MusicCog(commands.Cog, name="music_cog"):
                 except:
                     requester = None
                 await self._send_background_message(
-                    state.last_text_channel_id,
-                    "now_playing",
-                    title=track_to_play.title,
+                    state.last_text_channel_id, "now_playing", title=track_to_play.title,
                     duration=format_duration(track_to_play.duration),
                     requester_display_name=requester.display_name if requester else "不明"
                 )
@@ -500,11 +457,11 @@ class MusicCog(commands.Cog, name="music_cog"):
 
     def _song_finished_callback(self, error: Optional[Exception], guild_id: int):
         state = self._get_guild_state(guild_id)
-        if not state:
+        if not state or state.is_seeking:
             return
 
-        if state.is_seeking:
-            return
+        if state.mixer:
+            asyncio.run_coroutine_threadsafe(state.mixer.remove_source('music'), self.bot.loop)
 
         finished_track = state.current_track
         state.is_playing = False
@@ -545,15 +502,19 @@ class MusicCog(commands.Cog, name="music_cog"):
                 await state.voice_client.disconnect()
 
     async def _cleanup_guild_state(self, guild_id: int):
-        if guild_id in self.guild_states:
-            state = self.guild_states[guild_id]
+        # ▼▼▼ BUG FIX 2 ▼▼▼
+        # KeyErrorを防ぐための修正。
+        # popメソッドを使い、安全にギルドステートを取得・削除する。
+        # これにより、複数のクリーンアップ処理が同時に走ってもエラーにならない。
+        state = self.guild_states.pop(guild_id, None)
+        if state:
             await state.cleanup_voice_client()
             if state.auto_leave_task and not state.auto_leave_task.done():
                 state.auto_leave_task.cancel()
             await state.clear_queue()
-            del self.guild_states[guild_id]
             guild = self.bot.get_guild(guild_id)
             logger.info(f"Guild {guild_id} ({guild.name if guild else ''}): State cleaned up")
+        # ▲▲▲ BUG FIX 2 END ▲▲▲
 
     @commands.Cog.listener()
     async def on_ready(self):
@@ -612,7 +573,6 @@ class MusicCog(commands.Cog, name="music_cog"):
                 self.exception_handler.get_message("searching_for_song", query=query)
             )
 
-            # ★ 重要: ここでは stream_url は取得しない（extract のみ）
             extracted_media = await extract_audio_data(query, shuffle_playlist=False)
 
             if not extracted_media:
@@ -627,7 +587,6 @@ class MusicCog(commands.Cog, name="music_cog"):
             for track in tracks:
                 if state.queue.qsize() < self.max_queue_size:
                     track.requester_id = interaction.user.id
-                    # ★ stream_url を明示的に None にして、再生時に取得させる
                     track.stream_url = None
                     await state.queue.put(track)
                     if added_count == 0:
@@ -692,18 +651,9 @@ class MusicCog(commands.Cog, name="music_cog"):
             return
 
         state.is_seeking = True
-
-        if state.voice_client and state.voice_client.is_playing():
-            state.voice_client.stop()
-
+        self._song_finished_callback(None, interaction.guild.id)
         await asyncio.sleep(0.5)
-
-        try:
-            updated_track = await ensure_stream(state.current_track)
-            if updated_track and updated_track.stream_url:
-                state.current_track.stream_url = updated_track.stream_url
-        except Exception as e:
-            logger.warning(f"Guild {interaction.guild.id}: Stream refresh failed during seek: {e}")
+        state.is_seeking = False
 
         await self._send_response(interaction, "seeked_to_position", position=format_duration(seek_seconds))
         await self._play_next_song(interaction.guild.id, seek_seconds=seek_seconds)
@@ -759,7 +709,7 @@ class MusicCog(commands.Cog, name="music_cog"):
             return
 
         await self._send_response(interaction, "skipped_song", title=state.current_track.title)
-        state.voice_client.stop()
+        self._song_finished_callback(None, interaction.guild.id)
 
     @app_commands.command(name="stop", description="再生を停止し、キューをクリアします。")
     async def stop_slash(self, interaction: discord.Interaction):
@@ -774,6 +724,9 @@ class MusicCog(commands.Cog, name="music_cog"):
 
         state.loop_mode = LoopMode.OFF
         await state.clear_queue()
+        if state.mixer:
+            state.mixer.stop()
+            state.mixer = None
         if state.voice_client and state.voice_client.is_playing():
             state.voice_client.stop()
         state.is_playing = False
@@ -795,7 +748,7 @@ class MusicCog(commands.Cog, name="music_cog"):
                 await self._send_response(interaction, "bot_not_in_voice_channel", ephemeral=True)
                 return
             await self._send_response(interaction, "leaving_voice_channel")
-            await state.cleanup_voice_client()
+            await self._cleanup_guild_state(interaction.guild.id)
 
     @app_commands.command(name="queue", description="現在の再生キューを表示します。")
     async def queue_slash(self, interaction: discord.Interaction):
@@ -1062,8 +1015,8 @@ class MusicCog(commands.Cog, name="music_cog"):
 
         state.volume = level / 100.0
         state.update_activity()
-        if state.voice_client and state.voice_client.source:
-            state.voice_client.source.volume = state.volume
+        if state.mixer:
+            await state.mixer.set_volume('music', state.volume)
         await self._send_response(interaction, "volume_set", volume=level)
 
     @app_commands.command(name="loop", description="ループ再生モードを設定します。")

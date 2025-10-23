@@ -8,7 +8,7 @@ import discord
 from discord import app_commands
 
 if TYPE_CHECKING:
-    from PLANA.music.ytdlp_wrapper import Track
+    from PLANA.music.plugin.ytdlp_wrapper import Track
 
 logger = logging.getLogger(__name__)
 
