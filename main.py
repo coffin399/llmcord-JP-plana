@@ -345,7 +345,7 @@ if __name__ == "__main__":
     intents.guild_messages = True
     intents.dm_messages = True
     intents.voice_states = True
-    intents.message_content = False
+    intents.message_content = False #特権インテントの申請が受理されたらTrueに変更
     intents.members = False
     intents.presences = False
     allowed_mentions = discord.AllowedMentions(everyone=False, users=True, roles=False, replied_user=True)
