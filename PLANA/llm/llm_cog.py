@@ -511,8 +511,12 @@ class LLMCog(commands.Cog, name="LLM"):
         try:
             llm_client = await self._get_llm_client_for_channel(message.channel.id)
             if not llm_client:
+                # 修正点：デフォルトのエラーメッセージを一度変数に格納する
+                default_error_msg = 'LLM client is not available for this channel.\nこのチャンネルではLLMクライアントが利用できません。'
+                error_msg = self.llm_config.get('error_msg', {}).get('general_error', default_error_msg)
+
                 await message.reply(
-                    content=f"❌ **Error / エラー** ❌\n\n{self.llm_config.get('error_msg', {}).get('general_error', 'LLM client is not available for this channel.\nこのチャンネルではLLMクライアントが利用できません。')}",
+                    content=f"❌ **Error / エラー** ❌\n\n{error_msg}",  # 修正点：変数を使ってf-stringを構成する
                     view=self._create_support_view(), silent=True)
                 return
         except Exception as e:
@@ -577,7 +581,6 @@ class LLMCog(commands.Cog, name="LLM"):
                 for msg in sent_messages: self.message_to_thread[msg.id] = thread_id
                 self._cleanup_old_threads()
 
-                # --- ▼▼▼ 新規追加箇所 ▼▼▼ ---
                 # TTS Cogにカスタムイベントを発火させる
                 try:
                     self.bot.dispatch("llm_response_complete", sent_messages, llm_response)
