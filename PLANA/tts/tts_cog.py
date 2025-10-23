@@ -12,8 +12,10 @@ import time
 
 try:
     from PLANA.music.music_cog import MusicCog
+    from PLANA.music.audio_mixer import TTSAudioSource
 except ImportError:
     MusicCog = None
+    TTSAudioSource = None
 
 try:
     from PLANA.tts.error.errors import TTSCogExceptionHandler
@@ -512,7 +514,13 @@ class TTSCog(commands.Cog, name="tts_cog"):
                     return False
 
                 wav_data = await response.read()
-                tts_source = discord.FFmpegPCMAudio(io.BytesIO(wav_data), pipe=True)
+
+                tts_source = TTSAudioSource(
+                    io.BytesIO(wav_data),
+                    text=text,
+                    guild_id=guild.id,
+                    pipe=True
+                )
 
                 source_name = f"tts_{int(time.time() * 1000)}"
                 await music_state.mixer.add_source(source_name, tts_source, volume=1.0)
@@ -540,7 +548,14 @@ class TTSCog(commands.Cog, name="tts_cog"):
             async with self.session.post(endpoint, params=payload) as response:
                 if response.status == 200:
                     wav_data = await response.read()
-                    source = discord.FFmpegPCMAudio(io.BytesIO(wav_data), pipe=True)
+
+                    source = TTSAudioSource(
+                        io.BytesIO(wav_data),
+                        text=text,
+                        guild_id=guild.id,
+                        pipe=True
+                    )
+
                     voice_client.play(source)
                     return True
                 else:

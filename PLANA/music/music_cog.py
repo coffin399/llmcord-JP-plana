@@ -16,9 +16,9 @@ from discord import app_commands
 from discord.ext import commands, tasks
 
 try:
-    from PLANA.music.plugin.ytdlp_wrapper import Track, extract as extract_audio_data, ensure_stream
+    from PLANA.music.plugins.ytdlp_wrapper import Track, extract as extract_audio_data, ensure_stream
     from PLANA.music.error.errors import MusicCogExceptionHandler
-    from PLANA.music.plugin.audio_mixer import AudioMixer
+    from PLANA.music.plugins.audio_mixer import AudioMixer, MusicAudioSource
 except ImportError as e:
     print(f"[CRITICAL] MusicCog: 必須コンポーネントのインポートに失敗しました。エラー: {e}")
     Track = None
@@ -26,6 +26,7 @@ except ImportError as e:
     ensure_stream = None
     MusicCogExceptionHandler = None
     AudioMixer = None
+    MusicAudioSource = None
 
 logger = logging.getLogger(__name__)
 
@@ -152,7 +153,7 @@ class GuildState:
 class MusicCog(commands.Cog, name="music_cog"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-        if not all((Track, extract_audio_data, ensure_stream, MusicCogExceptionHandler, AudioMixer)):
+        if not all((Track, extract_audio_data, ensure_stream, MusicCogExceptionHandler, AudioMixer, MusicAudioSource)):
             raise commands.ExtensionFailed(self.qualified_name, "必須コンポーネントのインポート失敗")
         self.config = self._load_bot_config()
         self.music_config = self.config.get('music', {})
@@ -405,8 +406,10 @@ class MusicCog(commands.Cog, name="music_cog"):
             if seek_seconds > 0:
                 ffmpeg_before_opts = f"-ss {seek_seconds} {ffmpeg_before_opts}"
 
-            source = discord.FFmpegPCMAudio(
+            source = MusicAudioSource(
                 track_to_play.stream_url,
+                title=track_to_play.title,
+                guild_id=guild_id,
                 executable=self.ffmpeg_path,
                 before_options=ffmpeg_before_opts,
                 options=self.ffmpeg_options,
@@ -418,13 +421,8 @@ class MusicCog(commands.Cog, name="music_cog"):
 
             await state.mixer.add_source('music', source, volume=state.volume)
 
-            # ▼▼▼ BUG FIX 1 ▼▼▼
-            # "Already playing audio"エラーを防ぐための修正。
-            # voice_client.play()は、ミキサーがまだ再生ソースとして設定されていない場合にのみ呼び出す。
-            # 一度設定されれば、以降は曲の追加/削除のみで対応する。
             if state.voice_client and state.voice_client.source is not state.mixer:
                 state.voice_client.play(state.mixer, after=lambda e: self.mixer_finished_callback(e, guild_id))
-            # ▲▲▲ BUG FIX 1 END ▲▲▲
 
             if is_seek_operation:
                 state.is_seeking = False
@@ -502,10 +500,6 @@ class MusicCog(commands.Cog, name="music_cog"):
                 await state.voice_client.disconnect()
 
     async def _cleanup_guild_state(self, guild_id: int):
-        # ▼▼▼ BUG FIX 2 ▼▼▼
-        # KeyErrorを防ぐための修正。
-        # popメソッドを使い、安全にギルドステートを取得・削除する。
-        # これにより、複数のクリーンアップ処理が同時に走ってもエラーにならない。
         state = self.guild_states.pop(guild_id, None)
         if state:
             await state.cleanup_voice_client()
@@ -514,7 +508,6 @@ class MusicCog(commands.Cog, name="music_cog"):
             await state.clear_queue()
             guild = self.bot.get_guild(guild_id)
             logger.info(f"Guild {guild_id} ({guild.name if guild else ''}): State cleaned up")
-        # ▲▲▲ BUG FIX 2 END ▲▲▲
 
     @commands.Cog.listener()
     async def on_ready(self):
