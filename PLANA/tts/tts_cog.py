@@ -122,8 +122,11 @@ class TTSCog(commands.Cog, name="tts_cog"):
         if guild_id_str not in self.speech_settings:
             self.speech_settings[guild_id_str] = {
                 "speech_channel_id": None,
-                "auto_join_users": []
+                "auto_join_users": [],
+                "enable_notifications": True
             }
+        # 以前のバージョンから設定ファイルを引き継いだ場合でもキーが存在するようにする
+        self.speech_settings[guild_id_str].setdefault("enable_notifications", True)
         return self.speech_settings[guild_id_str]
 
     def _get_channel_settings(self, channel_id: int) -> Dict:
@@ -281,7 +284,8 @@ class TTSCog(commands.Cog, name="tts_cog"):
                 self._save_speech_settings()
                 return
 
-        if not self.config.get('enable_join_leave_notice', True):
+        # グローバル設定の代わりにギルドごとの設定を確認
+        if not guild_settings.get("enable_notifications", True):
             return
 
         text_to_say = None
@@ -360,6 +364,41 @@ class TTSCog(commands.Cog, name="tts_cog"):
         auto_join_users.remove(interaction.user.id)
         self._save_speech_settings()
         await interaction.response.send_message("✅ 自動参加設定を解除しました。", ephemeral=False)
+
+    # --- ここから変更 ---
+    notification_group = app_commands.Group(
+        name="join-leave-notification",
+        description="VCへの入退室通知に関するコマンド / Commands for voice channel join/leave notifications"
+    )
+
+    @notification_group.command(
+        name="enable",
+        description="VCへの入退室を音声で通知するようにします / Enables voice notifications for members joining/leaving the VC"
+    )
+    async def enable_notification(self, interaction: discord.Interaction):
+        guild_settings = self._get_guild_speech_settings(interaction.guild.id)
+        if guild_settings.get("enable_notifications", True):
+            await interaction.response.send_message("ℹ️ 入退室通知は既に有効です。 / Join/leave notifications are already enabled.", ephemeral=True)
+            return
+
+        guild_settings["enable_notifications"] = True
+        self._save_speech_settings()
+        await interaction.response.send_message("✅ VCへの入退室通知を有効にしました。 / Enabled join/leave notifications.", ephemeral=False)
+
+    @notification_group.command(
+        name="disable",
+        description="VCへの入退室通知を無効にします / Disables voice notifications for members joining/leaving the VC"
+    )
+    async def disable_notification(self, interaction: discord.Interaction):
+        guild_settings = self._get_guild_speech_settings(interaction.guild.id)
+        if not guild_settings.get("enable_notifications", True):
+            await interaction.response.send_message("ℹ️ 入退室通知は既に無効です。 / Join/leave notifications are already disabled.", ephemeral=True)
+            return
+
+        guild_settings["enable_notifications"] = False
+        self._save_speech_settings()
+        await interaction.response.send_message("✅ VCへの入退室通知を無効にしました。 / Disabled join/leave notifications.", ephemeral=False)
+    # --- ここまで変更 ---
 
     @app_commands.command(name="say", description="テキストを音声で読み上げます")
     @app_commands.describe(text="読み上げるテキスト", model_id="モデルID (省略時はチャンネル設定)",
