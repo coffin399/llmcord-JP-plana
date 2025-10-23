@@ -250,11 +250,32 @@ class LLMCog(commands.Cog, name="LLM"):
         return client
 
     def _initialize_search_agent(self) -> Optional[SearchAgent]:
-        if 'search' not in self.llm_config.get('active_tools', []) or not SearchAgent: return None
-        search_config = self.llm_config.get('search_agent', {})
-        if not search_config.get('api_key'):
-            logger.error("SearchAgent config (api_key) is missing. Search will be disabled.")
+        if 'search' not in self.llm_config.get('active_tools', []) or not SearchAgent:
             return None
+
+        search_config = self.llm_config.get('search_agent', {})
+
+        # 複数のAPIキー (api_key1, api_key2, ...) に対応
+        api_keys = []
+        i = 1
+        while True:
+            key = search_config.get(f'api_key{i}')
+            if key:
+                api_keys.append(key)
+                i += 1
+            else:
+                break
+
+        # フォールバック: api_key1 がない場合は api_key を確認
+        if not api_keys and search_config.get('api_key'):
+            api_keys.append(search_config['api_key'])
+
+        if not api_keys:
+            logger.error("SearchAgent config (api_key/api_key1) is missing. Search will be disabled.")
+            return None
+
+        logger.info(f"Loaded {len(api_keys)} API key(s) for SearchAgent.")
+
         try:
             return SearchAgent(self.bot)
         except Exception as e:
