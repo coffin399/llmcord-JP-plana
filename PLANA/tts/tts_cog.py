@@ -1,3 +1,4 @@
+# PLANA/tts/tts_cog.py
 import discord
 from discord.ext import commands
 from discord import app_commands
@@ -10,13 +11,22 @@ from pathlib import Path
 from typing import Dict, Tuple, Optional, List, Any
 import subprocess
 import wave
+from pydub import AudioSegment
 
 try:
-    from .music_cog import MusicCog, GuildState as MusicGuildState, Track
+    # music_cog と同じ階層にある ytdlp_wrapper から直接インポートを試みる
+    from PLANA.music.ytdlp_wrapper import ensure_stream, Track
+    from PLANA.music.music_cog import MusicCog, GuildState as MusicGuildState
 except ImportError:
-    MusicCog = commands.Cog
-    MusicGuildState = any
-    Track = any
+    # 従来のインポートも念のため残す
+    try:
+        from .music_cog import MusicCog, GuildState as MusicGuildState, Track
+        from .ytdlp_wrapper import ensure_stream
+    except ImportError:
+        MusicCog = commands.Cog
+        MusicGuildState = any
+        Track = any
+        ensure_stream = None
 
 try:
     from PLANA.tts.error.errors import TTSCogExceptionHandler
@@ -215,7 +225,6 @@ class TTSCog(commands.Cog, name="tts_cog"):
 
     @commands.Cog.listener()
     async def on_llm_response_complete(self, response_messages: list, text_to_speak: str):
-        # response_messagesはリストなので、空でないか確認し、最初の要素を取得します
         if not response_messages:
             print("[TTSCog] on_llm_response_complete received an empty message list.")
             return
@@ -228,7 +237,6 @@ class TTSCog(commands.Cog, name="tts_cog"):
         guild_settings = self._get_guild_speech_settings(guild.id)
         speech_channel_id = guild_settings.get("speech_channel_id")
 
-        # response_message.channel.id を first_message.channel.id に変更
         if first_message.channel.id != speech_channel_id:
             return
 
@@ -497,21 +505,127 @@ class TTSCog(commands.Cog, name="tts_cog"):
         music_cog: MusicCog = self.bot.get_cog("music_cog")
         music_state: MusicGuildState = music_cog._get_guild_state(guild.id) if music_cog else None
 
-        if music_state and music_state.is_playing and music_state.current_track:
-            print(f"[TTSCog-Mixing] Music detected. Starting mix for guild {guild.id}")
-            return await self._handle_mixed_say_logic(
+        # 読み込み中でもなく、再生中でトラック情報がある場合のみミキシング/割り込み
+        should_interrupt = (
+            music_state and
+            not music_state.is_loading and
+            music_state.is_playing and
+            music_state.current_track
+        )
+
+        if should_interrupt:
+            print(f"[TTSCog-PydubMix] Music detected. Starting pydub mix for guild {guild.id}")
+            return await self._handle_pydub_mixing_logic(
                 guild, text, model_id, style, style_weight, speed, interaction
             )
         else:
-            print(f"[TTSCog-Normal] No music detected. Starting normal TTS for guild {guild.id}")
-            if music_state and music_state.is_playing and music_state.current_track:
-                current_position = music_state.get_current_position()
-                self.interrupted_states[guild.id] = (music_state.current_track, current_position)
-                music_state.is_seeking = True
-                voice_client.stop()
+            # 読み込み中、または音楽が再生されていない場合は、単純にTTSを再生
+            print(f"[TTSCog-Normal] No music or music is loading. Starting normal TTS for guild {guild.id}")
             return await self._handle_normal_say_logic(
                 guild, text, model_id, style, style_weight, speed, interaction
             )
+
+    async def _handle_pydub_mixing_logic(self, guild: discord.Guild, text: str, model_id: int, style: str,
+                                         style_weight: float, speed: float,
+                                         interaction: Optional[discord.Interaction] = None) -> bool:
+
+        if not ensure_stream:
+            print("[TTSCog-PydubMix] `ensure_stream` could not be imported. Mixing is disabled.")
+            return False
+
+        voice_client = guild.voice_client
+        music_cog: MusicCog = self.bot.get_cog("music_cog")
+        music_state: MusicGuildState = music_cog._get_guild_state(guild.id)
+
+        endpoint, payload = f"{self.api_url}/voice", {"text": text, "model_id": model_id, "style": style,
+                                                      "style_weight": style_weight, "speed": speed, "encoding": "wav"}
+        try:
+            async with self.session.post(endpoint, params=payload) as response:
+                if response.status != 200:
+                    return False
+                tts_wav_data = await response.read()
+                tts_audio = AudioSegment.from_wav(io.BytesIO(tts_wav_data))
+        except Exception as e:
+            print(f"TTS API Error: {e}")
+            return False
+
+        track = music_state.current_track
+        position = music_state.get_current_position()
+        music_state.is_seeking = True
+        if voice_client.is_playing():
+            voice_client.stop()
+
+        try:
+            print(f"[TTSCog-PydubMix] Refreshing stream URL for '{track.title}'")
+            updated_track = await ensure_stream(track)
+            if not (updated_track and updated_track.stream_url):
+                raise RuntimeError("Failed to refresh stream URL.")
+            track.stream_url = updated_track.stream_url
+            print("[TTSCog-PydubMix] Stream URL refreshed successfully.")
+        except Exception as e:
+            print(f"Failed to refresh stream URL: {e}")
+            self.interrupted_states[guild.id] = (track, position)
+            return await self._handle_normal_say_logic(guild, text, model_id, style, style_weight, speed, interaction)
+
+        tts_duration_sec = len(tts_audio) / 1000.0
+        ffmpeg_executable = music_cog.ffmpeg_path
+
+        args = [
+            ffmpeg_executable,
+            '-ss', str(position),
+            '-i', track.stream_url,
+            '-t', str(tts_duration_sec + 0.5),
+            '-f', 's16le', '-ar', '48000', '-ac', '2',
+            '-'
+        ]
+        process = await asyncio.create_subprocess_exec(
+            *args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        music_chunk_data, stderr = await process.communicate()
+
+        if process.returncode != 0 or not music_chunk_data:
+            print(f"Failed to get music chunk. FFmpeg stderr: {stderr.decode()}")
+            self.interrupted_states[guild.id] = (track, position)
+            return await self._handle_normal_say_logic(guild, text, model_id, style, style_weight, speed, interaction)
+
+        try:
+            music_chunk = AudioSegment(
+                data=music_chunk_data,
+                sample_width=2,
+                frame_rate=48000,
+                channels=2
+            )
+
+            music_chunk = music_chunk - 8
+
+            mixed_audio = music_chunk.overlay(tts_audio)
+
+            mixed_raw_data = mixed_audio.raw_data
+
+        except Exception as e:
+            print(f"Pydub mixing error: {e}")
+            self.interrupted_states[guild.id] = (track, position)
+            return await self._handle_normal_say_logic(guild, text, model_id, style, style_weight, speed, interaction)
+
+        source = discord.PCMAudio(io.BytesIO(mixed_raw_data))
+        player = discord.PCMVolumeTransformer(source, volume=music_state.volume)
+
+        async def after_mixing_playback(error):
+            if error:
+                print(f"Pydub mix playback error: {error}")
+
+            new_position = position + tts_duration_sec
+            print(f"Mix finished. Resuming music at {new_position:.2f}s")
+
+            await music_cog._play_next_song(guild.id, seek_seconds=int(new_position))
+
+        voice_client.play(player, after=lambda e: asyncio.run_coroutine_threadsafe(
+            after_mixing_playback(e), self.bot.loop).result()
+                          )
+
+        return True
 
     async def _handle_normal_say_logic(self, guild: discord.Guild, text: str, model_id: int, style: str,
                                        style_weight: float,
@@ -565,98 +679,6 @@ class TTSCog(commands.Cog, name="tts_cog"):
                         music_state.is_seeking = False
             return False
 
-    async def _handle_mixed_say_logic(self, guild: discord.Guild, text: str, model_id: int, style: str,
-                                      style_weight: float,
-                                      speed: float, interaction: Optional[discord.Interaction] = None) -> bool:
-        voice_client = guild.voice_client
-        music_cog: MusicCog = self.bot.get_cog("music_cog")
-        music_state: MusicGuildState = music_cog._get_guild_state(guild.id)
-
-        track = music_state.current_track
-        position = music_state.get_current_position()
-
-        music_state.is_seeking = True
-        if voice_client.is_playing():
-            voice_client.stop()
-
-        endpoint, payload = f"{self.api_url}/voice", {"text": text, "model_id": model_id, "style": style,
-                                                      "style_weight": style_weight, "speed": speed, "encoding": "wav"}
-        try:
-            async with self.session.post(endpoint, params=payload) as response:
-                if response.status != 200:
-                    error_text = await response.text()
-                    if interaction: await interaction.followup.send(
-                        f"❌ 音声生成エラー: {response.status}\n```{error_text[:200]}```", ephemeral=True)
-                    music_state.is_seeking = False
-                    return False
-                tts_wav_data = await response.read()
-        except Exception as e:
-            if interaction: await interaction.followup.send(f"❌ TTSリクエストエラー: {e}", ephemeral=True)
-            music_state.is_seeking = False
-            return False
-
-        try:
-            with wave.open(io.BytesIO(tts_wav_data), 'rb') as wf:
-                tts_duration = wf.getnframes() / float(wf.getframerate())
-        except Exception:
-            tts_duration = 5.0
-
-        ffmpeg_executable = music_cog.ffmpeg_path
-        ffmpeg_options = [
-            '-i', track.stream_url,
-            '-ss', str(position),
-            '-i', 'pipe:0',
-            '-filter_complex', '[0:a]volume=0.6[a0];[1:a]volume=1.0[a1];[a0][a1]amix=inputs=2:duration=shortest[out]',
-            '-map', '[out]',
-            '-f', 's16le',
-            '-ar', '48000',
-            '-ac', '2',
-            '-'
-        ]
-
-        try:
-            process = subprocess.Popen(
-                [ffmpeg_executable] + ffmpeg_options,
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE
-            )
-
-            try:
-                process.stdin.write(tts_wav_data)
-                process.stdin.flush()
-                process.stdin.close()
-            except (BrokenPipeError, OSError):
-                print(f"[TTSCog-Mixing] FFmpeg stdin write error for guild {guild.id}")
-                music_state.is_seeking = False
-                await music_cog._play_next_song(guild.id, seek_seconds=position)
-                return False
-
-            source = discord.PCMAudio(process.stdout)
-            player = discord.PCMVolumeTransformer(source, volume=music_state.volume)
-
-            async def after_mixing_playback(error):
-                if error:
-                    print(f"[TTSCog-Mixing] Playback error for guild {guild.id}: {error}")
-
-                process.kill()
-
-                new_position = position + tts_duration
-                print(f"[TTSCog-Mixing] Mix finished for guild {guild.id}. Resuming music at {new_position:.2f}s")
-
-                await music_cog._play_next_song(guild.id, seek_seconds=int(new_position))
-
-            voice_client.play(player, after=lambda e: asyncio.run_coroutine_threadsafe(after_mixing_playback(e),
-                                                                                       self.bot.loop).result())
-            return True
-
-        except Exception as e:
-            print(f"[TTSCog-Mixing] FFmpeg process error for guild {guild.id}: {e}")
-            if interaction: await interaction.followup.send(f"❌ ミキシング処理エラー: {e}", ephemeral=True)
-            music_state.is_seeking = False
-            await music_cog._play_next_song(guild.id, seek_seconds=position)
-            return False
-
     async def _tts_after_playback(self, error: Exception, guild_id: int):
         guild = self.bot.get_guild(guild_id)
         if not guild:
@@ -665,13 +687,13 @@ class TTSCog(commands.Cog, name="tts_cog"):
             return
 
         if error:
-            print(f"[TTSCog] 再生エラー (guild {guild.id}): {error}")
+            print(f"[TTSCog] 再生エラー (guild {guild_id}): {error}")
 
         if guild_id in self.interrupted_states:
             interrupted_track, position = self.interrupted_states.pop(guild_id)
             music_cog: MusicCog = self.bot.get_cog("music_cog")
 
-            print(f"[TTSCog] 音楽を再開します (guild {guild.id}) 位置: {position}秒")
+            print(f"[TTSCog] 音楽を再開します (guild {guild_id}) 位置: {position}秒")
 
             if music_cog:
                 music_state = music_cog._get_guild_state(guild_id)
@@ -682,11 +704,11 @@ class TTSCog(commands.Cog, name="tts_cog"):
                     if music_state:
                         music_state.is_seeking = False
                     print(
-                        f"[TTSCog] 音楽の再開をスキップしました (guild {guild.id}): MusicStateまたはVCが見つかりません。")
+                        f"[TTSCog] 音楽の再開をスキップしました (guild {guild_id}): MusicStateまたはVCが見つかりません。")
             else:
-                print(f"[TTSCog] 音楽の再開をスキップしました (guild {guild.id}): MusicCogが見つかりません。")
+                print(f"[TTSCog] 音楽の再開をスキップしました (guild {guild_id}): MusicCogが見つかりません。")
         else:
-            print(f"[TTSCog] TTS再生完了 (guild {guild.id}). 再開する音楽はありません。")
+            print(f"[TTSCog] TTS再生完了 (guild {guild_id}). 再開する音楽はありません。")
 
 
 async def setup(bot: commands.Bot):

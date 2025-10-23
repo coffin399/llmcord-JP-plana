@@ -230,6 +230,7 @@ music:
     skipped_song: "⏭️ Skipped **{title}**."
     nothing_to_skip: "❌ Nothing to skip."
     volume_set: "🔊 Volume set to **{volume}%**."
+    searching_for_song: "🚀 searching **{query}** ..."
 
     # Seek
     seeked_to_position: "⏩ Seeked to **{position}**."

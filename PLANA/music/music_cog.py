@@ -1,3 +1,4 @@
+# PLANA/music/music_cog.py
 import asyncio
 import gc
 import logging
@@ -8,7 +9,7 @@ from enum import Enum, auto
 from pathlib import Path
 from typing import Dict, Optional
 import time
-
+import subprocess
 import discord
 import yaml
 from discord import app_commands
@@ -85,6 +86,7 @@ class GuildState:
         self.seek_position: int = 0
         self.paused_at: Optional[float] = None
         self.is_seeking: bool = False
+        self.is_loading: bool = False
 
     def update_activity(self):
         self.last_activity = datetime.now()
@@ -328,6 +330,11 @@ class MusicCog(commands.Cog, name="music_cog"):
                 return None
             return vc
 
+    async def _wait_for_playback_to_finish(self, vc: discord.VoiceClient):
+        """ボイスクライアントの再生が終わるまで待機するヘルパー関数"""
+        while vc.is_playing():
+            await asyncio.sleep(0.2)
+
     async def _play_next_song(self, guild_id: int, seek_seconds: int = 0):
         state = self._get_guild_state(guild_id)
         if not state:
@@ -338,9 +345,18 @@ class MusicCog(commands.Cog, name="music_cog"):
 
         is_seek_operation = seek_seconds > 0
 
-        if not is_seek_operation:
-            if state.is_paused or (state.voice_client and state.voice_client.is_playing()):
-                return
+        # 1. MusicCogが「音楽再生中」と認識している場合は、シーク操作でない限り何もしない
+        if state.is_playing and not is_seek_operation:
+            return
+
+        # 2. ボイスクライアントが何か（主にTTS）を再生中の場合、それが終わるまで待機する
+        if state.voice_client and state.voice_client.is_playing():
+            try:
+                await asyncio.wait_for(self._wait_for_playback_to_finish(state.voice_client), timeout=30.0)
+            except asyncio.TimeoutError:
+                logger.warning(f"Guild {guild_id}: TTS等の再生終了待機がタイムアウトしました。再生を強制します。")
+                if state.voice_client.is_connected():
+                    state.voice_client.stop()
 
         track_to_play: Optional[Track] = None
 
@@ -348,7 +364,7 @@ class MusicCog(commands.Cog, name="music_cog"):
             track_to_play = state.current_track
         elif state.loop_mode == LoopMode.ONE and state.current_track and not is_seek_operation:
             track_to_play = state.current_track
-        elif not state.queue.empty() and not is_seek_operation:
+        elif not state.is_playing and not state.queue.empty() and not is_seek_operation:
             try:
                 track_to_play = await state.queue.get()
                 state.queue.task_done()
@@ -361,10 +377,11 @@ class MusicCog(commands.Cog, name="music_cog"):
             state.is_seeking = False
             state.reset_playback_tracking()
             guild = self.bot.get_guild(guild_id)
-            logger.info(f"Guild {guild_id} ({guild.name if guild else ''}): Queue has ended. Disconnecting.")
-            if state.last_text_channel_id:
-                await self._send_background_message(state.last_text_channel_id, "queue_ended")
-            await state.cleanup_voice_client()
+            if state.voice_client and state.voice_client.is_connected():
+                logger.info(f"Guild {guild_id} ({guild.name if guild else ''}): Queue has ended. Disconnecting.")
+                if state.last_text_channel_id:
+                    await self._send_background_message(state.last_text_channel_id, "queue_ended")
+                await state.cleanup_voice_client()
             return
 
         if not is_seek_operation:
@@ -379,11 +396,55 @@ class MusicCog(commands.Cog, name="music_cog"):
         state.paused_at = None
 
         try:
-            if not track_to_play.stream_url or not Path(track_to_play.stream_url).is_file():
-                updated_track = await ensure_stream(track_to_play)
-                if not (updated_track and updated_track.stream_url):
-                    raise RuntimeError("ストリームURLの取得/更新に失敗しました。")
-                track_to_play.stream_url = updated_track.stream_url
+            # ===== デバッグログ開始 =====
+            logger.info(f"[DEBUG] Guild {guild_id}: Track title: {track_to_play.title}")
+            logger.info(f"[DEBUG] Guild {guild_id}: Track URL: {track_to_play.url}")
+            logger.info(f"[DEBUG] Guild {guild_id}: Current stream_url: {track_to_play.stream_url}")
+
+            # ★★★ ニコニコ動画のローカルファイルチェック ★★★
+            is_local_file = False
+            if track_to_play.stream_url:
+                try:
+                    is_local_file = Path(track_to_play.stream_url).is_file()
+                    logger.info(f"[DEBUG] Guild {guild_id}: Is local file check: {is_local_file}")
+                except Exception as path_error:
+                    logger.warning(f"[DEBUG] Guild {guild_id}: Path check error: {path_error}")
+
+            if not is_local_file:
+                # ★★★ ローカルファイル以外は必ず ensure_stream で最新URLを取得 ★★★
+                logger.info(f"Guild {guild_id}: Fetching fresh stream URL for '{track_to_play.title}'")
+
+                try:
+                    updated_track = await ensure_stream(track_to_play)
+
+                    logger.info(f"[DEBUG] Guild {guild_id}: ensure_stream returned: {updated_track is not None}")
+                    if updated_track:
+                        logger.info(
+                            f"[DEBUG] Guild {guild_id}: New stream_url length: {len(updated_track.stream_url) if updated_track.stream_url else 0}")
+
+                    if not updated_track or not updated_track.stream_url:
+                        raise RuntimeError(
+                            f"'{track_to_play.title}' の有効なストリームURLを取得できませんでした。"
+                        )
+
+                    track_to_play.stream_url = updated_track.stream_url
+                    logger.info(
+                        f"Guild {guild_id}: Stream URL obtained successfully (length: {len(track_to_play.stream_url)})")
+
+                except Exception as stream_error:
+                    logger.error(
+                        f"Guild {guild_id}: Stream URL fetch failed: {stream_error}",
+                        exc_info=True
+                    )
+                    raise RuntimeError(
+                        f"ストリームURL取得エラー: {stream_error}"
+                    ) from stream_error
+            else:
+                logger.info(f"Guild {guild_id}: Using local file: {track_to_play.stream_url}")
+
+            # FFmpegでの再生開始
+            logger.info(
+                f"[DEBUG] Guild {guild_id}: Starting FFmpeg with stream_url length: {len(track_to_play.stream_url)}")
 
             ffmpeg_before_opts = self.ffmpeg_before_options
             if seek_seconds > 0:
@@ -394,7 +455,8 @@ class MusicCog(commands.Cog, name="music_cog"):
                     track_to_play.stream_url,
                     executable=self.ffmpeg_path,
                     before_options=ffmpeg_before_opts,
-                    options=self.ffmpeg_options
+                    options=self.ffmpeg_options,
+                    stderr=subprocess.PIPE
                 ),
                 volume=state.volume
             )
@@ -423,6 +485,7 @@ class MusicCog(commands.Cog, name="music_cog"):
                 )
         except Exception as e:
             guild = self.bot.get_guild(guild_id)
+            logger.error(f"Guild {guild_id} ({guild.name if guild else ''}): Playback error: {e}", exc_info=True)
             error_message = self.exception_handler.handle_error(e, guild)
             if state.last_text_channel_id:
                 await self._send_background_message(state.last_text_channel_id, "error_message_wrapper",
@@ -431,6 +494,7 @@ class MusicCog(commands.Cog, name="music_cog"):
                 await state.queue.put(track_to_play)
             state.current_track = None
             state.is_seeking = False
+            state.is_playing = False
             state.reset_playback_tracking()
             asyncio.create_task(self._play_next_song(guild_id))
 
@@ -525,6 +589,7 @@ class MusicCog(commands.Cog, name="music_cog"):
     @app_commands.describe(query="再生したい曲のタイトル、またはURL")
     async def play_slash(self, interaction: discord.Interaction, query: str):
         await interaction.response.defer()
+
         state = self._get_guild_state(interaction.guild.id)
         if not state:
             await interaction.followup.send("サーバーの上限に達しています。", ephemeral=True)
@@ -535,43 +600,69 @@ class MusicCog(commands.Cog, name="music_cog"):
             return
 
         if state.queue.qsize() >= self.max_queue_size:
-            await self._send_response(interaction, "max_queue_size_reached", ephemeral=True,
+            await self._send_response(interaction, "max_queue_size_reached",
                                       max_size=self.max_queue_size)
             return
 
+        was_playing = state.is_playing or state.is_loading
+        state.is_loading = True
+
         try:
+            await interaction.followup.send(
+                self.exception_handler.get_message("searching_for_song", query=query)
+            )
+
+            # ★ 重要: ここでは stream_url は取得しない（extract のみ）
             extracted_media = await extract_audio_data(query, shuffle_playlist=False)
+
+            if not extracted_media:
+                await interaction.channel.send(
+                    self.exception_handler.get_message("search_no_results", query=query)
+                )
+                return
+
+            tracks = extracted_media if isinstance(extracted_media, list) else [extracted_media]
+            added_count, first_track = 0, None
+
+            for track in tracks:
+                if state.queue.qsize() < self.max_queue_size:
+                    track.requester_id = interaction.user.id
+                    # ★ stream_url を明示的に None にして、再生時に取得させる
+                    track.stream_url = None
+                    await state.queue.put(track)
+                    if added_count == 0:
+                        first_track = track
+                    added_count += 1
+                else:
+                    await interaction.channel.send(
+                        self.exception_handler.get_message("max_queue_size_reached",
+                                                           max_size=self.max_queue_size)
+                    )
+                    break
+
+            if added_count > 1:
+                await interaction.channel.send(
+                    self.exception_handler.get_message("added_playlist_to_queue",
+                                                       count=added_count)
+                )
+            elif added_count == 1 and first_track:
+                await interaction.channel.send(
+                    self.exception_handler.get_message("added_to_queue",
+                                                       title=first_track.title,
+                                                       duration=format_duration(first_track.duration),
+                                                       requester_display_name=interaction.user.display_name)
+                )
+
+            if not was_playing:
+                await self._play_next_song(interaction.guild.id)
+
         except Exception as e:
-            await self._handle_error(interaction, e)
-            return
-
-        if not extracted_media:
-            await self._send_response(interaction, "search_no_results", ephemeral=True, query=query)
-            return
-
-        tracks = extracted_media if isinstance(extracted_media, list) else [extracted_media]
-        added_count, first_track = 0, None
-        for track in tracks:
-            if state.queue.qsize() < self.max_queue_size:
-                track.requester_id = interaction.user.id
-                await state.queue.put(track)
-                if added_count == 0:
-                    first_track = track
-                added_count += 1
-            else:
-                await self._send_response(interaction, "max_queue_size_reached", ephemeral=True,
-                                          max_size=self.max_queue_size)
-                break
-
-        if added_count > 1:
-            await self._send_response(interaction, "added_playlist_to_queue", count=added_count)
-        elif added_count == 1 and first_track:
-            await self._send_response(interaction, "added_to_queue", title=first_track.title,
-                                      duration=format_duration(first_track.duration),
-                                      requester_display_name=interaction.user.display_name)
-
-        if not state.is_playing:
-            await self._play_next_song(interaction.guild.id)
+            error_message = self.exception_handler.handle_error(e, interaction.guild)
+            await interaction.channel.send(
+                self.exception_handler.get_message("error_message_wrapper", error=error_message)
+            )
+        finally:
+            state.is_loading = False
 
     @app_commands.command(name="seek", description="再生位置を指定した時刻に移動します。")
     @app_commands.describe(time="移動先の時刻 (例: 1:30 または 90 秒)")
