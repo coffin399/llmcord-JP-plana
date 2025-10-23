@@ -333,7 +333,7 @@ class LLMCog(commands.Cog, name="LLM"):
                                                               current_time=current_time_str,
                                                               available_commands=available_commands)
             else:
-                logger.warning("⚠️ {available_commands} not in template")
+                #logger.warning("⚠️ {available_commands} not in template")
                 system_prompt = system_prompt_template.format(current_date=current_date_str,
                                                               current_time=current_time_str)
         except (KeyError, ValueError) as e:
@@ -347,12 +347,45 @@ class LLMCog(commands.Cog, name="LLM"):
         return system_prompt
 
     def get_tools_definition(self) -> Optional[List[Dict[str, Any]]]:
-        definitions, active_tools = [], self.llm_config.get('active_tools', [])
-        if 'search' in active_tools and self.search_agent: definitions.append(self.search_agent.tool_spec)
-        if 'user_bio' in active_tools and self.bio_manager: definitions.append(self.bio_manager.tool_spec)
-        if 'memory' in active_tools and self.memory_manager: definitions.append(self.memory_manager.tool_spec)
-        if 'image_generator' in active_tools and self.image_generator: definitions.append(
-            self.image_generator.tool_spec)
+        definitions = []
+        active_tools = self.llm_config.get('active_tools', [])
+
+        logger.info(f"🔍 [TOOLS] Active tools from config: {active_tools}")
+        logger.debug(f"🔍 [TOOLS] Plugin status: search_agent={self.search_agent is not None}, "
+                     f"bio_manager={self.bio_manager is not None}, "
+                     f"memory_manager={self.memory_manager is not None}, "
+                     f"image_generator={self.image_generator is not None}")
+
+        if 'search' in active_tools:
+            if self.search_agent:
+                definitions.append(self.search_agent.tool_spec)
+                #logger.info(f"✅ [TOOLS] Added 'search' tool (name: {self.search_agent.tool_spec['function']['name']})")
+            else:
+                logger.warning(f"⚠️ [TOOLS] 'search' is in active_tools but search_agent is None")
+
+        if 'user_bio' in active_tools:
+            if self.bio_manager:
+                definitions.append(self.bio_manager.tool_spec)
+                #logger.info(f"✅ [TOOLS] Added 'user_bio' tool (name: {self.bio_manager.tool_spec['function']['name']})")
+            else:
+                logger.warning(f"⚠️ [TOOLS] 'user_bio' is in active_tools but bio_manager is None")
+
+        if 'memory' in active_tools:
+            if self.memory_manager:
+                definitions.append(self.memory_manager.tool_spec)
+                #logger.info(f"✅ [TOOLS] Added 'memory' tool (name: {self.memory_manager.tool_spec['function']['name']})")
+            else:
+                logger.warning(f"⚠️ [TOOLS] 'memory' is in active_tools but memory_manager is None")
+
+        if 'image_generator' in active_tools:
+            if self.image_generator:
+                definitions.append(self.image_generator.tool_spec)
+                #logger.info(f"✅ [TOOLS] Added 'image_generator' tool (name: {self.image_generator.tool_spec['function']['name']})")
+            else:
+                logger.warning(f"⚠️ [TOOLS] 'image_generator' is in active_tools but image_generator is None")
+
+        logger.info(f"🔧 [TOOLS] Total tools to return: {len(definitions)}")
+
         return definitions or None
 
     async def _get_conversation_thread_id(self, message: discord.Message) -> int:
@@ -675,8 +708,8 @@ class LLMCog(commands.Cog, name="LLM"):
             if len(full_response_text) <= SAFE_MESSAGE_LENGTH:
                 for attempt in range(max_final_retries):
                     try:
-                        if full_response_text != sent_message.content: await sent_message.edit(
-                            content=full_response_text, embed=None, view=None)
+                        if full_response_text != sent_message.content:
+                            await sent_message.edit(content=full_response_text, embed=None, view=None)
                         logger.debug(f"Final message updated successfully (attempt {attempt + 1})")
                         break
                     except discord.NotFound:
@@ -695,8 +728,11 @@ class LLMCog(commands.Cog, name="LLM"):
                 return [sent_message], full_response_text, getattr(llm_client, 'last_used_key_index', None)
             else:
                 logger.debug(f"Response is {len(full_response_text)} chars, splitting into multiple messages")
-                chunks, all_messages = _split_message_smartly(full_response_text, SAFE_MESSAGE_LENGTH), []
-                first_chunk = chunks
+                # 修正: タプル作成のバグを修正
+                chunks = _split_message_smartly(full_response_text, SAFE_MESSAGE_LENGTH)
+                all_messages = []
+                first_chunk = chunks[0]  # 最初のチャンクを取得
+
                 for attempt in range(max_final_retries):
                     try:
                         await sent_message.edit(content=first_chunk, embed=None, view=None)
@@ -731,11 +767,13 @@ class LLMCog(commands.Cog, name="LLM"):
             finish_reason = getattr(llm_client, 'last_finish_reason', None)
             if finish_reason == 'content_filter':
                 error_msg = self.llm_config.get('error_msg', {}).get('content_filter_error',
-                                                                     "The response was blocked by the content filter.\nAIの応答がコンテンツフィルターによってブロックされました。"); logger.warning(
+                                                                     "The response was blocked by the content filter.\nAIの応答がコンテンツフィルターによってブロックされました。");
+                logger.warning(
                     f"⚠️ Empty response from LLM due to content filter.")
             else:
                 error_msg = self.llm_config.get('error_msg', {}).get('empty_response_error',
-                                                                     "There was no response from the AI. Please try rephrasing your message.\nAIから応答がありませんでした。表現を変えてもう一度お試しください。"); logger.warning(
+                                                                     "There was no response from the AI. Please try rephrasing your message.\nAIから応答がありませんでした。表現を変えてもう一度お試しください。");
+                logger.warning(
                     f"⚠️ Empty response from LLM (Finish reason: {finish_reason})")
             await sent_message.edit(content=f"❌ **Error / エラー** ❌\n\n{error_msg}", embed=None,
                                     view=self._create_support_view())
@@ -760,28 +798,50 @@ class LLMCog(commands.Cog, name="LLM"):
     async def _llm_stream_and_tool_handler(self, messages: List[Dict[str, Any]], client: openai.AsyncOpenAI,
                                            channel_id: int, user_id: int) -> AsyncGenerator[str, None]:
         model_string = self.channel_models.get(str(channel_id)) or self.llm_config.get('model')
-        if model_string and 'gemini' in model_string.lower():
-            original_messages_for_log, messages, combined_system_prompt = messages, *self._convert_messages_for_gemini(
-                messages)
+        is_gemini = model_string and 'gemini' in model_string.lower()
+
+        if is_gemini:
+            original_messages_for_log = messages
+            messages, combined_system_prompt = self._convert_messages_for_gemini(messages)
             if combined_system_prompt:
                 logger.info(f"🔄 [GEMINI ADAPTER] Converting system prompts for Gemini model '{model_string}'.")
                 logger.debug(
                     f"  - Combined system prompt ({len(combined_system_prompt)} chars): {combined_system_prompt.replace(chr(10), ' ')[:300]}...")
                 logger.debug(f"  - Message count changed: {len(original_messages_for_log)} -> {len(messages)}")
-        current_messages, max_iterations, extra_params = messages.copy(), self.llm_config.get('max_tool_iterations',
-                                                                                              5), self.llm_config.get(
-            'extra_api_parameters', {})
+
+        current_messages = messages.copy()
+        max_iterations = self.llm_config.get('max_tool_iterations', 5)
+        extra_params = self.llm_config.get('extra_api_parameters', {})
+
         for iteration in range(max_iterations):
             logger.debug(f"Starting LLM API call (iteration {iteration + 1}/{max_iterations})")
             tools_def = self.get_tools_definition()
-            api_kwargs = {"model": client.model_name_for_api_calls, "messages": current_messages, "stream": True,
-                          "temperature": extra_params.get('temperature', 0.7),
-                          "max_tokens": extra_params.get('max_tokens', 4096)}
-            if tools_def: api_kwargs["tools"], api_kwargs["tool_choice"] = tools_def, "auto"; logger.debug(
-                f"Available tools: {[t['function']['name'] for t in tools_def]}")
-            stream, provider_name, api_keys, num_keys = None, client.provider_name, self.provider_api_keys.get(
-                client.provider_name, []), len(self.provider_api_keys.get(client.provider_name, []))
-            if num_keys == 0: raise Exception(f"No API keys available for provider {provider_name}")
+
+            api_kwargs = {
+                "model": client.model_name_for_api_calls,
+                "messages": current_messages,
+                "stream": True,
+                "temperature": extra_params.get('temperature', 0.7),
+                "max_tokens": extra_params.get('max_tokens', 4096)
+            }
+
+            # ✅ Gemini でも tools を正しく渡す
+            if tools_def:
+                api_kwargs["tools"] = tools_def
+                api_kwargs["tool_choice"] = "auto"
+                logger.info(
+                    f"🔧 [TOOLS] Passing {len(tools_def)} tools to API: {[t['function']['name'] for t in tools_def]}")
+            else:
+                logger.warning(f"⚠️ [TOOLS] No tools available to pass to API")
+
+            stream = None
+            provider_name = client.provider_name
+            api_keys = self.provider_api_keys.get(client.provider_name, [])
+            num_keys = len(api_keys)
+
+            if num_keys == 0:
+                raise Exception(f"No API keys available for provider {provider_name}")
+
             for attempt in range(num_keys):
                 try:
                     current_key_index = self.provider_key_index.get(provider_name, 0)
@@ -792,9 +852,8 @@ class LLMCog(commands.Cog, name="LLM"):
                     logger.debug(f"Stream connection established successfully.")
                     break
                 except (openai.RateLimitError, openai.InternalServerError) as e:
-                    error_type, status_code = "Rate limit" if isinstance(e,
-                                                                         openai.RateLimitError) else "Server", getattr(
-                        e, 'status_code', 'N/A')
+                    error_type = "Rate limit" if isinstance(e, openai.RateLimitError) else "Server"
+                    status_code = getattr(e, 'status_code', 'N/A')
                     logger.warning(
                         f"⚠️ {error_type} error ({status_code}) for provider '{provider_name}' with key index {current_key_index}. Details: {e}")
                     if attempt + 1 >= num_keys:
@@ -806,60 +865,92 @@ class LLMCog(commands.Cog, name="LLM"):
                     logger.info(
                         f"🔄 Switching to next API key for provider '{provider_name}' (index: {next_key_index}) and retrying.")
                     new_client = openai.AsyncOpenAI(base_url=client.base_url, api_key=next_key)
-                    new_client.model_name_for_api_calls, new_client.provider_name = client.model_name_for_api_calls, client.provider_name
-                    client, self.llm_clients[
-                        f"{provider_name}/{client.model_name_for_api_calls}"] = new_client, new_client
+                    new_client.model_name_for_api_calls = client.model_name_for_api_calls
+                    new_client.provider_name = client.provider_name
+                    client = new_client
+                    self.llm_clients[f"{provider_name}/{client.model_name_for_api_calls}"] = new_client
                     await asyncio.sleep(1)
                 except Exception as e:
                     logger.error(f"❌ Unhandled error calling LLM API: {e}", exc_info=True)
                     raise
-            if stream is None: raise Exception("Failed to establish stream with any API key.")
-            tool_calls_buffer, assistant_response_content, finish_reason = [], "", None
+
+            if stream is None:
+                raise Exception("Failed to establish stream with any API key.")
+
+            tool_calls_buffer = []
+            assistant_response_content = ""
+            finish_reason = None
+
             async for chunk in stream:
                 if not chunk.choices:
                     continue
                 choice = chunk.choices[0]
-                if choice.finish_reason: finish_reason = choice.finish_reason
+                if choice.finish_reason:
+                    finish_reason = choice.finish_reason
                 delta = choice.delta
-                if delta and delta.content: assistant_response_content += delta.content; yield delta.content
+                if delta and delta.content:
+                    assistant_response_content += delta.content
+                    yield delta.content
                 if delta and delta.tool_calls:
                     for tool_call_chunk in delta.tool_calls:
                         chunk_index = tool_call_chunk.index if tool_call_chunk.index is not None else 0
-                        if len(tool_calls_buffer) <= chunk_index: tool_calls_buffer.append(
-                            {"id": "", "type": "function", "function": {"name": "", "arguments": ""}})
+                        if len(tool_calls_buffer) <= chunk_index:
+                            tool_calls_buffer.append(
+                                {"id": "", "type": "function", "function": {"name": "", "arguments": ""}})
                         buffer = tool_calls_buffer[chunk_index]
-                        if tool_call_chunk.id: buffer["id"] = tool_call_chunk.id
+                        if tool_call_chunk.id:
+                            buffer["id"] = tool_call_chunk.id
                         if tool_call_chunk.function:
-                            if tool_call_chunk.function.name: buffer["function"]["name"] = tool_call_chunk.function.name
-                            if tool_call_chunk.function.arguments: buffer["function"][
-                                "arguments"] += tool_call_chunk.function.arguments
+                            if tool_call_chunk.function.name:
+                                buffer["function"]["name"] = tool_call_chunk.function.name
+                            if tool_call_chunk.function.arguments:
+                                buffer["function"]["arguments"] += tool_call_chunk.function.arguments
+
             client.last_finish_reason = finish_reason
             assistant_message = {"role": "assistant", "content": assistant_response_content or None}
-            if tool_calls_buffer: assistant_message["tool_calls"] = tool_calls_buffer
+            if tool_calls_buffer:
+                assistant_message["tool_calls"] = tool_calls_buffer
             current_messages.append(assistant_message)
+
             if not tool_calls_buffer:
                 logger.debug(f"No tool calls, returning final response (Finish reason: {finish_reason})")
                 return
+
             logger.info(f"🔧 [TOOL] LLM requested {len(tool_calls_buffer)} tool call(s)")
-            for tc in tool_calls_buffer: logger.debug(
-                f"Tool call details: {tc['function']['name']} with args: {tc['function']['arguments'][:200]}")
-            tool_calls_obj = [SimpleNamespace(id=tc['id'], function=SimpleNamespace(name=tc['function']['name'],
-                                                                                    arguments=tc['function'][
-                                                                                        'arguments'])) for tc in
-                              tool_calls_buffer]
+            for tc in tool_calls_buffer:
+                logger.debug(
+                    f"Tool call details: {tc['function']['name']} with args: {tc['function']['arguments'][:200]}")
+
+            tool_calls_obj = [
+                SimpleNamespace(
+                    id=tc['id'],
+                    function=SimpleNamespace(
+                        name=tc['function']['name'],
+                        arguments=tc['function']['arguments']
+                    )
+                ) for tc in tool_calls_buffer
+            ]
             await self._process_tool_calls(tool_calls_obj, current_messages, channel_id, user_id)
+
         logger.warning(f"⚠️ Tool processing exceeded max iterations ({max_iterations})")
         yield self.llm_config.get('error_msg', {}).get('tool_loop_timeout',
-                                                       "Tool processing exceeded max iterations.\nツールの処理が最大反復回数を超えました。")
+                                                       "Tool processing exceeded max iterations.\nツールの処理が最大反復回数を超えました.")
 
     async def _process_tool_calls(self, tool_calls: List[Any], messages: List[Dict[str, Any]], channel_id: int,
                                   user_id: int) -> None:
         for tool_call in tool_calls:
-            function_name, error_content, tool_response_content = tool_call.function.name, None, ""
+            raw_function_name = tool_call.function.name
+            error_content = None
+            tool_response_content = ""
+
+            # ✅ Gemini の "default_api.search" → "search" に正規化
+            function_name = raw_function_name.split('.')[-1] if '.' in raw_function_name else raw_function_name
+
             try:
                 function_args = json.loads(tool_call.function.arguments)
-                logger.info(f"🔧 [TOOL] Executing {function_name}")
+                logger.info(f"🔧 [TOOL] Executing {raw_function_name} (normalized: {function_name})")
                 logger.debug(f"🔧 [TOOL] Arguments: {json.dumps(function_args, ensure_ascii=False, indent=2)}")
+
                 if self.search_agent and function_name == self.search_agent.name:
                     tool_response_content = await self.search_agent.run(arguments=function_args, bot=self.bot,
                                                                         channel_id=channel_id)
@@ -876,7 +967,7 @@ class LLMCog(commands.Cog, name="LLM"):
                                                                            channel_id=channel_id)
                     logger.debug(f"🔧 [TOOL] Result:\n{tool_response_content}")
                 else:
-                    logger.warning(f"⚠️ Unsupported tool called: {function_name}")
+                    logger.warning(f"⚠️ Unsupported tool called: {raw_function_name} (normalized: {function_name})")
                     error_content = f"Error: Tool '{function_name}' is not available."
             except json.JSONDecodeError as e:
                 logger.error(f"❌ Error decoding tool arguments for {function_name}: {e}", exc_info=True)
@@ -893,6 +984,7 @@ class LLMCog(commands.Cog, name="LLM"):
             except Exception as e:
                 logger.error(f"❌ Unexpected error during tool call for {function_name}: {e}", exc_info=True)
                 error_content = f"[Tool Error]\nAn unexpected error occurred: {str(e)}"
+
             final_content = error_content if error_content else tool_response_content
             logger.debug(f"🔧 [TOOL] Sending tool response back to LLM (length: {len(final_content)} chars)")
             messages.append(
