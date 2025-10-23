@@ -5,7 +5,6 @@ openai
 pyyaml
 google-genai
 PyNaCl
-google-generativeai
 yt-dlp
 akinator
 google-api-python-client
@@ -17,4 +16,3 @@ japanize-matplotlib
 cartopy
 langdetect
 pillow
-pydub
