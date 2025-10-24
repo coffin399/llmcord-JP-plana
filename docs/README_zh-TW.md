@@ -61,14 +61,17 @@
 
 ## ✨ 主要功能
 
-### 🗣️ AI對話 (LLM)
+### 🤖 AI對話 (LLM)
 透過提及機器人（`@PLANA`）或回覆機器人的訊息來開始與AI的對話。
 
+*   **多種AI模型：** OpenAI GPT-4o、Google Gemini 2.5 Pro、NVIDIA NIM、Mistral等
 *   **持續對話：** 透過持續回覆保持上下文的對話。
 *   **圖像識別：** 在訊息中附加圖片，AI將嘗試理解圖像內容（如果模型支援視覺）。
+*   **圖像生成：** 使用Stable Diffusion WebUI Forge進行高品質圖像生成
 *   **工具使用（網路搜尋）：** 當AI判斷需要時，會在網際網路上搜尋資訊並用於回應（需要Google Custom Search API金鑰）。
 *   **對話歷史管理：** 使用 `/clear_history` 指令重置當前頻道的對話歷史。
 *   **可自訂的AI個性：** 透過編輯 `config.yaml` 中的系統提示詞，自由更改AI的基本性格和回應風格。
+*   **多語言支援：** 自動適應用戶語言
 
 <p align="center">
   <img src="https://i.imgur.com/wjdPNFQ.png" alt="PLANA MODEL CHANGE">
@@ -111,7 +114,7 @@ PLANA具有進階個性設定和記憶功能，使對話更加豐富。
 ### 🎶 高級音樂播放
 在語音頻道中享受高品質音樂。
 
-*   **支援多種來源：** 可以播放來自YouTube、SoundCloud URL或搜尋查詢的音樂。
+*   **支援多種來源：** 可以播放來自YouTube、SoundCloud、Niconico等平台的音樂，支援URL或搜尋查詢。
 *   **播放控制：** 使用直觀的指令進行操作，如 `/play`、`/pause`、`/resume`、`/stop`、`/skip`、`/volume`。
 *   **高級佇列管理：** 使用 `/queue` 查看佇列，`/shuffle` 隨機播放，`/remove` 刪除單曲，`/clear` 清空全部。
 *   **循環播放：** 使用 `/loop` 指令在無循環、單曲循環和佇列循環之間切換。
@@ -136,6 +139,15 @@ PLANA具有進階個性設定和記憶功能，使對話更加豐富。
 *   **/support:** 顯示開發者的聯絡資訊。
 *   **/roll, /check, /diceroll:** 擲骰子功能。
 *   **/timer:** 計時器功能。
+
+### 🎯 遊戲追蹤器
+*   **Valorant:** 玩家統計追蹤
+*   **Rainbow Six Siege:** 遊戲統計顯示
+
+### 🔊 語音合成（TTS）
+*   **Style-Bert-VITS2:** 高品質日語語音合成
+*   **加入/離開通知:** 語音頻道中的語音通知
+*   **可自訂:** 語速、風格、情感調整
 
 ### 📥 媒體下載器
 從YouTube等網站下載影片或音訊，並產生臨時共享連結。
