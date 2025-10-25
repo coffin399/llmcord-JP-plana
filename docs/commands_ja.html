@@ -1,0 +1,628 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PLANA Bot コマンドリスト</title>
+    <style>
+        body { font-family: sans-serif; margin: 2em; }
+        table { border-collapse: collapse; width: 100%; margin-bottom: 2em; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        th { background-color: #f2f2f2; }
+        h1, h2 { border-bottom: 2px solid #ccc; padding-bottom: 10px; }
+        code { background-color: #eee; padding: 2px 4px; border-radius: 4px; }
+    </style>
+</head>
+<body>
+    <h1>PLANA Bot コマンドリスト</h1>
+    <p><a href="commands_en.html">English Version</a></p>
+
+    <h2>画像検索</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>コマンド</th>
+          <th>説明</th>
+          <th>パラメータ</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>/meow</code></td>
+          <td>可愛い猫の画像を表示します。</td>
+          <td>-</td>
+        </tr>
+        <tr>
+          <td><code>/yandere</code></td>
+          <td>Yandereから画像を検索します (NSFWチャンネル専用)。</td>
+          <td><code>query</code>: 検索タグ (スペース区切り)</td>
+        </tr>
+        <tr>
+          <td><code>/danbooru</code></td>
+          <td>Danbooruから画像を検索します (NSFWチャンネル専用)。</td>
+          <td><code>query</code>: 検索タグ (スペース区切り)</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>LLM</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>コマンド</th>
+          <th>説明</th>
+          <th>パラメータ</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>/chat</code></td>
+          <td>AIとメンションなしで対話します。</td>
+          <td><code>message</code>, <code>image_url</code> (任意)</td>
+        </tr>
+        <tr>
+          <td><code>/set-ai-bio</code></td>
+          <td>このチャンネルのAIの性格/役割(bio)を設定します。</td>
+          <td><code>bio</code></td>
+        </tr>
+        <tr>
+          <td><code>/show-ai-bio</code></td>
+          <td>このチャンネルのAIの現在のbioを表示します。</td>
+          <td>-</td>
+        </tr>
+        <tr>
+          <td><code>/reset-ai-bio</code></td>
+          <td>このチャンネルのAIのbioをデフォルトに戻します。</td>
+          <td>-</td>
+        </tr>
+        <tr>
+          <td><code>/set-user-bio</code></td>
+          <td>AIにあなたの情報を記憶させます。</td>
+          <td><code>bio</code>, <code>mode</code> ('上書き' or '追記')</td>
+        </tr>
+        <tr>
+          <td><code>/show-user-bio</code></td>
+          <td>AIが記憶しているあなたの情報を表示します。</td>
+          <td>-</td>
+        </tr>
+        <tr>
+          <td><code>/reset-user-bio</code></td>
+          <td>AIが記憶しているあなたの情報をすべて削除します。</td>
+          <td>-</td>
+        </tr>
+        <tr>
+          <td><code>/memory-save</code></td>
+          <td>グローバル共有メモリに情報を保存します。</td>
+          <td><code>key</code>, <code>value</code></td>
+        </tr>
+        <tr>
+          <td><code>/memory-list</code></td>
+          <td>グローバル共有メモリの情報を一覧表示します。</td>
+          <td>-</td>
+        </tr>
+        <tr>
+          <td><code>/memory-delete</code></td>
+          <td>グローバル共有メモリから情報を削除します。</td>
+          <td><code>key</code></td>
+        </tr>
+        <tr>
+          <td><code>/switch-models</code></td>
+          <td>このチャンネルで使用するAIモデルを切り替えます。</td>
+          <td><code>model</code></td>
+        </tr>
+        <tr>
+          <td><code>/switch-models-default-server</code></td>
+          <td>このチャンネルのAIモデルをサーバーのデフォルト設定に戻します。</td>
+          <td>-</td>
+        </tr>
+        <tr>
+          <td><code>/switch-image-model</code></td>
+          <td>このチャンネルの画像生成モデルを切り替えます。</td>
+          <td><code>model</code></td>
+        </tr>
+        <tr>
+          <td><code>/reset-image-model</code></td>
+          <td>このチャンネルの画像生成モデルをデフォルトに戻します。</td>
+          <td>-</td>
+        </tr>
+        <tr>
+          <td><code>/show-image-model</code></td>
+          <td>このチャンネルの現在の画像生成モデルを表示します。</td>
+          <td>-</td>
+        </tr>
+        <tr>
+          <td><code>/list-image-models</code></td>
+          <td>利用可能な画像生成モデルの一覧を表示します。</td>
+          <td><code>provider</code> (任意)</td>
+        </tr>
+        <tr>
+          <td><code>/llm_help</code></td>
+          <td>LLM (AI対話) 機能のヘルプと利用ガイドラインを表示します。</td>
+          <td>-</td>
+        </tr>
+        <tr>
+          <td><code>/clear_history</code></td>
+          <td>現在の会話スレッドの履歴をクリアします。</td>
+          <td>-</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>メディアダウンローダー</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>コマンド</th>
+          <th>説明</th>
+          <th>パラメータ</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>/ytdlp_audio</code></td>
+          <td>音声をダウンロードし、Google Drive経由で共有します。</td>
+          <td><code>query</code>, <code>audio_format</code></td>
+        </tr>
+        <tr>
+          <td><code>/ytdlp_video</code></td>
+          <td>動画をダウンロードし、Google Drive経由で共有します。</td>
+          <td><code>query</code></td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>音楽</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>コマンド</th>
+          <th>説明</th>
+          <th>パラメータ</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>/play</code></td>
+          <td>曲を再生またはキューに追加します。</td>
+          <td><code>query</code></td>
+        </tr>
+        <tr>
+          <td><code>/seek</code></td>
+          <td>再生位置を指定した時刻に移動します。</td>
+          <td><code>time</code></td>
+        </tr>
+        <tr>
+          <td><code>/pause</code></td>
+          <td>再生を一時停止します。</td>
+          <td>-</td>
+        </tr>
+        <tr>
+          <td><code>/resume</code></td>
+          <td>一時停止中の再生を再開します。</td>
+          <td>-</td>
+        </tr>
+        <tr>
+          <td><code>/skip</code></td>
+          <td>再生中の曲をスキップします。</td>
+          <td>-</td>
+        </tr>
+        <tr>
+          <td><code>/stop</code></td>
+          <td>再生を停止し、キューをクリアします。</td>
+          <td>-</td>
+        </tr>
+        <tr>
+          <td><code>/leave</code></td>
+          <td>ボットをボイスチャンネルから切断します。</td>
+          <td>-</td>
+        </tr>
+        <tr>
+          <td><code>/queue</code></td>
+          <td>現在の再生キューを表示します。</td>
+          <td>-</td>
+        </tr>
+        <tr>
+          <td><code>/nowplaying</code></td>
+          <td>現在再生中の曲の情報を表示します。</td>
+          <td>-</td>
+        </tr>
+        <tr>
+          <td><code>/shuffle</code></td>
+          <td>再生キューをシャッフルします。</td>
+          <td>-</td>
+        </tr>
+        <tr>
+          <td><code>/clear</code></td>
+          <td>再生キューを空にします。</td>
+          <td>-</td>
+        </tr>
+        <tr>
+          <td><code>/remove</code></td>
+          <td>キューから指定した番号の曲を削除します。</td>
+          <td><code>index</code></td>
+        </tr>
+        <tr>
+          <td><code>/volume</code></td>
+          <td>音量を変更します (0-200)。</td>
+          <td><code>level</code></td>
+        </tr>
+        <tr>
+          <td><code>/loop</code></td>
+          <td>ループ再生モードを設定します。</td>
+          <td><code>mode</code> ('off', 'one', or 'all')</td>
+        </tr>
+        <tr>
+          <td><code>/join</code></td>
+          <td>ボットをあなたのいるボイスチャンネルに接続します。</td>
+          <td>-</td>
+        </tr>
+        <tr>
+          <td><code>/music_help</code></td>
+          <td>音楽機能のコマンド一覧と使い方を表示します。</td>
+          <td>-</td>
+        </tr>
+        <tr>
+          <td><code>/reload music_cog</code></td>
+          <td>音楽Cogを再読み込みして、問題をリセットします。</td>
+          <td>-</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>地震・津波情報</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>コマンド</th>
+          <th>説明</th>
+          <th>パラメータ</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>/earthquake_channel</code></td>
+          <td>地震・津波情報の通知チャンネルを設定します。</td>
+          <td><code>channel</code>, <code>info_type</code></td>
+        </tr>
+        <tr>
+          <td><code>/earthquake_status</code></td>
+          <td>地震・津波情報システムの状態を確認します。</td>
+          <td>-</td>
+        </tr>
+        <tr>
+          <td><code>/earthquake_test</code></td>
+          <td>地震・津波情報のテスト通知を送信します。</td>
+          <td><code>info_type</code>, <code>max_scale</code> (任意), <code>tsunami_level</code> (任意)</td>
+        </tr>
+        <tr>
+          <td><code>/earthquake_remove</code></td>
+          <td>地震・津波情報の通知設定を削除します。</td>
+          <td><code>info_type</code></td>
+        </tr>
+        <tr>
+          <td><code>/earthquake_help</code></td>
+          <td>このシステムのヘルプを表示します。</td>
+          <td>-</td>
+        </tr>
+        <tr>
+          <td><code>/earthquake_map</code></td>
+          <td>最近の地震を日本地図上に表示します。</td>
+          <td><code>limit</code> (任意), <code>min_scale</code> (任意), <code>hours</code> (任意)</td>
+        </tr>
+        <tr>
+          <td><code>/earthquake_history</code></td>
+          <td>最近の地震情報を表示します。</td>
+          <td><code>limit</code> (任意), <code>min_scale</code> (任意)</td>
+        </tr>
+        <tr>
+          <td><code>/earthquake_debug</code></td>
+          <td>通知設定の詳細診断。</td>
+          <td>-</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>Twitch通知</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>コマンド</th>
+          <th>説明</th>
+          <th>パラメータ</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>/twitch_set</code></td>
+          <td>Twitch配信通知を設定します。</td>
+          <td><code>twitch_url</code>, <code>notification_channel</code>, <code>message</code> (任意)</td>
+        </tr>
+        <tr>
+          <td><code>/twitch_remove</code></td>
+          <td>Twitch配信通知の設定を解除します。</td>
+          <td><code>twitch_channel</code></td>
+        </tr>
+        <tr>
+          <td><code>/twitch_test</code></td>
+          <td>Twitch配信通知のテストメッセージを送信します。</td>
+          <td><code>twitch_channel</code></td>
+        </tr>
+        <tr>
+          <td><code>/twitch_list</code></td>
+          <td>設定されているTwitch通知の一覧を表示します。</td>
+          <td>-</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>タイマー</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>コマンド</th>
+          <th>説明</th>
+          <th>パラメータ</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>/timer start</code></td>
+          <td>タイマーを開始します。</td>
+          <td>-</td>
+        </tr>
+        <tr>
+          <td><code>/timer stop</code></td>
+          <td>タイマーを停止し、経過時間を表示します。</td>
+          <td>-</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>R6Sトラッカー</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>コマンド</th>
+          <th>説明</th>
+          <th>パラメータ</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>/r6s-stats</code></td>
+          <td>R6Sプレイヤーの統計情報を表示します。</td>
+          <td><code>username</code>, <code>platform</code></td>
+        </tr>
+        <tr>
+          <td><code>/r6s-compare</code></td>
+          <td>2人のプレイヤーの統計情報を比較します。</td>
+          <td><code>player1</code>, <code>player2</code>, <code>platform</code></td>
+        </tr>
+        <tr>
+          <td><code>/r6s-operator</code></td>
+          <td>R6Sオペレーターの情報を検索します。</td>
+          <td><code>name</code> (任意), <code>role</code> (任意)</td>
+        </tr>
+        <tr>
+          <td><code>/r6s-server-status</code></td>
+          <td>R6Sのサーバー状態を確認します。</td>
+          <td>-</td>
+        </tr>
+        <tr>
+          <td><code>/r6s-search</code></td>
+          <td>オペレーター、武器、マップなどを検索します。</td>
+          <td><code>query</code></td>
+        </tr>
+        <tr>
+          <td><code>/r6s-map</code></td>
+          <td>R6Sのマップ情報を取得します。</td>
+          <td><code>name</code> (任意)</td>
+        </tr>
+        <tr>
+          <td><code>/r6s-weapon</code></td>
+          <td>武器の情報を取得します。</td>
+          <td><code>name</code></td>
+        </tr>
+        <tr>
+          <td><code>/r6s-debug</code></td>
+          <td>プレイヤー統計の生のAPIレスポンスを表示します（デバッグ用）。</td>
+          <td><code>username</code>, <code>platform</code></td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>Valorantトラッカー</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>コマンド</th>
+          <th>説明</th>
+          <th>パラメータ</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>/valorant-stats</code></td>
+          <td>Valorantプレイヤーの統計情報を取得します。</td>
+          <td><code>riot_id</code>, <code>region</code></td>
+        </tr>
+        <tr>
+          <td><code>/valorant-recent</code></td>
+          <td>最近のコンペティティブマッチを取得します。</td>
+          <td><code>riot_id</code>, <code>region</code></td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>TTS</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>コマンド</th>
+          <th>説明</th>
+          <th>パラメータ</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>/tts volume</code></td>
+          <td>TTSの音量を設定します (0-200%)。</td>
+          <td><code>volume</code></td>
+        </tr>
+        <tr>
+          <td><code>/speech enable</code></td>
+          <td>このチャンネルのメッセージ読み上げを有効にします。</td>
+          <td>-</td>
+        </tr>
+        <tr>
+          <td><code>/speech disable</code></td>
+          <td>メッセージ読み上げを無効にします。</td>
+          <td>-</td>
+        </tr>
+        <tr>
+          <td><code>/speech skip</code></td>
+          <td>現在の読み上げをスキップします。</td>
+          <td>-</td>
+        </tr>
+        <tr>
+          <td><code>/autojoin enable</code></td>
+          <td>あなたがVCに参加した際、BOTも自動で参加するようにします。</td>
+          <td>-</td>
+        </tr>
+        <tr>
+          <td><code>/autojoin disable</code></td>
+          <td>BOTの自動参加設定を解除します。</td>
+          <td>-</td>
+        </tr>
+        <tr>
+          <td><code>/join-leave-notification enable</code></td>
+          <td>VCへの入退室を音声で通知するようにします。</td>
+          <td>-</td>
+        </tr>
+        <tr>
+          <td><code>/join-leave-notification disable</code></td>
+          <td>VCへの入退室通知を無効にします。</td>
+          <td>-</td>
+        </tr>
+        <tr>
+          <td><code>/say</code></td>
+          <td>テキストを音声で読み上げます。</td>
+          <td><code>text</code>, <code>model_id</code> (任意), <code>style</code> (任意), <code>style_weight</code> (任意), <code>speed</code> (任意)</td>
+        </tr>
+        <tr>
+          <td><code>/dictionary add</code></td>
+          <td>読み上げ辞書に単語を追加します。</td>
+          <td><code>word</code>, <code>reading</code></td>
+        </tr>
+        <tr>
+          <td><code>/dictionary remove</code></td>
+          <td>読み上げ辞書から単語を削除します。</td>
+          <td><code>word</code></td>
+        </tr>
+        <tr>
+          <td><code>/dictionary list</code></td>
+          <td>登録されている辞書の一覧を表示します。</td>
+          <td>-</td>
+        </tr>
+        <tr>
+          <td><code>/dictionary search</code></td>
+          <td>辞書から単語を検索します。</td>
+          <td><code>query</code></td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>ユーティリティ</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>コマンド</th>
+          <th>説明</th>
+          <th>パラメータ</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>/gacha</code></td>
+          <td>ブルーアーカイブ風の生徒募集（ガチャ）を行います。</td>
+          <td><code>rolls</code></td>
+        </tr>
+        <tr>
+          <td><code>/diceroll</code></td>
+          <td>指定された範囲でダイスを振ります。</td>
+          <td><code>min_value</code>, <code>max_value</code></td>
+        </tr>
+        <tr>
+          <td><code>/roll</code></td>
+          <td>nDn形式でダイスを振ります (例: 2d6+3)。</td>
+          <td><code>expression</code></td>
+        </tr>
+        <tr>
+          <td><code>/check</code></td>
+          <td>ダイスロールと、任意で条件判定を行います。</td>
+          <td><code>expression</code>, <code>condition</code> (任意), <code>target</code> (任意)</td>
+        </tr>
+        <tr>
+          <td><code>/ping</code></td>
+          <td>Botの現在のレイテンシを表示します。</td>
+          <td>-</td>
+        </tr>
+        <tr>
+          <td><code>/serverinfo</code></td>
+          <td>現在のサーバーに関する情報を表示します。</td>
+          <td>-</td>
+        </tr>
+        <tr>
+          <td><code>/userinfo</code></td>
+          <td>指定されたユーザーの情報を表示します。</td>
+          <td><code>user</code> (任意)</td>
+        </tr>
+        <tr>
+          <td><code>/avatar</code></td>
+          <td>指定されたユーザーのアバター画像URLを表示します。</td>
+          <td><code>user</code> (任意)</td>
+        </tr>
+        <tr>
+          <td><code>/arona</code></td>
+          <td>Arona Music Botのリポジトリを表示します。</td>
+          <td>-</td>
+        </tr>
+        <tr>
+          <td><code>/plana</code></td>
+          <td>llmcord-JP-planaのリポジトリを表示します。</td>
+          <td>-</td>
+        </tr>
+        <tr>
+          <td><code>/support</code></td>
+          <td>開発者へのお問い合わせ方法を表示します。</td>
+          <td>-</td>
+        </tr>
+        <tr>
+          <td><code>/invite</code></td>
+          <td>このBotをあなたのサーバーに招待します。</td>
+          <td>-</td>
+        </tr>
+        <tr>
+          <td><code>/updates</code></td>
+          <td>Botの最新のアップデート履歴（コミットログ）を表示します。</td>
+          <td>-</td>
+        </tr>
+        <tr>
+          <td><code>/enable-logging</code></td>
+          <td>指定したチャンネルにBot全体のログを送信するように設定します。</td>
+          <td><code>channel</code></td>
+        </tr>
+        <tr>
+          <td><code>/disable-logging</code></td>
+          <td>指定したチャンネルへのBot全体のログ送信を停止します。</td>
+          <td><code>channel</code></td>
+        </tr>
+        <tr>
+          <td><code>/help</code></td>
+          <td>Botのヘルプ情報を表示します。</td>
+          <td>-</td>
+        </tr>
+      </tbody>
+    </table>
+</body>
+</html>
