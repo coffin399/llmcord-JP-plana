@@ -61,14 +61,17 @@ Therefore, it **only** collects the following messages:
 
 ## ✨ Main Features
 
-### 🗣️ AI Chat (LLM)
+### 🤖 AI Chat (LLM)
 Start a conversation with the AI by mentioning the bot (`@PLANA`) or replying to one of its messages.
 
+*   **Multiple AI Models:** OpenAI GPT-4o, Google Gemini 2.5 Pro, NVIDIA NIM, Mistral, and more
 *   **Continuous Conversations:** Context-aware conversations by continuing to reply.
 *   **Image Recognition:** Attach images with your message, and the AI will attempt to understand the image content (if the model supports vision).
+*   **Image Generation:** High-quality image generation using Stable Diffusion WebUI Forge
 *   **Tool Use (Web Search):** The AI can search the internet for information when needed (requires Google Custom Search API key).
 *   **Conversation History Management:** Reset conversation history for the current channel with `/clear_history`.
 *   **Customizable AI Personality:** Customize the AI's personality and response style by editing the system prompt in `config.yaml`.
+*   **Multi-language Support:** Automatically adapts to user's language
 
 <p align="center">
   <img src="https://i.imgur.com/wjdPNFQ.png" alt="PLANA MODEL CHANGE">
@@ -111,7 +114,7 @@ PLANA features advanced personality settings and memory functions to enrich conv
 ### 🎶 Advanced Music Playback
 Enjoy high-quality music in your voice channels.
 
-*   **Various Sources:** Play music from YouTube, SoundCloud URLs, or search queries.
+*   **Various Sources:** Play music from YouTube, SoundCloud, Niconico, and other platforms via URLs or search queries.
 *   **Playback Controls:** Intuitive commands like `/play`, `/pause`, `/resume`, `/stop`, `/skip`, `/volume`.
 *   **Advanced Queue Management:** View queue with `/queue`, shuffle with `/shuffle`, remove individual songs with `/remove`, clear all with `/clear`.
 *   **Loop Modes:** Toggle between no loop, single track loop, or full queue loop with `/loop`.
@@ -136,6 +139,15 @@ Provides useful slash commands for server management and information retrieval.
 *   **/support:** Display contact information for the developer.
 *   **/roll, /check, /diceroll:** Dice rolling features.
 *   **/timer:** Timer feature.
+
+### 🎯 Game Trackers
+*   **Valorant:** Player statistics tracking
+*   **Rainbow Six Siege:** Game statistics display
+
+### 🔊 Text-to-Speech (TTS)
+*   **Style-Bert-VITS2:** High-quality Japanese voice synthesis
+*   **Join/Leave Notifications:** Voice notifications in voice channels
+*   **Customizable:** Speech rate, style, and emotion adjustments
 
 ### 📥 Media Downloader
 Downloads video or audio from sites like YouTube and generates a temporary shareable link.

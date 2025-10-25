@@ -24,7 +24,9 @@
 [![Discord](https://img.shields.io/discord/1305004687921250436?logo=discord&logoColor=white&label=Discord&color=5865F2)](https://discord.gg/H79HKKqx3s)</div>
 
 ---
+
 ## 🚀 Quick Start
+
 ### Invite PLANA to Your Server
 
 <h3 align="center">
@@ -59,7 +61,7 @@
     
     Open the generated `config.yaml` and **configure at least the following settings:**
 
-    *   `token`: **Required.** Discord Bot Token
+    *   `bot_token`: **Required.** Discord Bot Token
     *   `llm:` section: `model`, `providers` (API keys, etc.)
 
 #### Step 2: Start the Bot
@@ -80,20 +82,92 @@ python main.py
 docker compose up --build -d
 ```
 
-> For additional features (Twitch notifications, Media downloader), please refer to the language-specific documentation.
+> For additional features (Twitch notifications, Media downloader, TTS), please refer to the language-specific documentation.
 
 ---
 
 ## ✨ Key Features
 
-- 🗣️ **AI Chat (LLM)** - Conversation with advanced language models
-- 🎨 **Image Generation** - Generate images from text
-- 🎶 **Music Playback** - High-quality music streaming from YouTube, SoundCloud
-- 🖼️ **Image Recognition** - AI-powered image understanding
-- 📡 **Real-Time Notifications** - Earthquake alerts (Japan), Twitch streams
-- 🎮 **Entertainment** - Akinator, Gacha, and more
-- 🛠️ **Utilities** - Server management and information commands
-- 📥 **Media Downloader** - Download videos and audio
+### 🤖 AI Chat (LLM)
+- **Multiple AI Models**: OpenAI GPT-4o, Google Gemini 2.5 Pro, NVIDIA NIM, Mistral, and more
+- **Image Recognition**: AI-powered image understanding and analysis
+- **Image Generation**: High-quality image generation using Stable Diffusion WebUI Forge
+- **Web Search**: Real-time internet search capabilities
+- **Memory System**: User bio, channel bio, and global memory management
+- **Multi-language Support**: Automatically adapts to user's language
+
+### 🎶 Advanced Music Playback
+- **Multiple Sources**: YouTube, SoundCloud, Niconico, and other platforms
+- **Advanced Controls**: Play, pause, skip, volume, seek, loop modes
+- **Queue Management**: Shuffle, remove, clear, and playlist support
+- **Auto Management**: Automatic voice channel management
+
+### 🎯 Game Trackers
+- **Valorant**: Player statistics tracking and display
+- **Rainbow Six Siege**: Game statistics and performance metrics
+
+### 🔊 Text-to-Speech (TTS)
+- **Style-Bert-VITS2**: High-quality Japanese voice synthesis
+- **Voice Notifications**: Join/leave announcements in voice channels
+- **Customizable**: Speech rate, style, and emotion adjustments
+
+### 📡 Real-Time Notifications
+- **Earthquake Alerts**: Japan earthquake and tsunami notifications with maps
+- **Twitch Streams**: Automatic stream start notifications
+
+### 🎮 Entertainment Features
+- **Akinator**: Character guessing game with multi-language support
+- **Gacha System**: Blue Archive-style student recruitment simulation
+- **Image Commands**: Cat images, anime image search, and more
+
+### 🛠️ Utility Commands
+- **Server Management**: Server info, user info, avatar display
+- **Dice Rolling**: Advanced dice roll system with custom notation
+- **Timer**: Countdown timer functionality
+- **Media Downloader**: Download videos and audio from various platforms
+
+---
+
+## 🔧 Technical Specifications
+
+### Architecture
+- **Framework**: discord.py 2.0+
+- **Language**: Python 3.8+
+- **Configuration**: YAML-based settings
+- **Logging**: Discord channel logging with rate limiting
+- **Error Handling**: Comprehensive exception handling system
+
+### Supported APIs
+- **OpenAI**: GPT-4o, GPT-4 Turbo
+- **Google**: Gemini 2.5 Pro/Flash
+- **NVIDIA NIM**: Various open-source models
+- **Mistral**: Mistral Medium
+- **HenrikDev**: Valorant API
+- **TheCatAPI**: Cat image API
+- **P2P Earthquake**: Japan earthquake data
+
+### Project Structure
+```
+llmcord-JP-plana/
+├── main.py                    # Main entry point
+├── config.default.yaml        # Default configuration
+├── config.yaml               # Actual configuration (create this)
+├── requirements.txt          # Python dependencies
+├── startPLANA.bat           # Windows startup script
+├── PLANA/                   # Main feature modules
+│   ├── llm/                 # AI chat functionality
+│   ├── music/               # Music playback
+│   ├── images/              # Image commands
+│   ├── notifications/       # Notification features
+│   ├── tracker/             # Game trackers
+│   ├── tts/                 # Text-to-speech
+│   ├── utilities/           # Utility commands
+│   └── services/            # Common services
+├── modules/                 # Legacy modules
+├── plugins/                 # Plugins
+├── data/                    # Data storage
+└── cache/                   # Cache directory
+```
 
 ---
 
