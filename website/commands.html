@@ -54,6 +54,7 @@
                             <strong>Parameters:</strong>
                             <ul>
                                 <li><code>message</code> - The message you want to send to the AI</li>
+                                <li><code>image_url</code> - URL of an image (optional)</li>
                             </ul>
                         </div>
                     </div>
@@ -272,6 +273,103 @@
                     <div class="command-card">
                         <h3>/music_help</h3>
                         <p>Display help for music features. / 音楽機能のヘルプを表示します。</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- TTS Commands -->
+            <div class="command-section">
+                <h2 class="section-title">
+                    <i class="fas fa-volume-up"></i>
+                    TTS Commands / TTSコマンド
+                </h2>
+                <div class="commands-grid">
+                    <div class="command-card">
+                        <h3>/say</h3>
+                        <p>Convert text to speech. / テキストを音声で読み上げます。</p>
+                        <div class="command-params">
+                            <strong>Parameters:</strong>
+                            <ul>
+                                <li><code>text</code> - Text to convert to speech</li>
+                                <li><code>model_id</code> - Model ID (optional)</li>
+                                <li><code>style</code> - Style name (optional)</li>
+                                <li><code>style_weight</code> - Style strength (optional)</li>
+                                <li><code>speed</code> - Speech rate (optional)</li>
+                            </ul>
+                        </div>
+                    </div>
+                    <div class="command-card">
+                        <h3>/tts volume</h3>
+                        <p>Set TTS volume. / TTSの音量を設定します。</p>
+                        <div class="command-params">
+                            <strong>Parameters:</strong>
+                            <ul>
+                                <li><code>volume</code> - Volume level (0-200)</li>
+                            </ul>
+                        </div>
+                    </div>
+                    <div class="command-card">
+                        <h3>/speech enable</h3>
+                        <p>Enable message reading for this channel. / このチャンネルのメッセージ読み上げを有効にします。</p>
+                    </div>
+                    <div class="command-card">
+                        <h3>/speech disable</h3>
+                        <p>Disable message reading. / メッセージ読み上げを無効にします。</p>
+                    </div>
+                    <div class="command-card">
+                        <h3>/speech skip</h3>
+                        <p>Skip current speech. / 現在の読み上げをスキップします。</p>
+                    </div>
+                    <div class="command-card">
+                        <h3>/autojoin enable</h3>
+                        <p>Enable automatic joining when you join a voice channel. / あなたがVCに参加した際、BOTも自動で参加するようにします。</p>
+                    </div>
+                    <div class="command-card">
+                        <h3>/autojoin disable</h3>
+                        <p>Disable automatic joining. / BOTの自動参加設定を解除します。</p>
+                    </div>
+                    <div class="command-card">
+                        <h3>/join-leave-notification enable</h3>
+                        <p>Enable voice notifications for VC join/leave. / VCへの入退室を音声で通知するようにします。</p>
+                    </div>
+                    <div class="command-card">
+                        <h3>/join-leave-notification disable</h3>
+                        <p>Disable voice notifications for VC join/leave. / VCへの入退室通知を無効にします。</p>
+                    </div>
+                    <div class="command-card">
+                        <h3>/dictionary add</h3>
+                        <p>Add a word to the speech dictionary. / 読み上げ辞書に単語を追加します。</p>
+                        <div class="command-params">
+                            <strong>Parameters:</strong>
+                            <ul>
+                                <li><code>word</code> - Word to add</li>
+                                <li><code>reading</code> - Pronunciation</li>
+                            </ul>
+                        </div>
+                    </div>
+                    <div class="command-card">
+                        <h3>/dictionary remove</h3>
+                        <p>Remove a word from the speech dictionary. / 読み上げ辞書から単語を削除します。</p>
+                        <div class="command-params">
+                            <strong>Parameters:</strong>
+                            <ul>
+                                <li><code>word</code> - Word to remove</li>
+                            </ul>
+                        </div>
+                    </div>
+                    <div class="command-card">
+                        <h3>/dictionary list</h3>
+                        <p>Display the speech dictionary. / 登録されている辞書の一覧を表示します。</p>
+                    </div>
+                    <div class="command-card">
+                        <h3>/dictionary search</h3>
+                        <p>Search the speech dictionary. / 辞書から単語を検索します。</p>
+                        <div class="command-params">
+                            <strong>Parameters:</strong>
+                            <ul>
+                                <li><code>query</code> - Search query</li>
+                            </ul>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -663,103 +761,6 @@
                     <div class="command-card">
                         <h3>/twitch_list</h3>
                         <p>Display list of configured Twitch notifications. / 設定されているTwitch通知の一覧を表示します。</p>
-                    </div>
-                </div>
-            </div>
-
-            <!-- TTS Commands -->
-            <div class="command-section">
-                <h2 class="section-title">
-                    <i class="fas fa-volume-up"></i>
-                    TTS Commands / TTSコマンド
-                </h2>
-                <div class="commands-grid">
-                    <div class="command-card">
-                        <h3>/say</h3>
-                        <p>Convert text to speech. / テキストを音声で読み上げます。</p>
-                        <div class="command-params">
-                            <strong>Parameters:</strong>
-                            <ul>
-                                <li><code>text</code> - Text to convert to speech</li>
-                                <li><code>model_id</code> - Model ID (optional)</li>
-                                <li><code>style</code> - Style name (optional)</li>
-                                <li><code>style_weight</code> - Style strength (optional)</li>
-                                <li><code>speed</code> - Speech rate (optional)</li>
-                            </ul>
-                        </div>
-                    </div>
-                    <div class="command-card">
-                        <h3>/tts volume</h3>
-                        <p>Set TTS volume. / TTSの音量を設定します。</p>
-                        <div class="command-params">
-                            <strong>Parameters:</strong>
-                            <ul>
-                                <li><code>volume</code> - Volume level (0-200)</li>
-                            </ul>
-                        </div>
-                    </div>
-                    <div class="command-card">
-                        <h3>/speech enable</h3>
-                        <p>Enable message reading for this channel. / このチャンネルのメッセージ読み上げを有効にします。</p>
-                    </div>
-                    <div class="command-card">
-                        <h3>/speech disable</h3>
-                        <p>Disable message reading. / メッセージ読み上げを無効にします。</p>
-                    </div>
-                    <div class="command-card">
-                        <h3>/speech skip</h3>
-                        <p>Skip current speech. / 現在の読み上げをスキップします。</p>
-                    </div>
-                    <div class="command-card">
-                        <h3>/autojoin enable</h3>
-                        <p>Enable automatic joining when you join a voice channel. / あなたがVCに参加した際、BOTも自動で参加するようにします。</p>
-                    </div>
-                    <div class="command-card">
-                        <h3>/autojoin disable</h3>
-                        <p>Disable automatic joining. / BOTの自動参加設定を解除します。</p>
-                    </div>
-                    <div class="command-card">
-                        <h3>/join-leave-notification enable</h3>
-                        <p>Enable voice notifications for VC join/leave. / VCへの入退室を音声で通知するようにします。</p>
-                    </div>
-                    <div class="command-card">
-                        <h3>/join-leave-notification disable</h3>
-                        <p>Disable voice notifications for VC join/leave. / VCへの入退室通知を無効にします。</p>
-                    </div>
-                    <div class="command-card">
-                        <h3>/dictionary add</h3>
-                        <p>Add a word to the speech dictionary. / 読み上げ辞書に単語を追加します。</p>
-                        <div class="command-params">
-                            <strong>Parameters:</strong>
-                            <ul>
-                                <li><code>word</code> - Word to add</li>
-                                <li><code>reading</code> - Pronunciation</li>
-                            </ul>
-                        </div>
-                    </div>
-                    <div class="command-card">
-                        <h3>/dictionary remove</h3>
-                        <p>Remove a word from the speech dictionary. / 読み上げ辞書から単語を削除します。</p>
-                        <div class="command-params">
-                            <strong>Parameters:</strong>
-                            <ul>
-                                <li><code>word</code> - Word to remove</li>
-                            </ul>
-                        </div>
-                    </div>
-                    <div class="command-card">
-                        <h3>/dictionary list</h3>
-                        <p>Display the speech dictionary. / 登録されている辞書の一覧を表示します。</p>
-                    </div>
-                    <div class="command-card">
-                        <h3>/dictionary search</h3>
-                        <p>Search the speech dictionary. / 辞書から単語を検索します。</p>
-                        <div class="command-params">
-                            <strong>Parameters:</strong>
-                            <ul>
-                                <li><code>query</code> - Search query</li>
-                            </ul>
-                        </div>
                     </div>
                 </div>
             </div>
