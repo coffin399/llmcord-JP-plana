@@ -273,6 +273,7 @@ tts:
   default_style: "Neutral"  # デフォルトのスタイル
   default_style_weight: 5.0  # スタイルの強さ
   default_speed: 1.0  # デフォルトの話速
+  default_volume: 1.0  # デフォルトの音量
   enable_say_command: true
   enable_join_leave_notice: true
   join_message_template: "{member_name}さんが参加しました。"
