@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PLANA - Multi-functional Discord Bot</title>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar">
+        <div class="nav-container">
+            <div class="nav-logo">
+                <h2>PLANA</h2>
+            </div>
+            <div class="nav-menu">
+                <a href="#features" class="nav-link">Features</a>
+                <a href="#commands" class="nav-link">Commands</a>
+                <a href="#setup" class="nav-link">Setup</a>
+                <a href="commands.html" class="nav-link">Command List</a>
+            </div>
+            <div class="nav-toggle">
+                <span class="bar"></span>
+                <span class="bar"></span>
+                <span class="bar"></span>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Hero Section -->
+    <section class="hero">
+        <div class="hero-container">
+            <div class="hero-content">
+                <h1 class="hero-title">
+                    <span class="gradient-text">PLANA</span>
+                    <br>Multi-functional Discord Bot
+                </h1>
+                <p class="hero-subtitle">
+                    プラナちゃんとおしゃべりしよう！<br>
+                    Let's chat with Plana!
+                </p>
+                <div class="hero-buttons">
+                    <a href="https://discord.com/oauth2/authorize?client_id=1031673203774464160&permissions=551906765824&scope=bot"
+                       class="btn btn-primary" target="_blank">
+                        <i class="fab fa-discord"></i>
+                        Invite to Server
+                    </a>
+                    <a href="https://github.com/coffin399/llmcord-JP-plana"
+                       class="btn btn-secondary" target="_blank">
+                        <i class="fab fa-github"></i>
+                        View on GitHub
+                    </a>
+                </div>
+            </div>
+            <div class="hero-image">
+                <img src="https://i.imgur.com/Q3VuxzG.png" alt="PLANA Banner" class="hero-banner">
+            </div>
+        </div>
+    </section>
+
+    <!-- Features Section -->
+    <section id="features" class="features">
+        <div class="container">
+            <h2 class="section-title">Main Features / 主な機能</h2>
+            <div class="features-grid">
+                <!-- AI Chat Feature -->
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <i class="fas fa-robot"></i>
+                    </div>
+                    <h3>AI Chat (LLM)</h3>
+                    <p>Advanced AI conversation with multiple models support. Context-aware conversations, image recognition, and customizable personality.</p>
+                    <ul class="feature-list">
+                        <li>OpenAI GPT-4o, Google Gemini 2.5 Pro</li>
+                        <li>Image recognition & generation</li>
+                        <li>Web search integration</li>
+                        <li>Multi-language support</li>
+                    </ul>
+                </div>
+
+                <!-- Music Feature -->
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <i class="fas fa-music"></i>
+                    </div>
+                    <h3>Music Playback</h3>
+                    <p>High-quality music playback with advanced queue management and multiple source support.</p>
+                    <ul class="feature-list">
+                        <li>YouTube, SoundCloud, Niconico</li>
+                        <li>Queue management & shuffle</li>
+                        <li>Loop modes & seek function</li>
+                        <li>Volume control</li>
+                    </ul>
+                </div>
+
+                <!-- Games & Entertainment -->
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <i class="fas fa-gamepad"></i>
+                    </div>
+                    <h3>Games & Entertainment</h3>
+                    <p>Fun games and entertainment features to keep your server active and engaged.</p>
+                    <ul class="feature-list">
+                        <li>Akinator character guessing</li>
+                        <li>Blue Archive gacha simulation</li>
+                        <li>Cat images from TheCatAPI</li>
+                        <li>Anime image search</li>
+                    </ul>
+                </div>
+
+                <!-- Notifications -->
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <i class="fas fa-bell"></i>
+                    </div>
+                    <h3>Real-time Notifications</h3>
+                    <p>Stay informed with real-time notifications for earthquakes, tsunamis, and Twitch streams.</p>
+                    <ul class="feature-list">
+                        <li>Earthquake & tsunami alerts (Japan)</li>
+                        <li>Twitch stream notifications</li>
+                        <li>Custom message settings</li>
+                        <li>Multiple channel support</li>
+                    </ul>
+                </div>
+
+                <!-- TTS -->
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <i class="fas fa-volume-up"></i>
+                    </div>
+                    <h3>Text-to-Speech</h3>
+                    <p>High-quality Japanese voice synthesis with Style-Bert-VITS2 integration.</p>
+                    <ul class="feature-list">
+                        <li>Style-Bert-VITS2 support</li>
+                        <li>Join/leave notifications</li>
+                        <li>Customizable speech settings</li>
+                        <li>Dictionary management</li>
+                    </ul>
+                </div>
+
+                <!-- Media Downloader -->
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <i class="fas fa-download"></i>
+                    </div>
+                    <h3>Media Downloader</h3>
+                    <p>Download videos and audio from various platforms with Google Drive integration.</p>
+                    <ul class="feature-list">
+                        <li>YouTube video/audio download</li>
+                        <li>Google Drive sharing</li>
+                        <li>Multiple format support</li>
+                        <li>Temporary link generation</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Commands Preview -->
+    <section id="commands" class="commands-preview">
+        <div class="container">
+            <h2 class="section-title">Command Categories / コマンドカテゴリ</h2>
+            <div class="commands-grid">
+                <div class="command-category">
+                    <h3><i class="fas fa-robot"></i> AI & LLM</h3>
+                    <div class="command-list">
+                        <span class="command">/chat</span>
+                        <span class="command">/set-ai-bio</span>
+                        <span class="command">/switch-models</span>
+                        <span class="command">/memory-save</span>
+                    </div>
+                </div>
+                <div class="command-category">
+                    <h3><i class="fas fa-music"></i> Music</h3>
+                    <div class="command-list">
+                        <span class="command">/play</span>
+                        <span class="command">/queue</span>
+                        <span class="command">/skip</span>
+                        <span class="command">/volume</span>
+                    </div>
+                </div>
+                <div class="command-category">
+                    <h3><i class="fas fa-gamepad"></i> Games</h3>
+                    <div class="command-list">
+                        <span class="command">/gacha</span>
+                        <span class="command">/diceroll</span>
+                        <span class="command">/meow</span>
+                        <span class="command">/timer</span>
+                    </div>
+                </div>
+                <div class="command-category">
+                    <h3><i class="fas fa-chart-line"></i> Trackers</h3>
+                    <div class="command-list">
+                        <span class="command">/valorant-stats</span>
+                        <span class="command">/r6s-stats</span>
+                        <span class="command">/r6s-compare</span>
+                        <span class="command">/r6s-operator</span>
+                    </div>
+                </div>
+                <div class="command-category">
+                    <h3><i class="fas fa-bell"></i> Notifications</h3>
+                    <div class="command-list">
+                        <span class="command">/earthquake_channel</span>
+                        <span class="command">/twitch_set</span>
+                        <span class="command">/earthquake_status</span>
+                        <span class="command">/twitch_list</span>
+                    </div>
+                </div>
+                <div class="command-category">
+                    <h3><i class="fas fa-volume-up"></i> TTS</h3>
+                    <div class="command-list">
+                        <span class="command">/say</span>
+                        <span class="command">/speech enable</span>
+                        <span class="command">/tts volume</span>
+                        <span class="command">/dictionary add</span>
+                    </div>
+                </div>
+            </div>
+            <div class="commands-cta">
+                <a href="commands.html" class="btn btn-primary">
+                    <i class="fas fa-list"></i>
+                    View All Commands
+                </a>
+            </div>
+        </div>
+    </section>
+
+    <!-- Setup Section -->
+    <section id="setup" class="setup">
+        <div class="container">
+            <h2 class="section-title">Quick Setup / クイックセットアップ</h2>
+            <div class="setup-content">
+                <div class="setup-steps">
+                    <div class="step">
+                        <div class="step-number">1</div>
+                        <div class="step-content">
+                            <h3>Invite PLANA</h3>
+                            <p>Click the invite button above to add PLANA to your Discord server.</p>
+                        </div>
+                    </div>
+                    <div class="step">
+                        <div class="step-number">2</div>
+                        <div class="step-content">
+                            <h3>Configure Settings</h3>
+                            <p>Use <code>/help</code> command to see all available features and setup options.</p>
+                        </div>
+                    </div>
+                    <div class="step">
+                        <div class="step-number">3</div>
+                        <div class="step-content">
+                            <h3>Start Chatting</h3>
+                            <p>Mention @PLANA or use slash commands to start using the bot!</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="setup-info">
+                    <h3>Self-Hosting / セルフホスト</h3>
+                    <p>For advanced users who want to host their own instance:</p>
+                    <div class="code-block">
+                        <code>git clone https://github.com/coffin399/llmcord-JP-plana</code>
+                        <code>cd llmcord-JP-plana</code>
+                        <code>pip install -r requirements.txt</code>
+                        <code>python main.py</code>
+                    </div>
+                    <p>See the <a href="https://github.com/coffin399/llmcord-JP-plana" target="_blank">GitHub repository</a> for detailed setup instructions.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Privacy Section -->
+    <section class="privacy">
+        <div class="container">
+            <h2 class="section-title">Privacy & Security / プライバシーとセキュリティ</h2>
+            <div class="privacy-content">
+                <div class="privacy-feature">
+                    <i class="fas fa-shield-alt"></i>
+                    <h3>Privacy-Focused Design</h3>
+                    <p>PLANA does not use Message Content Intent. Only @mentions and replies to PLANA are processed.</p>
+                </div>
+                <div class="privacy-feature">
+                    <i class="fas fa-lock"></i>
+                    <h3>Data Protection</h3>
+                    <p>All data is anonymized and used only for service improvement. No personal information is stored.</p>
+                </div>
+                <div class="privacy-feature">
+                    <i class="fas fa-eye-slash"></i>
+                    <h3>Transparent Usage</h3>
+                    <p>Clear privacy policy and usage guidelines. Users have full control over their data.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-content">
+                <div class="footer-section">
+                    <h3>PLANA</h3>
+                    <p>Multi-functional Discord Bot with AI, Music, and more!</p>
+                </div>
+                <div class="footer-section">
+                    <h3>Links</h3>
+                    <ul>
+                        <li><a href="https://github.com/coffin399/llmcord-JP-plana" target="_blank">GitHub</a></li>
+                        <li><a href="https://discord.gg/H79HKKqx3s" target="_blank">Discord Server</a></li>
+                        <li><a href="commands.html">Command List</a></li>
+                    </ul>
+                </div>
+                <div class="footer-section">
+                    <h3>Support</h3>
+                    <ul>
+                        <li>Discord: coffin299</li>
+                        <li>Twitter: @coffin299</li>
+                        <li>GitHub Issues</li>
+                    </ul>
+                </div>
+            </div>
+            <div class="footer-bottom">
+                <p>&copy; 2025 PLANA. Dev by ごみぃ(coffin299) & えんじょ(Autmn134F)</p>
+            </div>
+        </div>
+    </footer>
+
+    <script src="script.js"></script>
+</body>
+</html>
