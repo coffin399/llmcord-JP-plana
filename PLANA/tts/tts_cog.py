@@ -351,6 +351,41 @@ class TTSCog(commands.Cog, name="tts_cog"):
             await interaction.guild.voice_client.disconnect()
         await interaction.response.send_message("✅ メッセージ読み上げを無効にしました。", ephemeral=False)
 
+    @speech_group.command(name="skip", description="現在の読み上げをスキップします")
+    async def skip_speech(self, interaction: discord.Interaction):
+        """現在の読み上げをスキップします"""
+        voice_client = interaction.guild.voice_client
+        if not voice_client:
+            await interaction.response.send_message("❌ Botがボイスチャンネルに接続していません。", ephemeral=True)
+            return
+
+        music_cog: Optional[MusicCog] = self.bot.get_cog("music_cog")
+        music_state = music_cog._get_guild_state(interaction.guild.id) if music_cog else None
+
+        skipped = False
+        # ミキサーが動作している場合
+        if music_state and music_state.mixer:
+            # 'tts_' プレフィックスを持つソースをすべて削除
+            tts_sources = [name for name in music_state.mixer.sources.keys() if name.startswith("tts_")]
+            if tts_sources:
+                for name in tts_sources:
+                    await music_state.mixer.remove_source(name)
+                skipped = True
+                print(f"[TTSCog] Skipped {len(tts_sources)} TTS source(s) from mixer.")
+
+        # 通常の再生の場合、またはミキサーにTTSソースがなかった場合
+        if voice_client.is_playing():
+            # 再生中のソースがTTSAudioSourceか確認
+            if isinstance(voice_client.source, TTSAudioSource):
+                voice_client.stop()
+                skipped = True
+                print("[TTSCog] Skipped direct TTS playback.")
+
+        if skipped:
+            await interaction.response.send_message("✅ 読み上げをスキップしました。", ephemeral=False)
+        else:
+            await interaction.response.send_message("❌ スキップ対象の読み上げがありません。", ephemeral=True)
+
     autojoin_group = app_commands.Group(name="autojoin", description="VCへの自動参加に関するコマンド")
 
     @autojoin_group.command(name="enable", description="あなたがVCに参加した際、BOTも自動で参加するようにします")
@@ -379,7 +414,6 @@ class TTSCog(commands.Cog, name="tts_cog"):
         self._save_speech_settings()
         await interaction.response.send_message("✅ 自動参加設定を解除しました。", ephemeral=False)
 
-    # --- ここから変更 ---
     notification_group = app_commands.Group(
         name="join-leave-notification",
         description="VCへの入退室通知に関するコマンド / Commands for voice channel join/leave notifications"
@@ -412,7 +446,6 @@ class TTSCog(commands.Cog, name="tts_cog"):
         guild_settings["enable_notifications"] = False
         self._save_speech_settings()
         await interaction.response.send_message("✅ VCへの入退室通知を無効にしました。 / Disabled join/leave notifications.", ephemeral=False)
-    # --- ここまで変更 ---
 
     @app_commands.command(name="say", description="テキストを音声で読み上げます")
     @app_commands.describe(text="読み上げるテキスト", model_id="モデルID (省略時はチャンネル設定)",
@@ -444,85 +477,6 @@ class TTSCog(commands.Cog, name="tts_cog"):
             if success:
                 await interaction.followup.send(
                     f"🔊 読み上げ中: `{text}`\n速度: {final_speed}x")
-
-    @app_commands.command(name="tts_models", description="利用可能な音声モデルの一覧を表示")
-    async def tts_models(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=True)
-        if not self.models_loaded: await self.fetch_available_models()
-        if not self.available_models:
-            await interaction.followup.send("❌ 利用可能なモデルが見つかりませんでした。", ephemeral=True)
-            return
-        embed = discord.Embed(title="🎙️ 利用可能な音声モデル",
-                              description=f"合計 {len(self.available_models)} 個のモデル", color=discord.Color.blue())
-        for model in self.available_models[:10]:
-            if isinstance(model, dict):
-                model_id, model_name, styles = model.get('id', 'N/A'), model.get('name', 'Unknown'), model.get('styles',
-                                                                                                               ['Neutral'])
-                display_name = f"ID: {model_id} - {str(model_name)[:200]}"
-                styles_str = ", ".join(str(s) for s in styles[:10]) if isinstance(styles, list) else str(styles)
-                if isinstance(styles, list) and len(styles) > 10: styles_str += f" ... (他{len(styles) - 10}個)"
-                embed.add_field(name=display_name[:256], value=f"スタイル: {styles_str[:1000]}", inline=False)
-            else:
-                embed.add_field(name=f"Model: {str(model)[:240]}", value="詳細情報なし", inline=False)
-        if len(self.available_models) > 10: embed.set_footer(
-            text=f"... 他 {len(self.available_models) - 10} 個のモデル")
-        await interaction.followup.send(embed=embed, ephemeral=True)
-
-    @app_commands.command(name="switch-tts-model", description="このチャンネルのTTSモデル設定を変更します")
-    @app_commands.describe(model_id="使用するモデルID", style="スタイル名 (省略時は現在の設定を維持)",
-                           style_weight="スタイルの強さ (0.0-10.0, 省略時は現在の設定を維持)",
-                           speed="話速 (0.5-2.0, 省略時は現在の設定を維持)")
-    async def switch_tts_model(self, interaction: discord.Interaction, model_id: int, style: Optional[str] = None,
-                               style_weight: Optional[float] = None, speed: Optional[float] = None):
-        if not interaction.guild.voice_client:
-            await interaction.response.send_message("❌ Botがボイスチャンネルに接続していません。", ephemeral=True)
-            return
-        voice_channel, channel_id = interaction.guild.voice_client.channel, interaction.guild.voice_client.channel.id
-        current_settings = self._get_channel_settings(channel_id)
-        new_settings = {"model_id": model_id, "style": style if style is not None else current_settings["style"],
-                        "style_weight": style_weight if style_weight is not None else current_settings["style_weight"],
-                        "speed": speed if speed is not None else current_settings["speed"]}
-        self._set_channel_settings(channel_id, new_settings)
-        model_name = self.get_model_name(model_id)
-        embed = discord.Embed(title="✅ TTS設定を更新しました", description=f"チャンネル: {voice_channel.mention}",
-                              color=discord.Color.green())
-        embed.add_field(name="モデル", value=f"ID: {model_id} - {model_name}", inline=False)
-        embed.add_field(name="スタイル", value=new_settings["style"], inline=True)
-        embed.add_field(name="スタイル強度", value=f"{new_settings['style_weight']}", inline=True)
-        embed.add_field(name="速度", value=f"{new_settings['speed']}x", inline=True)
-        await interaction.response.send_message(embed=embed, ephemeral=True)
-
-    @app_commands.command(name="show-tts-settings", description="現在のチャンネルのTTS設定を表示します")
-    async def show_tts_settings(self, interaction: discord.Interaction):
-        if not interaction.guild.voice_client:
-            await interaction.response.send_message("❌ Botがボイスチャンネルに接続していません。", ephemeral=True)
-            return
-        voice_channel, channel_id = interaction.guild.voice_client.channel, interaction.guild.voice_client.channel.id
-        settings, model_name, is_custom = self._get_channel_settings(channel_id), self.get_model_name(
-            self._get_channel_settings(channel_id)["model_id"]), channel_id in self.channel_settings
-        embed = discord.Embed(title="🎙️ 現在のTTS設定",
-                              description=f"チャンネル: {voice_channel.mention}\n{'(カスタム設定)' if is_custom else '(デフォルト設定)'}",
-                              color=discord.Color.blue() if is_custom else discord.Color.greyple())
-        embed.add_field(name="モデル", value=f"ID: {settings['model_id']} - {model_name}", inline=False)
-        embed.add_field(name="スタイル", value=settings["style"], inline=True)
-        embed.add_field(name="スタイル強度", value=f"{settings['style_weight']}", inline=True)
-        embed.add_field(name="速度", value=f"{settings['speed']}x", inline=True)
-        await interaction.response.send_message(embed=embed, ephemeral=True)
-
-    @app_commands.command(name="reset-tts-settings", description="このチャンネルのTTS設定をデフォルトに戻します")
-    async def reset_tts_settings(self, interaction: discord.Interaction):
-        if not interaction.guild.voice_client:
-            await interaction.response.send_message("❌ Botがボイスチャンネルに接続していません。", ephemeral=True)
-            return
-        voice_channel, channel_id = interaction.guild.voice_client.channel, interaction.guild.voice_client.channel.id
-        if channel_id in self.channel_settings:
-            del self.channel_settings[channel_id]
-            self._save_settings()
-            await interaction.response.send_message(f"✅ {voice_channel.mention} のTTS設定をデフォルトに戻しました。",
-                                                    ephemeral=True)
-        else:
-            await interaction.response.send_message(
-                f"ℹ️ {voice_channel.mention} はすでにデフォルト設定を使用しています。", ephemeral=True)
 
     def _get_tts_lock(self, guild_id: int) -> asyncio.Lock:
         if guild_id not in self.tts_locks: self.tts_locks[guild_id] = asyncio.Lock()
@@ -826,6 +780,10 @@ class TTSCog(commands.Cog, name="tts_cog"):
         print(f"[TTSCog] Original: {text}")
         print(f"[TTSCog] Converted: {converted_text}")
 
+        # 200文字を超える場合は切り詰めて「以下省略」を追加
+        if len(converted_text) > 200:
+            converted_text = converted_text[:200] + " 以下省略"
+
         music_cog: Optional[MusicCog] = self.bot.get_cog("music_cog")
         music_state = music_cog._get_guild_state(guild.id) if music_cog else None
 
@@ -931,6 +889,3 @@ async def setup(bot: commands.Bot):
     
     tts_cog = TTSCog(bot)
     await bot.add_cog(tts_cog)
-    
-    # Add the dictionary command group to the bot's command tree
-    bot.tree.add_command(tts_cog.dictionary_group)
