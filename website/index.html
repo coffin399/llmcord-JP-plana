@@ -6,13 +6,26 @@
     <title>PLANA - Multi-functional Discord Bot</title>
     <meta name="description" content="PLANA is a multi-functional Discord bot featuring AI chat (GPT-4o, Gemini), music playback, games, and more. Enhance your server with PLANA.">
     <meta name="keywords" content="Discord Chat Bot,PLANA,プラナ,AI Chat,Discord Bot,GPT-4o,Gemini,Music Bot">
+    <meta name="author" content="coffin399">
+
+    <!-- Canonical URL -->
+    <link rel="canonical" href="https://coffin399.github.io/llmcord-JP-plana/">
+
+    <!-- Alternate Languages -->
+    <link rel="alternate" hreflang="en" href="https://coffin399.github.io/llmcord-JP-plana/">
+    <link rel="alternate" hreflang="ja" href="https://coffin399.github.io/llmcord-JP-plana/">
+
+    <!-- Favicon -->
+    <link rel="icon" href="./assets/icons/favicon.ico">
+    <link rel="apple-touch-icon" href="./assets/icons/apple-touch-icon.png">
 
     <!-- OGP -->
     <meta property="og:title" content="PLANA - Multi-functional Discord Bot">
     <meta property="og:description" content="PLANA is a multi-functional Discord bot featuring AI chat (GPT-4o, Gemini), music playback, games, and more.">
     <meta property="og:type" content="website">
-    <meta property="og:url" content="https://coffin399.github.io/llmcord-JP-plana">
-    <meta property="og:image" content="https://coffin399.github.io/llmcord-JP-plana/website/assets/images/ogp.png">
+    <meta property="og:url" content="https://coffin399.github.io/llmcord-JP-plana/">
+    <meta property="og:image" content="https://coffin399.github.io/llmcord-JP-plana/assets/images/ogp.png">
+    <meta property="og:site_name" content="PLANA">
 
     <!-- Twitter Card -->
     <meta name="twitter:card" content="summary_large_image">
@@ -20,7 +33,7 @@
     <meta name="twitter:creator" content="@coffin299">
     <meta name="twitter:title" content="PLANA - Multi-functional Discord Bot">
     <meta name="twitter:description" content="PLANA is a multi-functional Discord bot featuring AI chat (GPT-4o, Gemini), music playback, games, and more.">
-    <meta name="twitter:image" content="https://coffin399.github.io/llmcord-JP-plana/website/assets/images/ogp.png">
+    <meta name="twitter:image" content="https://coffin399.github.io/llmcord-JP-plana/assets/images/ogp.png">
 
     <!-- Discord Theme Color -->
     <meta name="theme-color" content="#5865F2">
@@ -33,16 +46,28 @@
       "name": "PLANA",
       "description": "PLANA is a multi-functional Discord bot featuring AI chat (GPT-4o, Gemini), music playback, games, and more. Enhance your server with PLANA.",
       "operatingSystem": "Discord",
-      "applicationCategory": "GameApplication",
+      "applicationCategory": "CommunicationApplication",
       "url": "https://coffin399.github.io/llmcord-JP-plana",
-      "image": "https://coffin399.github.io/llmcord-JP-plana/website/assets/images/ogp.png",
+      "image": "https://coffin399.github.io/llmcord-JP-plana/assets/images/ogp.png",
       "offers": {
         "@type": "Offer",
         "price": "0",
         "priceCurrency": "USD"
-      }
+      },
+      "author": {
+        "@type": "Person",
+        "name": "coffin399",
+        "url": "https://github.com/coffin399"
+      },
+      "codeRepository": "https://github.com/coffin399/llmcord-JP-plana",
+      "programmingLanguage": "Python"
     }
     </script>
+
+    <!-- Preconnect for Performance -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="preconnect" href="https://cdnjs.cloudflare.com">
 
     <link rel="stylesheet" href="style.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -50,7 +75,7 @@
 </head>
 <body>
     <!-- Navigation -->
-    <nav class="navbar">
+    <nav class="navbar" role="navigation" aria-label="Main navigation">
         <div class="nav-container">
             <div class="nav-logo">
                 <h2>PLANA</h2>
@@ -61,7 +86,7 @@
                 <a href="#setup" class="nav-link">Setup</a>
                 <a href="commands.html" class="nav-link">Command List</a>
             </div>
-            <div class="nav-toggle">
+            <div class="nav-toggle" aria-label="Toggle navigation menu">
                 <span class="bar"></span>
                 <span class="bar"></span>
                 <span class="bar"></span>
@@ -70,7 +95,7 @@
     </nav>
 
     <!-- Hero Section -->
-    <section class="hero">
+    <section class="hero" role="banner">
         <div class="hero-container">
             <div class="hero-content">
                 <h1 class="hero-title">
@@ -83,31 +108,31 @@
                 </p>
                 <div class="hero-buttons">
                     <a href="https://discord.com/oauth2/authorize?client_id=1031673203774464160&permissions=551906765824&scope=bot"
-                       class="btn btn-primary" target="_blank">
-                        <i class="fab fa-discord"></i>
+                       class="btn btn-primary" target="_blank" rel="noopener noreferrer" aria-label="Invite PLANA to your Discord server">
+                        <i class="fab fa-discord" aria-hidden="true"></i>
                         Invite to Server
                     </a>
                     <a href="https://github.com/coffin399/llmcord-JP-plana"
-                       class="btn btn-secondary" target="_blank">
-                        <i class="fab fa-github"></i>
+                       class="btn btn-secondary" target="_blank" rel="noopener noreferrer" aria-label="View PLANA on GitHub">
+                        <i class="fab fa-github" aria-hidden="true"></i>
                         View on GitHub
                     </a>
                 </div>
             </div>
             <div class="hero-image">
-                <img src="https://i.imgur.com/Q3VuxzG.png" alt="PLANA Banner" class="hero-banner">
+                <img src="https://i.imgur.com/Q3VuxzG.png" alt="PLANA Discord Bot Banner" class="hero-banner" loading="eager" width="600" height="400">
             </div>
         </div>
     </section>
 
     <!-- Features Section -->
-    <section id="features" class="features">
+    <section id="features" class="features" aria-label="Main features">
         <div class="container">
             <h2 class="section-title">Main Features / 主な機能</h2>
             <div class="features-grid">
                 <!-- AI Chat Feature -->
-                <div class="feature-card">
-                    <div class="feature-icon">
+                <article class="feature-card">
+                    <div class="feature-icon" aria-hidden="true">
                         <i class="fas fa-robot"></i>
                     </div>
                     <h3>AI Chat (LLM)</h3>
@@ -118,11 +143,11 @@
                         <li>Web search integration</li>
                         <li>Multi-language support</li>
                     </ul>
-                </div>
+                </article>
 
                 <!-- Music Feature -->
-                <div class="feature-card">
-                    <div class="feature-icon">
+                <article class="feature-card">
+                    <div class="feature-icon" aria-hidden="true">
                         <i class="fas fa-music"></i>
                     </div>
                     <h3>Music Playback</h3>
@@ -133,11 +158,11 @@
                         <li>Loop modes & seek function</li>
                         <li>Volume control</li>
                     </ul>
-                </div>
+                </article>
 
                 <!-- Games & Entertainment -->
-                <div class="feature-card">
-                    <div class="feature-icon">
+                <article class="feature-card">
+                    <div class="feature-icon" aria-hidden="true">
                         <i class="fas fa-gamepad"></i>
                     </div>
                     <h3>Games & Entertainment</h3>
@@ -148,11 +173,11 @@
                         <li>Cat images from TheCatAPI</li>
                         <li>Anime image search</li>
                     </ul>
-                </div>
+                </article>
 
                 <!-- Notifications -->
-                <div class="feature-card">
-                    <div class="feature-icon">
+                <article class="feature-card">
+                    <div class="feature-icon" aria-hidden="true">
                         <i class="fas fa-bell"></i>
                     </div>
                     <h3>Real-time Notifications</h3>
@@ -163,11 +188,11 @@
                         <li>Custom message settings</li>
                         <li>Multiple channel support</li>
                     </ul>
-                </div>
+                </article>
 
                 <!-- TTS -->
-                <div class="feature-card">
-                    <div class="feature-icon">
+                <article class="feature-card">
+                    <div class="feature-icon" aria-hidden="true">
                         <i class="fas fa-volume-up"></i>
                     </div>
                     <h3>Text-to-Speech</h3>
@@ -178,11 +203,11 @@
                         <li>Customizable speech settings</li>
                         <li>Dictionary management</li>
                     </ul>
-                </div>
+                </article>
 
                 <!-- Media Downloader -->
-                <div class="feature-card">
-                    <div class="feature-icon">
+                <article class="feature-card">
+                    <div class="feature-icon" aria-hidden="true">
                         <i class="fas fa-download"></i>
                     </div>
                     <h3>Media Downloader</h3>
@@ -193,18 +218,18 @@
                         <li>Multiple format support</li>
                         <li>Temporary link generation</li>
                     </ul>
-                </div>
+                </article>
             </div>
         </div>
     </section>
 
     <!-- Commands Preview -->
-    <section id="commands" class="commands-preview">
+    <section id="commands" class="commands-preview" aria-label="Command categories">
         <div class="container">
             <h2 class="section-title">Command Categories / コマンドカテゴリ</h2>
             <div class="commands-grid">
                 <div class="command-category">
-                    <h3><i class="fas fa-robot"></i> AI & LLM</h3>
+                    <h3><i class="fas fa-robot" aria-hidden="true"></i> AI & LLM</h3>
                     <div class="command-list">
                         <span class="command">/chat</span>
                         <span class="command">/set-ai-bio</span>
@@ -213,7 +238,7 @@
                     </div>
                 </div>
                 <div class="command-category">
-                    <h3><i class="fas fa-music"></i> Music</h3>
+                    <h3><i class="fas fa-music" aria-hidden="true"></i> Music</h3>
                     <div class="command-list">
                         <span class="command">/play</span>
                         <span class="command">/queue</span>
@@ -222,7 +247,7 @@
                     </div>
                 </div>
                 <div class="command-category">
-                    <h3><i class="fas fa-gamepad"></i> Games</h3>
+                    <h3><i class="fas fa-gamepad" aria-hidden="true"></i> Games</h3>
                     <div class="command-list">
                         <span class="command">/gacha</span>
                         <span class="command">/diceroll</span>
@@ -231,7 +256,7 @@
                     </div>
                 </div>
                 <div class="command-category">
-                    <h3><i class="fas fa-chart-line"></i> Trackers</h3>
+                    <h3><i class="fas fa-chart-line" aria-hidden="true"></i> Trackers</h3>
                     <div class="command-list">
                         <span class="command">/valorant-stats</span>
                         <span class="command">/r6s-stats</span>
@@ -240,7 +265,7 @@
                     </div>
                 </div>
                 <div class="command-category">
-                    <h3><i class="fas fa-bell"></i> Notifications</h3>
+                    <h3><i class="fas fa-bell" aria-hidden="true"></i> Notifications</h3>
                     <div class="command-list">
                         <span class="command">/earthquake_channel</span>
                         <span class="command">/twitch_set</span>
@@ -249,7 +274,7 @@
                     </div>
                 </div>
                 <div class="command-category">
-                    <h3><i class="fas fa-volume-up"></i> TTS</h3>
+                    <h3><i class="fas fa-volume-up" aria-hidden="true"></i> TTS</h3>
                     <div class="command-list">
                         <span class="command">/say</span>
                         <span class="command">/speech enable</span>
@@ -260,7 +285,7 @@
             </div>
             <div class="commands-cta">
                 <a href="commands.html" class="btn btn-primary">
-                    <i class="fas fa-list"></i>
+                    <i class="fas fa-list" aria-hidden="true"></i>
                     View All Commands
                 </a>
             </div>
@@ -268,32 +293,32 @@
     </section>
 
     <!-- Setup Section -->
-    <section id="setup" class="setup">
+    <section id="setup" class="setup" aria-label="Quick setup guide">
         <div class="container">
             <h2 class="section-title">Quick Setup / クイックセットアップ</h2>
             <div class="setup-content">
                 <div class="setup-steps">
-                    <div class="step">
+                    <article class="step">
                         <div class="step-number">1</div>
                         <div class="step-content">
                             <h3>Invite PLANA</h3>
                             <p>Click the invite button above to add PLANA to your Discord server.</p>
                         </div>
-                    </div>
-                    <div class="step">
+                    </article>
+                    <article class="step">
                         <div class="step-number">2</div>
                         <div class="step-content">
                             <h3>Configure Settings</h3>
                             <p>Use <code>/help</code> command to see all available features and setup options.</p>
                         </div>
-                    </div>
-                    <div class="step">
+                    </article>
+                    <article class="step">
                         <div class="step-number">3</div>
                         <div class="step-content">
                             <h3>Start Chatting</h3>
                             <p>Mention @PLANA or use slash commands to start using the bot!</p>
                         </div>
-                    </div>
+                    </article>
                 </div>
                 <div class="setup-info">
                     <h3>Self-Hosting / セルフホスト</h3>
@@ -304,38 +329,38 @@
                         <code>pip install -r requirements.txt</code>
                         <code>python main.py</code>
                     </div>
-                    <p>See the <a href="https://github.com/coffin399/llmcord-JP-plana" target="_blank">GitHub repository</a> for detailed setup instructions.</p>
+                    <p>See the <a href="https://github.com/coffin399/llmcord-JP-plana" target="_blank" rel="noopener noreferrer">GitHub repository</a> for detailed setup instructions.</p>
                 </div>
             </div>
         </div>
     </section>
 
     <!-- Privacy Section -->
-    <section class="privacy">
+    <section class="privacy" aria-label="Privacy and security information">
         <div class="container">
             <h2 class="section-title">Privacy & Security / プライバシーとセキュリティ</h2>
             <div class="privacy-content">
-                <div class="privacy-feature">
-                    <i class="fas fa-shield-alt"></i>
+                <article class="privacy-feature">
+                    <i class="fas fa-shield-alt" aria-hidden="true"></i>
                     <h3>Privileged Intents</h3>
                     <p>PLANA requires the Message Content Intent for processing @mentions, replies, and TTS channel messages. No other messages are collected or stored.</p>
-                </div>
-                <div class="privacy-feature">
-                    <i class="fas fa-lock"></i>
+                </article>
+                <article class="privacy-feature">
+                    <i class="fas fa-lock" aria-hidden="true"></i>
                     <h3>Data Protection</h3>
                     <p>All data is anonymized and used only for service improvement. No personal information is stored.</p>
-                </div>
-                <div class="privacy-feature">
-                    <i class="fas fa-eye-slash"></i>
+                </article>
+                <article class="privacy-feature">
+                    <i class="fas fa-eye-slash" aria-hidden="true"></i>
                     <h3>Transparent Usage</h3>
                     <p>Clear privacy policy and usage guidelines. Users have full control over their data.</p>
-                </div>
+                </article>
             </div>
         </div>
     </section>
 
     <!-- Footer -->
-    <footer class="footer">
+    <footer class="footer" role="contentinfo">
         <div class="container">
             <div class="footer-content">
                 <div class="footer-section">
@@ -345,8 +370,8 @@
                 <div class="footer-section">
                     <h3>Links</h3>
                     <ul>
-                        <li><a href="https://github.com/coffin399/llmcord-JP-plana" target="_blank">GitHub</a></li>
-                        <li><a href="https://discord.gg/H79HKKqx3s" target="_blank">Discord Server</a></li>
+                        <li><a href="https://github.com/coffin399/llmcord-JP-plana" target="_blank" rel="noopener noreferrer">GitHub</a></li>
+                        <li><a href="https://discord.gg/H79HKKqx3s" target="_blank" rel="noopener noreferrer">Discord Server</a></li>
                         <li><a href="commands.html">Command List</a></li>
                     </ul>
                 </div>
