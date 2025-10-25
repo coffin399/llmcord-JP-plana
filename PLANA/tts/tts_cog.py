@@ -69,6 +69,11 @@ class TTSCog(commands.Cog, name="tts_cog"):
         self.speech_settings: Dict[str, Dict[str, Any]] = {}
         self._load_speech_settings()
 
+        # 辞書システムの初期化を追加（self.llm_bot_idsの前に）
+        self.dictionary_file = Path("data/speech_dictionary.json")
+        self.speech_dictionary: Dict[str, str] = {}
+        self._load_dictionary()
+
         self.llm_bot_ids = [1031673203774464160, 1311866016011124736]
 
         print("TTSCog loaded (Style-Bert-VITS2 compatible, AudioMixer enabled)")
@@ -80,6 +85,7 @@ class TTSCog(commands.Cog, name="tts_cog"):
     async def cog_unload(self):
         self._save_settings()
         self._save_speech_settings()
+        self._save_dictionary()
         await self.session.close()
         print("TTSCog unloaded and session closed.")
 
@@ -528,6 +534,286 @@ class TTSCog(commands.Cog, name="tts_cog"):
             await self._handle_say_logic(guild, text, self.default_model_id, self.default_style,
                                          self.default_style_weight, self.default_speed)
 
+    def _load_dictionary(self):
+        """辞書ファイルを読み込む"""
+        try:
+            if self.dictionary_file.exists():
+                with open(self.dictionary_file, 'r', encoding='utf-8') as f:
+                    self.speech_dictionary = json.load(f)
+                print(f"✓ [TTSCog] 読み上げ辞書を読み込みました: {len(self.speech_dictionary)}単語")
+            else:
+                self.dictionary_file.parent.mkdir(parents=True, exist_ok=True)
+                self._save_dictionary()
+                print(f"✓ [TTSCog] 新しい辞書ファイルを作成しました")
+        except Exception as e:
+            print(f"✗ [TTSCog] 辞書読み込みエラー: {e}")
+            self.speech_dictionary = {}
+
+    def _save_dictionary(self):
+        """辞書ファイルを保存"""
+        try:
+            self.dictionary_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(self.dictionary_file, 'w', encoding='utf-8') as f:
+                json.dump(self.speech_dictionary, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"✗ [TTSCog] 辞書保存エラー: {e}")
+
+    def _apply_dictionary(self, text: str) -> str:
+        """
+        辞書を適用してテキストを変換
+        長い単語から順に置換することで、部分一致の問題を回避
+        """
+        if not self.speech_dictionary:
+            return text
+
+        # 辞書のキーを長い順にソート（長い単語を優先的に置換）
+        sorted_words = sorted(self.speech_dictionary.keys(), key=len, reverse=True)
+
+        result = text
+        for word in sorted_words:
+            reading = self.speech_dictionary[word]
+            result = result.replace(word, reading)
+
+        return result
+
+    dictionary_group = app_commands.Group(
+        name="dictionary",
+        description="読み上げ辞書の管理 / Manage speech dictionary"
+    )
+
+    @dictionary_group.command(
+        name="add",
+        description="読み上げ辞書に単語を追加します / Add a word to the speech dictionary"
+    )
+    @app_commands.describe(
+        word="登録する単語 / Word to register",
+        reading="読み方（ひらがな・カタカナ推奨） / Reading (hiragana/katakana recommended)"
+    )
+    async def add_dictionary(self, interaction: discord.Interaction, word: str, reading: str):
+        """辞書に単語を追加"""
+        if not word or not reading:
+            await interaction.response.send_message(
+                "❌ 単語と読み方の両方を指定してください。 / Please specify both word and reading.",
+                ephemeral=True
+            )
+            return
+
+        # 既存の単語かチェック
+        is_update = word in self.speech_dictionary
+        old_reading = self.speech_dictionary.get(word)
+
+        # 辞書に追加
+        self.speech_dictionary[word] = reading
+        self._save_dictionary()
+
+        if is_update:
+            embed = discord.Embed(
+                title="📖 辞書を更新しました / Dictionary Updated",
+                color=discord.Color.blue()
+            )
+            embed.add_field(name="単語 / Word", value=f"`{word}`", inline=False)
+            embed.add_field(name="変更前 / Before", value=f"`{old_reading}`", inline=True)
+            embed.add_field(name="変更後 / After", value=f"`{reading}`", inline=True)
+        else:
+            embed = discord.Embed(
+                title="📖 辞書に追加しました / Added to Dictionary",
+                color=discord.Color.green()
+            )
+            embed.add_field(name="単語 / Word", value=f"`{word}`", inline=True)
+            embed.add_field(name="読み方 / Reading", value=f"`{reading}`", inline=True)
+
+        embed.set_footer(text=f"辞書登録数: {len(self.speech_dictionary)}語")
+        await interaction.response.send_message(embed=embed)
+
+    @dictionary_group.command(
+        name="remove",
+        description="読み上げ辞書から単語を削除します / Remove a word from the speech dictionary"
+    )
+    @app_commands.describe(word="削除する単語 / Word to remove")
+    async def remove_dictionary(self, interaction: discord.Interaction, word: str):
+        """辞書から単語を削除"""
+        if word not in self.speech_dictionary:
+            await interaction.response.send_message(
+                f"❌ `{word}` は辞書に登録されていません。 / `{word}` is not in the dictionary.",
+                ephemeral=True
+            )
+            return
+
+        reading = self.speech_dictionary.pop(word)
+        self._save_dictionary()
+
+        embed = discord.Embed(
+            title="📖 辞書から削除しました / Removed from Dictionary",
+            color=discord.Color.orange()
+        )
+        embed.add_field(name="単語 / Word", value=f"`{word}`", inline=True)
+        embed.add_field(name="読み方 / Reading", value=f"`{reading}`", inline=True)
+        embed.set_footer(text=f"辞書登録数: {len(self.speech_dictionary)}語")
+
+        await interaction.response.send_message(embed=embed)
+
+    @dictionary_group.command(
+        name="list",
+        description="登録されている辞書の一覧を表示します / Display the list of registered words"
+    )
+    async def list_dictionary(self, interaction: discord.Interaction):
+        """辞書の一覧を表示"""
+        if not self.speech_dictionary:
+            await interaction.response.send_message(
+                "📖 辞書に登録されている単語はありません。 / No words in the dictionary.",
+                ephemeral=True
+            )
+            return
+
+        items_per_page = 20
+        dictionary_items = sorted(self.speech_dictionary.items(), key=lambda x: x[0])
+        total_items = len(dictionary_items)
+        total_pages = (total_items + items_per_page - 1) // items_per_page
+
+        def get_page_embed(page_num: int):
+            embed = discord.Embed(
+                title="📖 読み上げ辞書 / Speech Dictionary",
+                description=f"登録単語数: {total_items}語 / Total: {total_items} words",
+                color=discord.Color.blue()
+            )
+
+            start = (page_num - 1) * items_per_page
+            end = start + items_per_page
+
+            for word, reading in dictionary_items[start:end]:
+                embed.add_field(
+                    name=word,
+                    value=f"→ {reading}",
+                    inline=True
+                )
+
+            if total_pages > 1:
+                embed.set_footer(text=f"ページ {page_num}/{total_pages} / Page {page_num}/{total_pages}")
+
+            return embed
+
+        def get_view(current_page: int, user_id: int):
+            view = discord.ui.View(timeout=120.0)
+
+            prev_button = discord.ui.Button(
+                style=discord.ButtonStyle.primary,
+                emoji="◀️",
+                label="Previous",
+                disabled=(current_page == 1)
+            )
+
+            async def prev_callback(button_interaction: discord.Interaction):
+                if button_interaction.user.id != user_id:
+                    await button_interaction.response.send_message(
+                        "このボタンは使用できません。 / You cannot use this button.",
+                        ephemeral=True
+                    )
+                    return
+                nonlocal current_page
+                current_page = max(1, current_page - 1)
+                await button_interaction.response.edit_message(
+                    embed=get_page_embed(current_page),
+                    view=get_view(current_page, user_id)
+                )
+
+            prev_button.callback = prev_callback
+            view.add_item(prev_button)
+
+            close_button = discord.ui.Button(
+                style=discord.ButtonStyle.danger,
+                emoji="⏹️",
+                label="Close"
+            )
+
+            async def close_callback(button_interaction: discord.Interaction):
+                if button_interaction.user.id != user_id:
+                    await button_interaction.response.send_message(
+                        "このボタンは使用できません。 / You cannot use this button.",
+                        ephemeral=True
+                    )
+                    return
+                await button_interaction.response.edit_message(view=None)
+
+            close_button.callback = close_callback
+            view.add_item(close_button)
+
+            next_button = discord.ui.Button(
+                style=discord.ButtonStyle.primary,
+                emoji="▶️",
+                label="Next",
+                disabled=(current_page == total_pages)
+            )
+
+            async def next_callback(button_interaction: discord.Interaction):
+                if button_interaction.user.id != user_id:
+                    await button_interaction.response.send_message(
+                        "このボタンは使用できません。 / You cannot use this button.",
+                        ephemeral=True
+                    )
+                    return
+                nonlocal current_page
+                current_page = min(total_pages, current_page + 1)
+                await button_interaction.response.edit_message(
+                    embed=get_page_embed(current_page),
+                    view=get_view(current_page, user_id)
+                )
+
+            next_button.callback = next_callback
+            view.add_item(next_button)
+
+            return view
+
+        current_page = 1
+        if total_pages <= 1:
+            await interaction.response.send_message(embed=get_page_embed(current_page))
+        else:
+            await interaction.response.send_message(
+                embed=get_page_embed(current_page),
+                view=get_view(current_page, interaction.user.id)
+            )
+
+    @dictionary_group.command(
+        name="search",
+        description="辞書から単語を検索します / Search for a word in the dictionary"
+    )
+    @app_commands.describe(query="検索する単語（部分一致） / Search query (partial match)")
+    async def search_dictionary(self, interaction: discord.Interaction, query: str):
+        """辞書から単語を検索"""
+        if not self.speech_dictionary:
+            await interaction.response.send_message(
+                "📖 辞書に登録されている単語はありません。 / No words in the dictionary.",
+                ephemeral=True
+            )
+            return
+
+        # 部分一致で検索
+        results = {word: reading for word, reading in self.speech_dictionary.items() if query.lower() in word.lower()}
+
+        if not results:
+            await interaction.response.send_message(
+                f"❌ `{query}` に一致する単語が見つかりませんでした。 / No words found matching `{query}`.",
+                ephemeral=True
+            )
+            return
+
+        embed = discord.Embed(
+            title=f"🔍 検索結果: {query}",
+            description=f"{len(results)}件見つかりました / Found {len(results)} result(s)",
+            color=discord.Color.blue()
+        )
+
+        for word, reading in sorted(results.items())[:25]:  # 最大25件まで表示
+            embed.add_field(
+                name=word,
+                value=f"→ {reading}",
+                inline=True
+            )
+
+        if len(results) > 25:
+            embed.set_footer(text=f"... 他 {len(results) - 25} 件 / ... and {len(results) - 25} more")
+
+        await interaction.response.send_message(embed=embed)
+
     async def _handle_say_logic(self, guild: discord.Guild, text: str, model_id: int, style: str,
                                 style_weight: float, speed: float,
                                 interaction: Optional[discord.Interaction] = None) -> bool:
@@ -535,13 +821,18 @@ class TTSCog(commands.Cog, name="tts_cog"):
         if not voice_client:
             return False
 
+        # 辞書を適用してテキストを変換
+        converted_text = self._apply_dictionary(text)
+        print(f"[TTSCog] Original: {text}")
+        print(f"[TTSCog] Converted: {converted_text}")
+
         music_cog: Optional[MusicCog] = self.bot.get_cog("music_cog")
         music_state = music_cog._get_guild_state(guild.id) if music_cog else None
 
         if music_state and music_state.mixer and music_state.is_playing:
-            return await self._overlay_tts_with_mixer(guild, text, model_id, style, style_weight, speed, interaction)
+            return await self._overlay_tts_with_mixer(guild, converted_text, model_id, style, style_weight, speed, interaction)
         else:
-            return await self._play_tts_directly(guild, text, model_id, style, style_weight, speed, interaction)
+            return await self._play_tts_directly(guild, converted_text, model_id, style, style_weight, speed, interaction)
 
     async def _overlay_tts_with_mixer(self, guild: discord.Guild, text: str, model_id: int, style: str,
                                       style_weight: float, speed: float,
@@ -637,4 +928,9 @@ async def setup(bot: commands.Bot):
         return
     if not bot.get_cog("music_cog"):
         print("Warning: MusicCog is not loaded. TTSCog may not function correctly with music.")
-    await bot.add_cog(TTSCog(bot))
+    
+    tts_cog = TTSCog(bot)
+    await bot.add_cog(tts_cog)
+    
+    # Add the dictionary command group to the bot's command tree
+    bot.tree.add_command(tts_cog.dictionary_group)
