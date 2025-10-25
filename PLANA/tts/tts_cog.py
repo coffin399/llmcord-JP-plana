@@ -7,6 +7,7 @@ import io
 import asyncio
 import json
 from pathlib import Path
+import re
 from typing import Dict, Optional, List, Any
 import time
 
@@ -775,9 +776,17 @@ class TTSCog(commands.Cog, name="tts_cog"):
         if not voice_client:
             return False
 
+        # URLを「URL省略」に置換
+        url_pattern = r'https?://[^\s]+'
+        # 置換後のテキストの前後にスペースを入れることで、他の単語と結合するのを防ぐ
+        processed_text = re.sub(url_pattern, ' URL省略 ', text)
+
         # 辞書を適用してテキストを変換
-        converted_text = self._apply_dictionary(text)
+        converted_text = self._apply_dictionary(processed_text)
+
         print(f"[TTSCog] Original: {text}")
+        if text != processed_text:
+            print(f"[TTSCog] URL Replaced: {processed_text}")
         print(f"[TTSCog] Converted: {converted_text}")
 
         # 200文字を超える場合は切り詰めて「以下省略」を追加
