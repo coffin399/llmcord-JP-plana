@@ -145,7 +145,7 @@ PLANA具有進階個性設定和記憶功能，使對話更加豐富。
 *   **Rainbow Six Siege:** 遊戲統計顯示
 
 ### 🔊 語音合成（TTS）
-*   **Style-Bert-VITS2:** 高品質日語語音合成
+*   **Style-Bert-VITS2:** 高品質日語語音合成。需要單獨設定[Style-Bert-VITS2](https://github.com/litagin02/Style-Bert-VITS2)。
 *   **加入/離開通知:** 語音頻道中的語音通知
 *   **可自訂:** 語速、風格、情感調整
 

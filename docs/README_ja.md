@@ -145,7 +145,7 @@ PLANAは、会話をより豊かにするための高度なパーソナリティ
 *   **Rainbow Six Siege:** ゲーム統計の表示
 
 ### 🔊 音声合成（TTS）
-*   **Style-Bert-VITS2:** 高品質な日本語音声合成
+*   **Style-Bert-VITS2:** 高品質な日本語音声合成。利用には別途[Style-Bert-VITS2](https://github.com/litagin02/Style-Bert-VITS2)のセットアップが必要です。
 *   **参加/退出通知:** ボイスチャンネルでの音声通知
 *   **カスタマイズ可能:** 話速、スタイル、感情の調整
 
@@ -331,7 +331,7 @@ docker compose up --build -d
 ## 📞 サポート
 
 - Discord: `coffin299`
-- X (Twitter): [@coffin299](https://x.com/coffin399)
+- X (Twitter): [@coffin399](https://x.com/coffin399)
 - GitHub Issues: [Issues](https://github.com/coffin399/llmcord-JP-plana/issues)
 
 ---

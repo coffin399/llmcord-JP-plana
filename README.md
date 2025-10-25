@@ -173,9 +173,10 @@ llmcord-JP-plana/
 
 ## 🔒 Privacy
 
-PLANA **does not use Message Content Intent**. It only collects:
+PLANA requires the Message Content Intent for the following features:
 - Messages that @mention PLANA
 - Replies to PLANA's messages
+- Messages in channels where text-to-speech is enabled
 
 **No other server messages are collected or stored.**
 

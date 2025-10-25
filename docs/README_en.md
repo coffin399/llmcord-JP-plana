@@ -145,7 +145,7 @@ Provides useful slash commands for server management and information retrieval.
 *   **Rainbow Six Siege:** Game statistics display
 
 ### 🔊 Text-to-Speech (TTS)
-*   **Style-Bert-VITS2:** High-quality Japanese voice synthesis
+*   **Style-Bert-VITS2:** High-quality Japanese voice synthesis. Requires a separate setup of [Style-Bert-VITS2](https://github.com/litagin02/Style-Bert-VITS2).
 *   **Join/Leave Notifications:** Voice notifications in voice channels
 *   **Customizable:** Speech rate, style, and emotion adjustments
 

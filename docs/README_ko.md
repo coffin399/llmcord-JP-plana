@@ -145,7 +145,7 @@ PLANA는 대화를 더욱 풍부하게 하는 고급 성격 설정 및 기억 �
 *   **Rainbow Six Siege:** 게임 통계 표시
 
 ### 🔊 음성 합성(TTS)
-*   **Style-Bert-VITS2:** 고품질 일본어 음성 합성
+*   **Style-Bert-VITS2:** 고품질 일본어 음성 합성. 별도의 [Style-Bert-VITS2](https://github.com/litagin02/Style-Bert-VITS2) 설정이 필요합니다.
 *   **참가/퇴장 알림:** 음성 채널의 음성 알림
 *   **커스터마이징 가능:** 말하기 속도, 스타일, 감정 조정
 
