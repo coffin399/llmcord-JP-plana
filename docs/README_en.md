@@ -331,7 +331,7 @@ Pull requests are welcome! For major changes, please open an issue first to disc
 ## 📞 Support
 
 - Discord: `coffin299`
-- X (Twitter): [@coffin299](https://x.com/coffin399)
+- X (Twitter): [@coffin299](https://x.com/coffin299)
 - GitHub Issues: [Issues](https://github.com/coffin399/llmcord-JP-plana/issues)
 
 ---

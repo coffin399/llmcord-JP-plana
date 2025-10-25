@@ -184,7 +184,7 @@ PLANA **does not use Message Content Intent**. It only collects:
 ## 📞 Support
 
 - **Discord:** `coffin299`
-- **X (Twitter):** [@coffin299](https://x.com/coffin399)
+- **X (Twitter):** [@coffin299](https://x.com/coffin299)
 - **GitHub Issues:** [Report Issues](https://github.com/coffin399/llmcord-JP-plana/issues)
 - **In-Bot Support:** Use `/support` command
 
