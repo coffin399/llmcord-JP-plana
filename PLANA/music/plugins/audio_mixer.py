@@ -2,6 +2,7 @@
 import discord
 import struct
 import asyncio
+import io
 from typing import Dict, Optional
 import logging
 
@@ -121,9 +122,22 @@ class MusicAudioSource(discord.FFmpegPCMAudio):
 
 class TTSAudioSource(discord.FFmpegPCMAudio):
     def __init__(self, source, *, text: str, guild_id: int, **kwargs):
-        super().__init__(source, **kwargs)
+        # BytesIOの場合はpipe=Trueを強制
+        if isinstance(source, io.BytesIO):
+            kwargs['pipe'] = True
+
         self.text = text if len(text) < 30 else text[:27] + "..."
         self.guild_id = guild_id
+
+        try:
+            super().__init__(source, **kwargs)
+        except Exception as e:
+            logger.error(f"Guild {guild_id}: Failed to initialize TTSAudioSource: {e}")
+            raise
+
+    def cleanup(self):
+        logger.info(f"Guild {self.guild_id}: TTS FFmpeg process for '{self.text}' is being cleaned up.")
+        super().cleanup()
 
     def cleanup(self):
         logger.info(f"Guild {self.guild_id}: TTS FFmpeg process for '{self.text}' is being cleaned up.")

@@ -12,10 +12,11 @@ import time
 
 try:
     from PLANA.music.music_cog import MusicCog
-    from PLANA.music.audio_mixer import TTSAudioSource
+    from PLANA.music.plugins.audio_mixer import TTSAudioSource, MusicAudioSource
 except ImportError:
     MusicCog = None
     TTSAudioSource = None
+    MusicAudioSource = None
 
 try:
     from PLANA.tts.error.errors import TTSCogExceptionHandler
@@ -29,7 +30,14 @@ class TTSCog(commands.Cog, name="tts_cog"):
         if TTSCogExceptionHandler is None:
             raise commands.ExtensionFailed(self.qualified_name,
                                            "必須コンポーネントTTSCogExceptionHandlerのインポート失敗")
+        if TTSCogExceptionHandler is None:
+            raise commands.ExtensionFailed(self.qualified_name,
+                                           "必須コンポーネントTTSCogExceptionHandlerのインポート失敗")
 
+            # TTSAudioSourceのチェックを追加
+        if TTSAudioSource is None:
+            raise commands.ExtensionFailed(self.qualified_name,
+                                           "必須コンポーネントTTSAudioSourceのインポート失敗")
         self.bot = bot
         self.config = bot.config.get('tts', {})
 
@@ -553,12 +561,17 @@ class TTSCog(commands.Cog, name="tts_cog"):
                     return False
 
                 wav_data = await response.read()
+                print(f"[DEBUG] Received {len(wav_data)} bytes from TTS API")
+
+                # BytesIOを作成してシーク位置を先頭に
+                wav_buffer = io.BytesIO(wav_data)
+                wav_buffer.seek(0)
 
                 tts_source = TTSAudioSource(
-                    io.BytesIO(wav_data),
+                    wav_buffer,
                     text=text,
                     guild_id=guild.id,
-                    pipe=True
+                    pipe=True  # pipe=True に戻す（BytesIOの場合は必須）
                 )
 
                 source_name = f"tts_{int(time.time() * 1000)}"
@@ -571,6 +584,8 @@ class TTSCog(commands.Cog, name="tts_cog"):
             if interaction: await interaction.followup.send(f"❌ TTS再生中にエラーが発生しました: {type(e).__name__}",
                                                             ephemeral=True)
             print(f"Error during TTS overlay: {e}")
+            import traceback
+            traceback.print_exc()
             return False
 
     async def _play_tts_directly(self, guild: discord.Guild, text: str, model_id: int, style: str,
@@ -587,12 +602,17 @@ class TTSCog(commands.Cog, name="tts_cog"):
             async with self.session.post(endpoint, params=payload) as response:
                 if response.status == 200:
                     wav_data = await response.read()
+                    print(f"[DEBUG] Received {len(wav_data)} bytes from TTS API")
+
+                    # BytesIOを作成してシーク位置を先頭に
+                    wav_buffer = io.BytesIO(wav_data)
+                    wav_buffer.seek(0)
 
                     source = TTSAudioSource(
-                        io.BytesIO(wav_data),
+                        wav_buffer,
                         text=text,
                         guild_id=guild.id,
-                        pipe=True
+                        pipe=True  # pipe=True に戻す（BytesIOの場合は必須）
                     )
 
                     voice_client.play(source)
@@ -605,6 +625,9 @@ class TTSCog(commands.Cog, name="tts_cog"):
         except Exception as e:
             if interaction: await interaction.followup.send(f"❌ エラーが発生しました: {type(e).__name__}",
                                                             ephemeral=True)
+            print(f"Error during TTS playback: {e}")
+            import traceback
+            traceback.print_exc()
             return False
 
 
