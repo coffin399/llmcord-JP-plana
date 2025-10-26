@@ -878,10 +878,10 @@ class R6SiegeTrackerExtended(commands.Cog):
         await interaction.response.defer()
 
         try:
-            url = f"{self.base_url}/status"
+            url = "https://r6data.eu/api/service-status"
 
             async with aiohttp.ClientSession() as session:
-                async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as response:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as response:
                     if response.status != 200:
                         raise ServerStatusError(f"API returned status {response.status}")
 
@@ -896,16 +896,20 @@ class R6SiegeTrackerExtended(commands.Cog):
                 status = platform.get('status', 'Unknown')
                 services = platform.get('services', [])
 
-                status_emoji = "🟢" if status.lower() == "online" else "🔴"
+                # "No Issues" = オンライン/正常
+                status_lower = str(status).strip().lower()
+                status_emoji = "🟢" if "no issues" in status_lower or "operational" in status_lower else "🔴"
+
+                # サービス情報をフォーマット
                 services_text = "\n".join(services) if services else "No information"
 
                 embed.add_field(
                     name=f"{status_emoji} {platform.get('name', 'Unknown')}",
-                    value=services_text,
+                    value=f"**Status:** {status}\n{services_text}",
                     inline=False
                 )
 
-            embed.set_footer(text="Powered by R6Data API")
+            embed.set_footer(text="Powered by R6Data.eu API")
             await interaction.followup.send(embed=embed)
 
         except ServerStatusError as e:
