@@ -276,7 +276,7 @@ class Shittim(commands.Bot):
         self.status_templates = self.config.get('status_rotation', [
                                                                     "Ask @PLANA for command help",
                                                                     "operating on {guild_count} servers",
-                                                                    "PLANA Ver.2025-10-22",
+                                                                    "PLANA Ver.2025-10-28",
                                                                     "Ask @PLANA <image generation>"
                                                                     "/say <audio generation>"
                                                                     ])
