@@ -660,11 +660,12 @@ class LLMCog(commands.Cog, name="LLM"):
         Optional[List[discord.Message]], str, Optional[int]]:
         sent_message = None
         try:
+            model_name = client.model_name_for_api_calls
+            waiting_message = f"-# :incoming_envelope: waiting response for '{model_name}' :incoming_envelope:"
             try:
-                sent_message = await message.reply(":incoming_envelope: Thinking...:incoming_envelope:", silent=True)
+                sent_message = await message.reply(waiting_message, silent=True)
             except discord.HTTPException:
-                sent_message = await message.channel.send(":incoming_envelope: Thinking...:incoming_envelope:",
-                                                          silent=True)
+                sent_message = await message.channel.send(waiting_message, silent=True)
             return await self._process_streaming_and_send_response(sent_message=sent_message, channel=message.channel,
                                                                    user=message.author,
                                                                    messages_for_api=initial_messages, llm_client=client)
@@ -690,16 +691,23 @@ class LLMCog(commands.Cog, name="LLM"):
         update_interval, min_update_chars, retry_sleep_time = 0.5, 15, 2.0
         emoji_prefix, emoji_suffix = ":incoming_envelope: ", " :incoming_envelope:"
         max_final_retries, final_retry_delay = 3, 2.0
+        is_first_update = True
         logger.debug(f"Starting LLM stream for message {sent_message.id}")
         stream_generator = self._llm_stream_and_tool_handler(messages_for_api, llm_client, channel.id, user.id)
         async for content_chunk in stream_generator:
+            if not content_chunk:
+                continue
             chunk_count += 1
             full_response_text += content_chunk
             if chunk_count % 100 == 0: logger.debug(
                 f"Stream chunk #{chunk_count}, total length: {len(full_response_text)} chars")
             current_time, chars_accumulated = time.time(), len(full_response_text) - last_displayed_length
-            if (
-                    current_time - last_update > update_interval and chars_accumulated >= min_update_chars) and full_response_text:
+
+            should_update = is_first_update or (
+                    current_time - last_update > update_interval and chars_accumulated >= min_update_chars)
+
+            if should_update and full_response_text:
+                is_first_update = False
                 display_length = len(full_response_text)
                 if display_length > SAFE_MESSAGE_LENGTH:
                     display_text = f"{emoji_prefix}{full_response_text[:SAFE_MESSAGE_LENGTH - len(emoji_prefix) - len(emoji_suffix) - 100]}\n\n⚠️ (Output is long, will be split...)\n⚠️ (出力が長いため分割します...){emoji_suffix}"
@@ -1095,7 +1103,9 @@ class LLMCog(commands.Cog, name="LLM"):
                 logger.info("🌐 [LANG] Using default language prompt as fallback")
             messages_for_api.append({"role": "user", "content": user_content_parts})
             logger.info(f"🔵 [API] Sending {len(messages_for_api)} messages to LLM")
-            temp_message = await interaction.followup.send(":incoming_envelope: Thinking...:incoming_envelope:",
+            model_name = llm_client.model_name_for_api_calls
+            waiting_message = f"-# :incoming_envelope: waiting response for '{model_name}' :incoming_envelope:"
+            temp_message = await interaction.followup.send(waiting_message,
                                                            ephemeral=False, wait=True)
             sent_messages, full_response_text, used_key_index = await self._process_streaming_and_send_response(
                 sent_message=temp_message, channel=interaction.channel, user=interaction.user,
