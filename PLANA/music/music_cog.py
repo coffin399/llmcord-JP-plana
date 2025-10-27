@@ -247,21 +247,13 @@ class MusicCog(commands.Cog, name="music_cog"):
         self.guild_states[guild_id].update_activity()
         return self.guild_states[guild_id]
 
-    async def _send_response(self, interaction: discord.Interaction, message_key: str, ephemeral: bool = False,
+    async def _send_response(self, ctx: commands.Context, message_key: str, ephemeral: bool = False,
                              **kwargs):
         content = self.exception_handler.get_message(message_key, **kwargs)
         try:
-            if interaction.response.is_done():
-                await interaction.followup.send(content, ephemeral=ephemeral)
-            else:
-                await interaction.response.send_message(content, ephemeral=ephemeral)
-        except discord.errors.InteractionResponded:
-            try:
-                await interaction.followup.send(content, ephemeral=ephemeral)
-            except Exception as e:
-                logger.error(f"Guild {interaction.guild.id} ({interaction.guild.name}): Followup error: {e}")
+            await ctx.send(content, ephemeral=ephemeral)
         except Exception as e:
-            logger.error(f"Guild {interaction.guild.id} ({interaction.guild.name}): Response error: {e}")
+            logger.error(f"Guild {ctx.guild.id} ({ctx.guild.name}): Response error: {e}")
 
     async def _send_background_message(self, channel_id: int, message_key: str, **kwargs):
         try:
@@ -273,23 +265,20 @@ class MusicCog(commands.Cog, name="music_cog"):
         except Exception as e:
             logger.error(f"Background message error: {e}")
 
-    async def _handle_error(self, interaction: discord.Interaction, error: Exception):
-        error_message = self.exception_handler.handle_error(error, interaction.guild)
-        if interaction.response.is_done():
-            await interaction.followup.send(error_message, ephemeral=True)
-        else:
-            await interaction.response.send_message(error_message, ephemeral=True)
+    async def _handle_error(self, ctx: commands.Context, error: Exception):
+        error_message = self.exception_handler.handle_error(error, ctx.guild)
+        await ctx.send(error_message, ephemeral=True)
 
-    async def _ensure_voice(self, interaction: discord.Interaction, connect_if_not_in: bool = True) -> Optional[
+    async def _ensure_voice(self, ctx: commands.Context, connect_if_not_in: bool = True) -> Optional[
         discord.VoiceClient]:
-        state = self._get_guild_state(interaction.guild.id)
+        state = self._get_guild_state(ctx.guild.id)
         if not state:
-            await interaction.followup.send("サーバーの上限に達しています。", ephemeral=True)
+            await ctx.send("サーバーの上限に達しています。", ephemeral=True)
             return None
-        state.update_last_text_channel(interaction.channel.id)
-        user_voice = interaction.user.voice
+        state.update_last_text_channel(ctx.channel.id)
+        user_voice = ctx.author.voice
         if not user_voice or not user_voice.channel:
-            await self._send_response(interaction, "join_voice_channel_first", ephemeral=True)
+            await self._send_response(ctx, "join_voice_channel_first", ephemeral=True)
             return None
 
         async with state.connection_lock:
@@ -297,7 +286,7 @@ class MusicCog(commands.Cog, name="music_cog"):
                 active_connections = sum(
                     1 for s in self.guild_states.values() if s.voice_client and s.voice_client.is_connected())
                 if active_connections >= self.max_guilds and not state.voice_client:
-                    await self._send_response(interaction, "error_playing", ephemeral=True,
+                    await self._send_response(ctx, "error_playing", ephemeral=True,
                                               error="現在接続数が上限に達しています。")
                     return None
 
@@ -314,7 +303,7 @@ class MusicCog(commands.Cog, name="music_cog"):
                     vc = None
 
             for voice_client in list(self.bot.voice_clients):
-                if voice_client.guild.id == interaction.guild.id and voice_client != state.voice_client:
+                if voice_client.guild.id == ctx.guild.id and voice_client != state.voice_client:
                     try:
                         await asyncio.wait_for(voice_client.disconnect(force=True), timeout=3.0)
                     except:
@@ -328,14 +317,14 @@ class MusicCog(commands.Cog, name="music_cog"):
                         timeout=35.0
                     )
                     logger.info(
-                        f"Guild {interaction.guild.id} ({interaction.guild.name}): Connected to {user_voice.channel.name}")
+                        f"Guild {ctx.guild.id} ({ctx.guild.name}): Connected to {user_voice.channel.name}")
                     return state.voice_client
                 except Exception as e:
-                    await self._handle_error(interaction, e)
+                    await self._handle_error(ctx, e)
                     state.voice_client = None
                     return None
             elif not vc:
-                await self._send_response(interaction, "bot_not_in_voice_channel", ephemeral=True)
+                await self._send_response(ctx, "bot_not_in_voice_channel", ephemeral=True)
                 return None
             return vc
 
@@ -539,22 +528,22 @@ class MusicCog(commands.Cog, name="music_cog"):
         elif state.auto_leave_task and not state.auto_leave_task.done():
             state.auto_leave_task.cancel()
 
-    @app_commands.command(name="play", description="曲を再生またはキューに追加します。")
+    @commands.hybrid_command(name="play", description="曲を再生またはキューに追加します。")
     @app_commands.describe(query="再生したい曲のタイトル、またはURL")
-    async def play_slash(self, interaction: discord.Interaction, query: str):
-        await interaction.response.defer()
+    async def play(self, ctx: commands.Context, *, query: str):
+        await ctx.defer()
 
-        state = self._get_guild_state(interaction.guild.id)
+        state = self._get_guild_state(ctx.guild.id)
         if not state:
-            await interaction.followup.send("サーバーの上限に達しています。", ephemeral=True)
+            await ctx.send("サーバーの上限に達しています。", ephemeral=True)
             return
 
-        vc = await self._ensure_voice(interaction, connect_if_not_in=True)
+        vc = await self._ensure_voice(ctx, connect_if_not_in=True)
         if not vc:
             return
 
         if state.queue.qsize() >= self.max_queue_size:
-            await self._send_response(interaction, "max_queue_size_reached",
+            await self._send_response(ctx, "max_queue_size_reached",
                                       max_size=self.max_queue_size)
             return
 
@@ -562,14 +551,14 @@ class MusicCog(commands.Cog, name="music_cog"):
         state.is_loading = True
 
         try:
-            await interaction.followup.send(
+            await ctx.send(
                 self.exception_handler.get_message("searching_for_song", query=query)
             )
 
             extracted_media = await extract_audio_data(query, shuffle_playlist=False)
 
             if not extracted_media:
-                await interaction.channel.send(
+                await ctx.send(
                     self.exception_handler.get_message("search_no_results", query=query)
                 )
                 return
@@ -579,105 +568,105 @@ class MusicCog(commands.Cog, name="music_cog"):
 
             for track in tracks:
                 if state.queue.qsize() < self.max_queue_size:
-                    track.requester_id = interaction.user.id
+                    track.requester_id = ctx.author.id
                     track.stream_url = None
                     await state.queue.put(track)
                     if added_count == 0:
                         first_track = track
                     added_count += 1
                 else:
-                    await interaction.channel.send(
+                    await ctx.send(
                         self.exception_handler.get_message("max_queue_size_reached",
                                                            max_size=self.max_queue_size)
                     )
                     break
 
             if added_count > 1:
-                await interaction.channel.send(
+                await ctx.send(
                     self.exception_handler.get_message("added_playlist_to_queue",
                                                        count=added_count)
                 )
             elif added_count == 1 and first_track:
-                await interaction.channel.send(
+                await ctx.send(
                     self.exception_handler.get_message("added_to_queue",
                                                        title=first_track.title,
                                                        duration=format_duration(first_track.duration),
-                                                       requester_display_name=interaction.user.display_name)
+                                                       requester_display_name=ctx.author.display_name)
                 )
 
             if not was_playing:
-                await self._play_next_song(interaction.guild.id)
+                await self._play_next_song(ctx.guild.id)
 
         except Exception as e:
-            error_message = self.exception_handler.handle_error(e, interaction.guild)
-            await interaction.channel.send(
+            error_message = self.exception_handler.handle_error(e, ctx.guild)
+            await ctx.send(
                 self.exception_handler.get_message("error_message_wrapper", error=error_message)
             )
         finally:
             state.is_loading = False
 
-    @app_commands.command(name="seek", description="再生位置を指定した時刻に移動します。")
+    @commands.hybrid_command(name="seek", description="再生位置を指定した時刻に移動します。")
     @app_commands.describe(time="移動先の時刻 (例: 1:30 または 90 秒)")
-    async def seek_slash(self, interaction: discord.Interaction, time: str):
-        state = self._get_guild_state(interaction.guild.id)
+    async def seek(self, ctx: commands.Context, *, time: str):
+        state = self._get_guild_state(ctx.guild.id)
         if not state:
-            await interaction.response.send_message("エラーが発生しました。", ephemeral=True)
+            await ctx.send("エラーが発生しました。", ephemeral=True)
             return
 
-        await interaction.response.defer()
+        await ctx.defer()
 
-        if not await self._ensure_voice(interaction, connect_if_not_in=False):
+        if not await self._ensure_voice(ctx, connect_if_not_in=False):
             return
 
         if not state.current_track:
-            await self._send_response(interaction, "nothing_to_skip", ephemeral=True)
+            await self._send_response(ctx, "nothing_to_skip", ephemeral=True)
             return
 
         seek_seconds = parse_time_to_seconds(time)
         if seek_seconds is None:
-            await self._send_response(interaction, "invalid_time_format", ephemeral=True)
+            await self._send_response(ctx, "invalid_time_format", ephemeral=True)
             return
 
         if seek_seconds >= state.current_track.duration:
-            await self._send_response(interaction, "seek_beyond_duration", ephemeral=True,
+            await self._send_response(ctx, "seek_beyond_duration", ephemeral=True,
                                       duration=format_duration(state.current_track.duration))
             return
 
         state.is_seeking = True
-        self._song_finished_callback(None, interaction.guild.id)
+        self._song_finished_callback(None, ctx.guild.id)
         await asyncio.sleep(0.5)
         state.is_seeking = False
 
-        await self._send_response(interaction, "seeked_to_position", position=format_duration(seek_seconds))
-        await self._play_next_song(interaction.guild.id, seek_seconds=seek_seconds)
+        await self._send_response(ctx, "seeked_to_position", position=format_duration(seek_seconds))
+        await self._play_next_song(ctx.guild.id, seek_seconds=seek_seconds)
 
-    @app_commands.command(name="pause", description="再生を一時停止します。")
-    async def pause_slash(self, interaction: discord.Interaction):
-        state = self._get_guild_state(interaction.guild.id)
-        if not state or not await self._ensure_voice(interaction, connect_if_not_in=False):
+    @commands.hybrid_command(name="pause", description="再生を一時停止します。")
+    async def pause(self, ctx: commands.Context):
+        state = self._get_guild_state(ctx.guild.id)
+        if not state or not await self._ensure_voice(ctx, connect_if_not_in=False):
             return
 
         if not state.is_playing:
-            await self._send_response(interaction, "error_playing", ephemeral=True, error="再生中ではありません。")
+            await self._send_response(ctx, "error_playing", ephemeral=True, error="再生中ではありません。")
             return
 
         if state.is_paused:
-            await self._send_response(interaction, "error_playing", ephemeral=True, error="既に一時停止中です。")
+            await self._send_response(ctx, "error_playing", ephemeral=True, error="既に一時停止中です。")
             return
 
         state.voice_client.pause()
         state.is_paused = True
         state.paused_at = time.time()
-        await self._send_response(interaction, "playback_paused")
+        await self._send_response(ctx, "playback_paused")
 
-    @app_commands.command(name="resume", description="一時停止中の再生を再開します。")
-    async def resume_slash(self, interaction: discord.Interaction):
-        state = self._get_guild_state(interaction.guild.id)
-        if not state or not await self._ensure_voice(interaction, connect_if_not_in=False):
+    @commands.hybrid_command(name="resume", description="一時停止中の再生を再開します。")
+    async def resume(self, ctx: commands.Context):
+        state = self._get_guild_state(ctx.guild.id)
+        if not state or not await self._ensure_voice(ctx, connect_if_not_in=False):
             return
 
         if not state.is_paused:
-            await self._send_response(interaction, "error_playing", ephemeral=True, error="一時停止中ではありません。")
+            await self._send_response(ctx, "error_playing", ephemeral=True, error="一時停止中ではありません。")
             return
 
         state.voice_client.resume()
@@ -686,33 +675,33 @@ class MusicCog(commands.Cog, name="music_cog"):
             pause_duration = time.time() - state.paused_at
             state.playback_start_time += pause_duration
         state.paused_at = None
-        await self._send_response(interaction, "playback_resumed")
+        await self._send_response(ctx, "playback_resumed")
 
-    @app_commands.command(name="skip", description="再生中の曲をスキップします。")
-    async def skip_slash(self, interaction: discord.Interaction):
-        state = self._get_guild_state(interaction.guild.id)
+    @commands.hybrid_command(name="skip", description="再生中の曲をスキップします。")
+    async def skip(self, ctx: commands.Context):
+        state = self._get_guild_state(ctx.guild.id)
         if not state:
-            await interaction.response.send_message("エラーが発生しました。", ephemeral=True)
+            await ctx.send("エラーが発生しました。", ephemeral=True)
             return
 
-        await interaction.response.defer()
-        vc = await self._ensure_voice(interaction, connect_if_not_in=False)
+        await ctx.defer()
+        vc = await self._ensure_voice(ctx, connect_if_not_in=False)
         if not vc or not state.current_track:
-            await self._send_response(interaction, "nothing_to_skip", ephemeral=True)
+            await self._send_response(ctx, "nothing_to_skip", ephemeral=True)
             return
 
-        await self._send_response(interaction, "skipped_song", title=state.current_track.title)
-        self._song_finished_callback(None, interaction.guild.id)
+        await self._send_response(ctx, "skipped_song", title=state.current_track.title)
+        self._song_finished_callback(None, ctx.guild.id)
 
-    @app_commands.command(name="stop", description="再生を停止し、キューをクリアします。")
-    async def stop_slash(self, interaction: discord.Interaction):
-        state = self._get_guild_state(interaction.guild.id)
+    @commands.hybrid_command(name="stop", description="再生を停止し、キューをクリアします。")
+    async def stop(self, ctx: commands.Context):
+        state = self._get_guild_state(ctx.guild.id)
         if not state:
-            await interaction.response.send_message("エラーが発生しました。", ephemeral=True)
+            await ctx.send("エラーが発生しました。", ephemeral=True)
             return
 
-        await interaction.response.defer()
-        if not await self._ensure_voice(interaction, connect_if_not_in=False):
+        await ctx.defer()
+        if not await self._ensure_voice(ctx, connect_if_not_in=False):
             return
 
         state.loop_mode = LoopMode.OFF
@@ -726,33 +715,33 @@ class MusicCog(commands.Cog, name="music_cog"):
         state.is_paused = False
         state.current_track = None
         state.reset_playback_tracking()
-        await self._send_response(interaction, "stopped_playback")
+        await self._send_response(ctx, "stopped_playback")
 
-    @app_commands.command(name="leave", description="ボットをボイスチャンネルから切断します。")
-    async def leave_slash(self, interaction: discord.Interaction):
-        state = self._get_guild_state(interaction.guild.id)
+    @commands.hybrid_command(name="leave", description="ボットをボイスチャンネルから切断します。")
+    async def leave(self, ctx: commands.Context):
+        state = self._get_guild_state(ctx.guild.id)
         if not state:
-            await interaction.response.send_message("エラーが発生しました。", ephemeral=True)
+            await ctx.send("エラーが発生しました。", ephemeral=True)
             return
 
-        await interaction.response.defer()
+        await ctx.defer()
         async with state.connection_lock:
             if not state.voice_client or not state.voice_client.is_connected():
-                await self._send_response(interaction, "bot_not_in_voice_channel", ephemeral=True)
+                await self._send_response(ctx, "bot_not_in_voice_channel", ephemeral=True)
                 return
-            await self._send_response(interaction, "leaving_voice_channel")
-            await self._cleanup_guild_state(interaction.guild.id)
+            await self._send_response(ctx, "leaving_voice_channel")
+            await self._cleanup_guild_state(ctx.guild.id)
 
-    @app_commands.command(name="queue", description="現在の再生キューを表示します。")
-    async def queue_slash(self, interaction: discord.Interaction):
-        state = self._get_guild_state(interaction.guild.id)
+    @commands.hybrid_command(name="queue", description="現在の再生キューを表示します。")
+    async def queue(self, ctx: commands.Context):
+        state = self._get_guild_state(ctx.guild.id)
         if not state:
-            await interaction.response.send_message("エラーが発生しました。", ephemeral=True)
+            await ctx.send("エラーが発生しました。", ephemeral=True)
             return
 
-        state.update_last_text_channel(interaction.channel.id)
+        state.update_last_text_channel(ctx.channel.id)
         if state.queue.empty() and not state.current_track:
-            await interaction.response.send_message(self.exception_handler.get_message("queue_empty"), ephemeral=True)
+            await ctx.send(self.exception_handler.get_message("queue_empty"), ephemeral=True)
             return
 
         items_per_page = 10
@@ -770,7 +759,7 @@ class MusicCog(commands.Cog, name="music_cog"):
             if page_num == 1 and state.current_track:
                 track = state.current_track
                 try:
-                    requester = interaction.guild.get_member(track.requester_id) or await self.bot.fetch_user(
+                    requester = ctx.guild.get_member(track.requester_id) or await self.bot.fetch_user(
                         track.requester_id)
                 except:
                     requester = None
@@ -784,7 +773,7 @@ class MusicCog(commands.Cog, name="music_cog"):
             end = (page_num - 1) * items_per_page + items_per_page
             for i, track in enumerate(queue_list[start:end], start=start + 1):
                 try:
-                    requester = interaction.guild.get_member(track.requester_id) or await self.bot.fetch_user(
+                    requester = ctx.guild.get_member(track.requester_id) or await self.bot.fetch_user(
                         track.requester_id)
                 except:
                     requester = None
@@ -807,13 +796,13 @@ class MusicCog(commands.Cog, name="music_cog"):
                 disabled=(current_page == 1)
             )
 
-            async def first_callback(button_interaction: discord.Interaction):
-                if button_interaction.user.id != user_id:
-                    await button_interaction.response.send_message("このボタンは使用できません。", ephemeral=True)
+            async def first_callback(interaction: discord.Interaction):
+                if interaction.user.id != user_id:
+                    await interaction.response.send_message("このボタンは使用できません。", ephemeral=True)
                     return
                 nonlocal current_page
                 current_page = 1
-                await button_interaction.response.edit_message(
+                await interaction.response.edit_message(
                     embed=await get_page_embed(current_page),
                     view=get_queue_view(current_page, total_pages, user_id)
                 )
@@ -828,13 +817,13 @@ class MusicCog(commands.Cog, name="music_cog"):
                 disabled=(current_page == 1)
             )
 
-            async def prev_callback(button_interaction: discord.Interaction):
-                if button_interaction.user.id != user_id:
-                    await button_interaction.response.send_message("このボタンは使用できません。", ephemeral=True)
+            async def prev_callback(interaction: discord.Interaction):
+                if interaction.user.id != user_id:
+                    await interaction.response.send_message("このボタンは使用できません。", ephemeral=True)
                     return
                 nonlocal current_page
                 current_page = max(1, current_page - 1)
-                await button_interaction.response.edit_message(
+                await interaction.response.edit_message(
                     embed=await get_page_embed(current_page),
                     view=get_queue_view(current_page, total_pages, user_id)
                 )
@@ -848,12 +837,12 @@ class MusicCog(commands.Cog, name="music_cog"):
                 label="Close"
             )
 
-            async def stop_callback(button_interaction: discord.Interaction):
-                if button_interaction.user.id != user_id:
-                    await button_interaction.response.send_message("このボタンは使用できません。", ephemeral=True)
+            async def stop_callback(interaction: discord.Interaction):
+                if interaction.user.id != user_id:
+                    await interaction.response.send_message("このボタンは使用できません。", ephemeral=True)
                     return
                 view.stop()
-                await button_interaction.response.edit_message(view=None)
+                await interaction.response.edit_message(view=None)
 
             stop_button.callback = stop_callback
             view.add_item(stop_button)
@@ -865,13 +854,13 @@ class MusicCog(commands.Cog, name="music_cog"):
                 disabled=(current_page == total_pages)
             )
 
-            async def next_callback(button_interaction: discord.Interaction):
-                if button_interaction.user.id != user_id:
-                    await button_interaction.response.send_message("このボタンは使用できません。", ephemeral=True)
+            async def next_callback(interaction: discord.Interaction):
+                if interaction.user.id != user_id:
+                    await interaction.response.send_message("このボタンは使用できません。", ephemeral=True)
                     return
                 nonlocal current_page
                 current_page = min(total_pages, current_page + 1)
-                await button_interaction.response.edit_message(
+                await interaction.response.edit_message(
                     embed=await get_page_embed(current_page),
                     view=get_queue_view(current_page, total_pages, user_id)
                 )
@@ -886,13 +875,13 @@ class MusicCog(commands.Cog, name="music_cog"):
                 disabled=(current_page == total_pages)
             )
 
-            async def last_callback(button_interaction: discord.Interaction):
-                if button_interaction.user.id != user_id:
-                    await button_interaction.response.send_message("このボタンは使用できません。", ephemeral=True)
+            async def last_callback(interaction: discord.Interaction):
+                if interaction.user.id != user_id:
+                    await interaction.response.send_message("このボタンは使用できません。", ephemeral=True)
                     return
                 nonlocal current_page
                 current_page = total_pages
-                await button_interaction.response.edit_message(
+                await interaction.response.edit_message(
                     embed=await get_page_embed(current_page),
                     view=get_queue_view(current_page, total_pages, user_id)
                 )
@@ -904,23 +893,23 @@ class MusicCog(commands.Cog, name="music_cog"):
 
         current_page = 1
         if total_pages <= 1:
-            await interaction.response.send_message(embed=await get_page_embed(current_page))
+            await ctx.send(embed=await get_page_embed(current_page))
         else:
-            view = get_queue_view(current_page, total_pages, interaction.user.id)
-            await interaction.response.send_message(embed=await get_page_embed(current_page), view=view)
+            view = get_queue_view(current_page, total_pages, ctx.author.id)
+            await ctx.send(embed=await get_page_embed(current_page), view=view)
 
-    @app_commands.command(name="nowplaying", description="現在再生中の曲の情報を表示します。")
-    async def nowplaying_slash(self, interaction: discord.Interaction):
-        state = self._get_guild_state(interaction.guild.id)
+    @commands.hybrid_command(name="nowplaying", description="現在再生中の曲の情報を表示します。")
+    async def nowplaying(self, ctx: commands.Context):
+        state = self._get_guild_state(ctx.guild.id)
         if not state or not state.current_track:
-            await interaction.response.send_message(self.exception_handler.get_message("now_playing_nothing"),
+            await ctx.send(self.exception_handler.get_message("now_playing_nothing"),
                                                     ephemeral=True)
             return
 
         track = state.current_track
         status_icon = "▶️" if state.is_playing else ("⏸️" if state.is_paused else "⏹️")
         try:
-            requester = interaction.guild.get_member(track.requester_id) or await self.bot.fetch_user(
+            requester = ctx.guild.get_member(track.requester_id) or await self.bot.fetch_user(
                 track.requester_id)
         except:
             requester = None
@@ -937,7 +926,7 @@ class MusicCog(commands.Cog, name="music_cog"):
         )
         if track.thumbnail:
             embed.set_thumbnail(url=track.thumbnail)
-        await interaction.response.send_message(embed=embed)
+        await ctx.send(embed=embed)
 
     def _create_progress_bar(self, current: int, total: int, length: int = 20) -> str:
         if total <= 0:
@@ -947,14 +936,14 @@ class MusicCog(commands.Cog, name="music_cog"):
         bar = "━" * filled + "○" + "─" * (length - filled - 1)
         return bar
 
-    @app_commands.command(name="shuffle", description="再生キューをシャッフルします。")
-    async def shuffle_slash(self, interaction: discord.Interaction):
-        state = self._get_guild_state(interaction.guild.id)
-        if not state or not await self._ensure_voice(interaction, connect_if_not_in=False):
+    @commands.hybrid_command(name="shuffle", description="再生キューをシャッフルします。")
+    async def shuffle(self, ctx: commands.Context):
+        state = self._get_guild_state(ctx.guild.id)
+        if not state or not await self._ensure_voice(ctx, connect_if_not_in=False):
             return
 
         if state.queue.qsize() < 2:
-            await self._send_response(interaction, "error_playing", ephemeral=True,
+            await self._send_response(ctx, "error_playing", ephemeral=True,
                                       error="シャッフルするにはキューに2曲以上必要です。")
             return
 
@@ -963,32 +952,36 @@ class MusicCog(commands.Cog, name="music_cog"):
         state.queue = asyncio.Queue()
         for item in queue_list:
             await state.queue.put(item)
-        await self._send_response(interaction, "queue_shuffled")
+        await self._send_response(ctx, "queue_shuffled")
 
-    @app_commands.command(name="clear", description="再生キューを空にします（再生中の曲は停止しません）。")
-    async def clear_slash(self, interaction: discord.Interaction):
-        state = self._get_guild_state(interaction.guild.id)
-        if not state or not await self._ensure_voice(interaction, connect_if_not_in=False):
+    @commands.hybrid_command(name="clear", description="再生キューを空にします（再生中の曲は停止しません）。")
+    async def clear(self, ctx: commands.Context):
+        state = self._get_guild_state(ctx.guild.id)
+        if not state or not await self._ensure_voice(ctx, connect_if_not_in=False):
             return
 
         await state.clear_queue()
-        await self._send_response(interaction, "queue_cleared")
+        await self._send_response(ctx, "queue_cleared")
 
-    @app_commands.command(name="remove", description="キューから指定した番号の曲を削除します。")
+    @commands.hybrid_command(name="remove", description="キューから指定した番号の曲を削除します。")
     @app_commands.describe(index="削除したい曲のキュー番号")
-    async def remove_slash(self, interaction: discord.Interaction, index: app_commands.Range[int, 1, None]):
-        state = self._get_guild_state(interaction.guild.id)
+    async def remove(self, ctx: commands.Context, index: int):
+        state = self._get_guild_state(ctx.guild.id)
         if not state:
-            await interaction.response.send_message("エラーが発生しました。", ephemeral=True)
+            await ctx.send("エラーが発生しました。", ephemeral=True)
+            return
+
+        if index < 1:
+            await self._send_response(ctx, "invalid_queue_number", ephemeral=True)
             return
 
         if state.queue.empty():
-            await interaction.response.send_message(self.exception_handler.get_message("queue_empty"), ephemeral=True)
+            await ctx.send(self.exception_handler.get_message("queue_empty"), ephemeral=True)
             return
 
         actual_index = index - 1
         if not (0 <= actual_index < state.queue.qsize()):
-            await self._send_response(interaction, "invalid_queue_number", ephemeral=True)
+            await self._send_response(ctx, "invalid_queue_number", ephemeral=True)
             return
 
         queue_list = list(state.queue._queue)
@@ -996,53 +989,61 @@ class MusicCog(commands.Cog, name="music_cog"):
         state.queue = asyncio.Queue()
         for item in queue_list:
             await state.queue.put(item)
-        await self._send_response(interaction, "song_removed", title=removed_track.title)
+        await self._send_response(ctx, "song_removed", title=removed_track.title)
 
-    @app_commands.command(name="volume", description="音量を変更します (0-200)。")
+    @commands.hybrid_command(name="volume", description="音量を変更します (0-200)。")
     @app_commands.describe(level="設定したい音量レベル (0-200)")
-    async def volume_slash(self, interaction: discord.Interaction, level: app_commands.Range[int, 0, 200]):
-        state = self._get_guild_state(interaction.guild.id)
+    async def volume(self, ctx: commands.Context, level: int):
+        if not 0 <= level <= 200:
+            await ctx.send("音量は0から200の間で指定してください。", ephemeral=True)
+            return
+
+        state = self._get_guild_state(ctx.guild.id)
         if not state:
-            await interaction.response.send_message("エラーが発生しました。", ephemeral=True)
+            await ctx.send("エラーが発生しました。", ephemeral=True)
             return
 
         state.volume = level / 100.0
         state.update_activity()
         if state.mixer:
             await state.mixer.set_volume('music', state.volume)
-        await self._send_response(interaction, "volume_set", volume=level)
+        await self._send_response(ctx, "volume_set", volume=level)
 
-    @app_commands.command(name="loop", description="ループ再生モードを設定します。")
+    @commands.hybrid_command(name="loop", description="ループ再生モードを設定します。")
     @app_commands.describe(mode="ループのモードを選択してください。")
     @app_commands.choices(mode=[
         app_commands.Choice(name="オフ (Loop Off)", value="off"),
         app_commands.Choice(name="現在の曲をループ (Loop One)", value="one"),
         app_commands.Choice(name="キュー全体をループ (Loop All)", value="all")
     ])
-    async def loop_slash(self, interaction: discord.Interaction, mode: app_commands.Choice[str]):
-        state = self._get_guild_state(interaction.guild.id)
+    async def loop(self, ctx: commands.Context, mode: str):
+        state = self._get_guild_state(ctx.guild.id)
         if not state:
-            await interaction.response.send_message("エラーが発生しました。", ephemeral=True)
+            await ctx.send("エラーが発生しました。", ephemeral=True)
             return
 
-        await interaction.response.defer()
+        await ctx.defer()
         mode_map = {"off": LoopMode.OFF, "one": LoopMode.ONE, "all": LoopMode.ALL}
-        state.loop_mode = mode_map.get(mode.value, LoopMode.OFF)
+        mode_val = mode.lower()
+        if mode_val not in mode_map:
+            await ctx.send(f"無効なモードです。`off`, `one`, `all`のいずれかを指定してください。", ephemeral=True)
+            return
+        state.loop_mode = mode_map.get(mode_val, LoopMode.OFF)
         state.update_activity()
-        await self._send_response(interaction, f"loop_{mode.value}")
+        await self._send_response(ctx, f"loop_{mode_val}")
 
-    @app_commands.command(name="join", description="ボットをあなたのいるボイスチャンネルに接続します。")
-    async def join_slash(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=True)
-        if await self._ensure_voice(interaction, connect_if_not_in=True):
-            await interaction.followup.send(self.exception_handler.get_message("already_connected"), ephemeral=True)
+    @commands.hybrid_command(name="join", description="ボットをあなたのいるボイスチャンネルに接続します。")
+    async def join(self, ctx: commands.Context):
+        await ctx.defer(ephemeral=True)
+        if await self._ensure_voice(ctx, connect_if_not_in=True):
+            await ctx.send(self.exception_handler.get_message("already_connected"), ephemeral=True)
 
-    @app_commands.command(name="music_help", description="音楽機能のコマンド一覧と使い方を表示します。")
-    async def music_help_slash(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=False)
+    @commands.hybrid_command(name="music_help", description="音楽機能のコマンド一覧と使い方を表示します。")
+    async def music_help(self, ctx: commands.Context):
+        await ctx.defer(ephemeral=False)
         embed = discord.Embed(
             title="🎵 音楽機能 ヘルプ / Music Feature Help",
-            description="音楽再生に関するコマンドの一覧です。\nAll commands start with a slash (`/`).",
+            description=f"音楽再生に関するコマンドの一覧です。\nコマンドはスラッシュ (`/`) またはプレフィックス (`{self.bot.command_prefix}`) で始まります。",
             color=discord.Color.from_rgb(79, 194, 255)
         )
         command_info = {
@@ -1069,10 +1070,10 @@ class MusicCog(commands.Cog, name="music_cog"):
                 {"name": "leave", "args": "", "desc_en": "Leave VC", "desc_ja": "VCから切断"}
             ]
         }
-        cog_command_names = {cmd.name for cmd in self.__cog_app_commands__}
+        cog_command_names = {cmd.name for cmd in self.get_commands()}
         for category, commands_in_category in command_info.items():
             field_value = "".join(
-                f"`/{c['name']}{' ' + c['args'] if c['args'] else ''}`\n{c['desc_ja']} / {c['desc_en']}\n"
+                f"`{self.bot.command_prefix}{c['name']}{' ' + c['args'] if c['args'] else ''}`\n{c['desc_ja']} / {c['desc_en']}\n"
                 for c in commands_in_category if c['name'] in cog_command_names
             )
             if field_value:
@@ -1080,36 +1081,36 @@ class MusicCog(commands.Cog, name="music_cog"):
 
         active_guilds = len(self.guild_states)
         embed.set_footer(text=f"<> は引数を表します | Active: {active_guilds}/{self.max_guilds} servers")
-        await interaction.followup.send(embed=embed)
+        await ctx.send(embed=embed)
 
-    reload_group = app_commands.Group(name="reload",
-                                      description="各種機能を再読み込みします。 / Reloads various features.")
+    @commands.hybrid_group(name="reload", description="各種機能を再読み込みします。 / Reloads various features.")
+    async def reload(self, ctx: commands.Context):
+        if ctx.invoked_subcommand is None:
+            await ctx.send('このコマンドにはサブコマンドが必要です。 (例: `reload music_cog`)', ephemeral=True)
 
-    @reload_group.command(name="music_cog",
-                          description="音楽Cogを再読み込みして、問題をリセットします。/ Reloads the music cog to fix issues.")
-    async def reload_music_cog_subcommand(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=False)
+    @reload.command(name="music_cog", description="音楽Cogを再読み込みして、問題をリセットします。/ Reloads the music cog to fix issues.")
+    async def reload_music_cog(self, ctx: commands.Context):
+        await ctx.defer(ephemeral=True)
         module_name = self.__module__
-        logger.info(f"音楽Cog ({module_name}) の再読み込みを試みます。リクエスト者: {interaction.user}")
+        logger.info(f"音楽Cog ({module_name}) の再読み込みを試みます。リクエスト者: {ctx.author}")
 
         try:
             await self.bot.reload_extension(module_name)
             logger.info(f"音楽Cog ({module_name}) の再読み込みに成功しました。")
-            await interaction.followup.send(
+            await ctx.followup.send(
                 "🎵 音楽機能の再読み込みが完了しました。\n🎵 Music feature has been successfully reloaded.",
                 ephemeral=True
             )
         except Exception as e:
             logger.error(f"音楽Cog ({module_name}) の再読み込み中にエラーが発生しました: {e}", exc_info=True)
-            await interaction.followup.send(
+            await ctx.followup.send(
                 f"❌ 音楽機能の再読み込み中にエラーが発生しました。\n❌ An error occurred while reloading the music feature.\n```py\n{type(e).__name__}: {e}\n```",
                 ephemeral=True
             )
 
-    @reload_music_cog_subcommand.error
-    async def reload_music_cog_subcommand_error(self, interaction: discord.Interaction,
-                                                error: app_commands.AppCommandError):
-        await self.exception_handler.handle_generic_command_error(interaction, error)
+    @reload_music_cog.error
+    async def reload_music_cog_error(self, ctx: commands.Context, error: commands.CommandError):
+        await self.exception_handler.handle_generic_command_error(ctx, error)
 
 
 async def setup(bot: commands.Bot):
