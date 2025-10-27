@@ -1041,9 +1041,10 @@ class MusicCog(commands.Cog, name="music_cog"):
     @commands.hybrid_command(name="music_help", description="音楽機能のコマンド一覧と使い方を表示します。")
     async def music_help(self, ctx: commands.Context):
         await ctx.defer(ephemeral=False)
+        prefix = str(self.bot.command_prefix).strip('"'+"'")
         embed = discord.Embed(
             title="🎵 音楽機能 ヘルプ / Music Feature Help",
-            description=f"音楽再生に関するコマンドの一覧です。\nコマンドはスラッシュ (`/`) またはプレフィックス (`{self.bot.command_prefix}`) で始まります。",
+            description=f"音楽再生に関するコマンドの一覧です。\nコマンドはスラッシュ (`/`) またはプレフィックス (`{prefix}`) で始まります。",
             color=discord.Color.from_rgb(79, 194, 255)
         )
         command_info = {
@@ -1073,7 +1074,7 @@ class MusicCog(commands.Cog, name="music_cog"):
         cog_command_names = {cmd.name for cmd in self.get_commands()}
         for category, commands_in_category in command_info.items():
             field_value = "".join(
-                f"`{self.bot.command_prefix}{c['name']}{' ' + c['args'] if c['args'] else ''}`\n{c['desc_ja']} / {c['desc_en']}\n"
+                f"`{prefix}{c['name']}{' ' + c['args'] if c['args'] else ''}`\n{c['desc_ja']} / {c['desc_en']}\n"
                 for c in commands_in_category if c['name'] in cog_command_names
             )
             if field_value:
