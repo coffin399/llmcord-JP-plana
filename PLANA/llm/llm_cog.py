@@ -295,8 +295,8 @@ class LLMCog(commands.Cog, name="LLM"):
         self.language_prompt = self.llm_config.get('language_prompt')
         if self.language_prompt: logger.info("Language prompt loaded from config for fallback.")
         self.http_session, self.bot.cfg = aiohttp.ClientSession(), self.llm_config
-        self.conversation_threads: Dict[int, List[Dict[str, Any]]] = {}
-        self.message_to_thread: Dict[int, int] = {}
+        self.conversation_threads: Dict[int, Dict[int, List[Dict[str, Any]]]] = {}  # {guild_id: {thread_id: messages}}
+        self.message_to_thread: Dict[int, Dict[int, int]] = {}  # {guild_id: {message_id: thread_id}}
         self.llm_clients: Dict[str, openai.AsyncOpenAI] = {}
         self.provider_api_keys: Dict[str, List[str]] = {}
         self.provider_key_index: Dict[str, int] = {}
@@ -568,7 +568,15 @@ class LLMCog(commands.Cog, name="LLM"):
         return definitions or None
 
     async def _get_conversation_thread_id(self, message: discord.Message) -> int:
-        if message.id in self.message_to_thread: return self.message_to_thread[message.id]
+        guild_id = message.guild.id if message.guild else 0  # DMの場合は0
+        
+        # ギルド固有の辞書を初期化
+        if guild_id not in self.message_to_thread:
+            self.message_to_thread[guild_id] = {}
+        
+        if message.id in self.message_to_thread[guild_id]: 
+            return self.message_to_thread[guild_id][message.id]
+        
         current_msg, visited_ids = message, set()
         while current_msg.reference and current_msg.reference.message_id:
             if current_msg.id in visited_ids: break
@@ -581,10 +589,16 @@ class LLMCog(commands.Cog, name="LLM"):
             except (discord.NotFound, discord.HTTPException):
                 break
         thread_id = current_msg.id
-        self.message_to_thread[message.id] = thread_id
+        self.message_to_thread[guild_id][message.id] = thread_id
         return thread_id
 
     async def _collect_conversation_history(self, message: discord.Message) -> List[Dict[str, Any]]:
+        guild_id = message.guild.id if message.guild else 0  # DMの場合は0
+        
+        # ギルド固有の会話履歴を初期化
+        if guild_id not in self.conversation_threads:
+            self.conversation_threads[guild_id] = {}
+        
         history, current_msg, visited_ids = [], message, set()
         while current_msg.reference and current_msg.reference.message_id:
             if current_msg.reference.message_id in visited_ids: break
@@ -607,8 +621,8 @@ class LLMCog(commands.Cog, name="LLM"):
                         history.append({"role": "user", "content": user_content_parts})
                 else:
                     thread_id = await self._get_conversation_thread_id(parent_msg)
-                    if thread_id in self.conversation_threads:
-                        for msg in self.conversation_threads[thread_id]:
+                    if thread_id in self.conversation_threads[guild_id]:
+                        for msg in self.conversation_threads[guild_id][thread_id]:
                             if msg.get("role") == "assistant" and msg.get("message_id") == parent_msg.id:
                                 history.append({"role": "assistant", "content": msg["content"]})
                                 break
@@ -798,11 +812,22 @@ class LLMCog(commands.Cog, name="LLM"):
                 key_log_str = f" [key{used_key_index + 1}]" if used_key_index is not None else ""
                 logger.info(f"🤖 [LLM_RESPONSE]{key_log_str} {log_response.replace(chr(10), ' ')}")
                 logger.debug(f"LLM full response (length: {len(llm_response)} chars):\n{llm_response}")
-                if thread_id not in self.conversation_threads: self.conversation_threads[thread_id] = []
-                self.conversation_threads[thread_id].append(user_message_for_api)
+                guild_id = message.guild.id if message.guild else 0  # DMの場合は0
+                
+                # ギルド固有の会話履歴を初期化
+                if guild_id not in self.conversation_threads:
+                    self.conversation_threads[guild_id] = {}
+                if thread_id not in self.conversation_threads[guild_id]: 
+                    self.conversation_threads[guild_id][thread_id] = []
+                
+                self.conversation_threads[guild_id][thread_id].append(user_message_for_api)
                 assistant_message = {"role": "assistant", "content": llm_response, "message_id": sent_messages[0].id}
-                self.conversation_threads[thread_id].append(assistant_message)
-                for msg in sent_messages: self.message_to_thread[msg.id] = thread_id
+                self.conversation_threads[guild_id][thread_id].append(assistant_message)
+                for msg in sent_messages: 
+                    guild_id_for_msg = msg.guild.id if msg.guild else 0
+                    if guild_id_for_msg not in self.message_to_thread:
+                        self.message_to_thread[guild_id_for_msg] = {}
+                    self.message_to_thread[guild_id_for_msg][msg.id] = thread_id
                 self._cleanup_old_threads()
 
                 # TTS Cogにカスタムイベントを発火させる
@@ -817,11 +842,17 @@ class LLMCog(commands.Cog, name="LLM"):
                                 view=self._create_support_view(), silent=True)
 
     def _cleanup_old_threads(self):
-        if len(self.conversation_threads) > 100:
-            threads_to_remove = list(self.conversation_threads.keys())[:len(self.conversation_threads) - 100]
-            for thread_id in threads_to_remove:
-                del self.conversation_threads[thread_id]
-                self.message_to_thread = {k: v for k, v in self.message_to_thread.items() if v != thread_id}
+        for guild_id in list(self.conversation_threads.keys()):
+            guild_threads = self.conversation_threads[guild_id]
+            if len(guild_threads) > 100:
+                threads_to_remove = list(guild_threads.keys())[:len(guild_threads) - 100]
+                for thread_id in threads_to_remove:
+                    del guild_threads[thread_id]
+                    if guild_id in self.message_to_thread:
+                        self.message_to_thread[guild_id] = {
+                            k: v for k, v in self.message_to_thread[guild_id].items() 
+                            if v != thread_id
+                        }
 
     async def _handle_llm_streaming_response(self, message: discord.Message, initial_messages: List[Dict[str, Any]],
                                              client: openai.AsyncOpenAI, is_first_response: bool = False) -> Tuple[
@@ -1980,10 +2011,13 @@ class LLMCog(commands.Cog, name="LLM"):
                           description="Clears the history of the current conversation thread.\n現在の会話スレッドの履歴をクリアします。")
     async def clear_history_slash(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=False)
+        guild_id = interaction.guild.id if interaction.guild else 0  # DMの場合は0
         cleared_count, threads_to_clear = 0, set()
+        
         try:
             async for msg in interaction.channel.history(limit=200):
-                if msg.id in self.message_to_thread: threads_to_clear.add(self.message_to_thread[msg.id])
+                if guild_id in self.message_to_thread and msg.id in self.message_to_thread[guild_id]: 
+                    threads_to_clear.add(self.message_to_thread[guild_id][msg.id])
         except (discord.Forbidden, discord.HTTPException):
             embed = discord.Embed(title="⚠️ Permission Error / 権限エラー",
                                   description="Could not read the channel's message history.\nチャンネルのメッセージ履歴を読み取れませんでした。",
@@ -1991,11 +2025,17 @@ class LLMCog(commands.Cog, name="LLM"):
             self._add_support_footer(embed)
             await interaction.followup.send(embed=embed, view=self._create_support_view())
             return
+        
         for thread_id in threads_to_clear:
-            if thread_id in self.conversation_threads:
-                del self.conversation_threads[thread_id]
-                self.message_to_thread = {k: v for k, v in self.message_to_thread.items() if v != thread_id}
+            if guild_id in self.conversation_threads and thread_id in self.conversation_threads[guild_id]:
+                del self.conversation_threads[guild_id][thread_id]
+                if guild_id in self.message_to_thread:
+                    self.message_to_thread[guild_id] = {
+                        k: v for k, v in self.message_to_thread[guild_id].items() 
+                        if v != thread_id
+                    }
                 cleared_count += 1
+        
         if cleared_count > 0:
             embed = discord.Embed(title="✅ History Cleared / 履歴をクリアしました",
                                   description=f"Cleared the history of {cleared_count} conversation thread(s) related to this channel.\nこのチャンネルに関連する {cleared_count} 個の会話スレッドの履歴をクリアしました。",
