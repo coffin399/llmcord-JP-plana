@@ -143,26 +143,50 @@ class ThreadCreationView(discord.ui.View):
                 reason="AI conversation thread created by user"
             )
             
-            # スレッド内の直近40メッセージを取得
+            # 元のチャンネルの会話履歴を取得（スレッド作成前の履歴）
             messages = []
-            async for message in thread.history(limit=40):
-                if message.author != self.llm_cog.bot.user:
-                    # ユーザーメッセージを処理
-                    image_contents, text_content = await self.llm_cog._prepare_multimodal_content(message)
-                    text_content = text_content.replace(f'<@!{self.llm_cog.bot.user.id}>', '').replace(f'<@{self.llm_cog.bot.user.id}>', '').strip()
+            try:
+                # 元のメッセージから遡って会話履歴を収集
+                current_msg = self.original_message
+                visited_ids = set()
+                message_count = 0
+                
+                while current_msg and message_count < 40:
+                    if current_msg.id in visited_ids:
+                        break
+                    visited_ids.add(current_msg.id)
                     
-                    if text_content or image_contents:
-                        user_content_parts = []
-                        if text_content:
-                            user_content_parts.append({
-                                "type": "text",
-                                "text": f"{message.created_at.astimezone(self.llm_cog.jst).strftime('[%H:%M]')} {text_content}"
-                            })
-                        user_content_parts.extend(image_contents)
-                        messages.append({"role": "user", "content": user_content_parts})
-            
-            # メッセージを逆順にして正しい順序にする
-            messages.reverse()
+                    if current_msg.author != self.llm_cog.bot.user:
+                        # ユーザーメッセージを処理
+                        image_contents, text_content = await self.llm_cog._prepare_multimodal_content(current_msg)
+                        text_content = text_content.replace(f'<@!{self.llm_cog.bot.user.id}>', '').replace(f'<@{self.llm_cog.bot.user.id}>', '').strip()
+                        
+                        if text_content or image_contents:
+                            user_content_parts = []
+                            if text_content:
+                                user_content_parts.append({
+                                    "type": "text",
+                                    "text": f"{current_msg.created_at.astimezone(self.llm_cog.jst).strftime('[%H:%M]')} {text_content}"
+                                })
+                            user_content_parts.extend(image_contents)
+                            messages.append({"role": "user", "content": user_content_parts})
+                            message_count += 1
+                    
+                    # 前のメッセージを取得
+                    if current_msg.reference and current_msg.reference.message_id:
+                        try:
+                            current_msg = current_msg.reference.resolved or await current_msg.channel.fetch_message(current_msg.reference.message_id)
+                        except (discord.NotFound, discord.HTTPException):
+                            break
+                    else:
+                        break
+                
+                # メッセージを逆順にして正しい順序にする
+                messages.reverse()
+                
+            except Exception as e:
+                logger.error(f"Failed to collect conversation history for thread: {e}", exc_info=True)
+                messages = []
             
             if messages:
                 # LLMクライアントを取得
@@ -201,6 +225,12 @@ class ThreadCreationView(discord.ui.View):
                 waiting_message = f"⏳ Processing conversation history... / 会話履歴を処理中..."
                 temp_message = await thread.send(waiting_message)
                 
+                # スレッド内での会話方法を説明
+                await thread.send("💡 **スレッド内での会話方法 / How to chat in this thread:**\n"
+                                "• メンション不要で直接話しかけることができます / You can chat directly without mentioning\n"
+                                "• 画像も送信可能です / Images are also supported\n"
+                                "• 会話履歴は自動的に保持されます / Conversation history is automatically maintained")
+                
                 sent_messages, full_response_text, used_key_index = await self.llm_cog._process_streaming_and_send_response(
                     sent_message=temp_message,
                     channel=thread,
@@ -225,7 +255,12 @@ class ThreadCreationView(discord.ui.View):
                 await interaction.edit_original_response(view=self)
                 
             else:
-                await thread.send("ℹ️ No conversation history found in this thread.\nこのスレッドには会話履歴が見つかりませんでした。")
+                await thread.send("ℹ️ No conversation history found, but you can start chatting!\n"
+                                "会話履歴は見つかりませんでしたが、ここから会話を始めることができます！\n\n"
+                                "💡 **スレッド内での会話方法 / How to chat in this thread:**\n"
+                                "• メンション不要で直接話しかけることができます / You can chat directly without mentioning\n"
+                                "• 画像も送信可能です / Images are also supported\n"
+                                "• 会話履歴は自動的に保持されます / Conversation history is automatically maintained")
                 
         except Exception as e:
             logger.error(f"Failed to create thread: {e}", exc_info=True)
@@ -682,10 +717,16 @@ class LLMCog(commands.Cog, name="LLM"):
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
         if message.author.bot: return
+        
+        # スレッド内ではメンション・リプライ不要で会話可能
+        is_thread = isinstance(message.channel, discord.Thread)
         is_mentioned = self.bot.user.mentioned_in(message) and not message.mention_everyone
         is_reply_to_bot = (message.reference and isinstance(message.reference.resolved,
                                                             discord.Message) and message.reference.resolved.author == self.bot.user)
-        if not (is_mentioned or is_reply_to_bot): return
+        
+        # スレッド内でない場合は従来通りメンション・リプライが必要
+        if not is_thread and not (is_mentioned or is_reply_to_bot): 
+            return
         try:
             llm_client = await self._get_llm_client_for_channel(message.channel.id)
             if not llm_client:
@@ -744,7 +785,8 @@ class LLMCog(commands.Cog, name="LLM"):
             f"Messages structure: system={len(messages_for_api[0]['content'])} chars, lang_override={'present' if len(messages_for_api) > 1 and 'CRITICAL' in str(messages_for_api) else 'absent'}")
         try:
             # 最初のレスポンスかどうかを判定（会話履歴がない場合）
-            is_first_response = len(await self._collect_conversation_history(message)) == 0
+            # スレッド内では常にスレッド作成ボタンを表示しない
+            is_first_response = not isinstance(message.channel, discord.Thread) and len(await self._collect_conversation_history(message)) == 0
             sent_messages, llm_response, used_key_index = await self._handle_llm_streaming_response(message,
                                                                                                     messages_for_api,
                                                                                                     llm_client,
