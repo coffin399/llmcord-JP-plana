@@ -65,6 +65,12 @@ except ImportError:
     ImageGenerator = None
 
 try:
+    from PLANA.llm.utils.tips import TipsManager
+except ImportError:
+    logging.error("Could not import TipsManager. Tips functionality will be disabled.")
+    TipsManager = None
+
+try:
     import aiofiles
 except ImportError:
     aiofiles = None
@@ -117,6 +123,115 @@ def _find_best_split_point(chunk: str) -> int:
     return -1
 
 
+class ThreadCreationView(discord.ui.View):
+    """スレッド作成ボタンのViewクラス"""
+    
+    def __init__(self, llm_cog, original_message: discord.Message):
+        super().__init__(timeout=300)  # 5分でタイムアウト
+        self.llm_cog = llm_cog
+        self.original_message = original_message
+    
+    @discord.ui.button(label="スレッドを作成する / Create Thread", style=discord.ButtonStyle.primary, emoji="🧵")
+    async def create_thread(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer(ephemeral=True)
+        
+        try:
+            # スレッドを作成
+            thread = await self.original_message.create_thread(
+                name=f"AI Chat - {interaction.user.display_name}",
+                auto_archive_duration=60,  # 1時間でアーカイブ
+                reason="AI conversation thread created by user"
+            )
+            
+            # スレッド内の直近40メッセージを取得
+            messages = []
+            async for message in thread.history(limit=40):
+                if message.author != self.llm_cog.bot.user:
+                    # ユーザーメッセージを処理
+                    image_contents, text_content = await self.llm_cog._prepare_multimodal_content(message)
+                    text_content = text_content.replace(f'<@!{self.llm_cog.bot.user.id}>', '').replace(f'<@{self.llm_cog.bot.user.id}>', '').strip()
+                    
+                    if text_content or image_contents:
+                        user_content_parts = []
+                        if text_content:
+                            user_content_parts.append({
+                                "type": "text",
+                                "text": f"{message.created_at.astimezone(self.llm_cog.jst).strftime('[%H:%M]')} {text_content}"
+                            })
+                        user_content_parts.extend(image_contents)
+                        messages.append({"role": "user", "content": user_content_parts})
+            
+            # メッセージを逆順にして正しい順序にする
+            messages.reverse()
+            
+            if messages:
+                # LLMクライアントを取得
+                llm_client = await self.llm_cog._get_llm_client_for_channel(thread.id)
+                if not llm_client:
+                    await thread.send("❌ LLM client is not available for this thread.\nこのスレッドではLLMクライアントが利用できません。")
+                    return
+                
+                # システムプロンプトを準備
+                system_prompt = await self.llm_cog._prepare_system_prompt(
+                    thread.id, interaction.user.id, interaction.user.display_name
+                )
+                
+                messages_for_api = [{"role": "system", "content": system_prompt}]
+                
+                # 言語検出とプロンプト追加
+                if messages:
+                    first_user_message = messages[0]
+                    if isinstance(first_user_message.get("content"), list):
+                        text_content = ""
+                        for content_part in first_user_message["content"]:
+                            if content_part.get("type") == "text":
+                                text_content += content_part.get("text", "")
+                    else:
+                        text_content = str(first_user_message.get("content", ""))
+                    
+                    if detected_lang_prompt := self.llm_cog._detect_language_and_create_prompt(text_content):
+                        messages_for_api.append({"role": "system", "content": detected_lang_prompt})
+                    elif self.llm_cog.language_prompt:
+                        messages_for_api.append({"role": "system", "content": self.llm_cog.language_prompt})
+                
+                messages_for_api.extend(messages)
+                
+                # スレッド内でLLM応答を生成
+                model_name = llm_client.model_name_for_api_calls
+                waiting_message = f"⏳ Processing conversation history... / 会話履歴を処理中..."
+                temp_message = await thread.send(waiting_message)
+                
+                sent_messages, full_response_text, used_key_index = await self.llm_cog._process_streaming_and_send_response(
+                    sent_message=temp_message,
+                    channel=thread,
+                    user=interaction.user,
+                    messages_for_api=messages_for_api,
+                    llm_client=llm_client
+                )
+                
+                if sent_messages and full_response_text:
+                    logger.info(f"✅ Thread conversation completed | model='{model_name}' | response_length={len(full_response_text)} chars")
+                    
+                    # TTS Cogにカスタムイベントを発火
+                    try:
+                        self.llm_cog.bot.dispatch("llm_response_complete", sent_messages, full_response_text)
+                        logger.info("📢 Dispatched 'llm_response_complete' event for TTS from thread.")
+                    except Exception as e:
+                        logger.error(f"Failed to dispatch 'llm_response_complete' event from thread: {e}", exc_info=True)
+                
+                # ボタンを無効化
+                button.disabled = True
+                button.label = "✅ Thread Created / スレッド作成済み"
+                await interaction.edit_original_response(view=self)
+                
+            else:
+                await thread.send("ℹ️ No conversation history found in this thread.\nこのスレッドには会話履歴が見つかりませんでした。")
+                
+        except Exception as e:
+            logger.error(f"Failed to create thread: {e}", exc_info=True)
+            await interaction.followup.send("❌ Failed to create thread.\nスレッドの作成に失敗しました。", ephemeral=True)
+
+
 class LLMCog(commands.Cog, name="LLM"):
     """A cog for interacting with Large Language Models, with tool support."""
 
@@ -157,7 +272,7 @@ class LLMCog(commands.Cog, name="LLM"):
         logger.info(
             f"Loaded {len(self.channel_models)} channel-specific model settings from '{self.channel_settings_path}'.")
         self.jst = timezone(timedelta(hours=+9))
-        self.search_agent, self.bio_manager, self.memory_manager, self.command_manager, self.image_generator = self._initialize_search_agent(), self._initialize_bio_manager(), self._initialize_memory_manager(), self._initialize_command_manager(), self._initialize_image_generator()
+        self.search_agent, self.bio_manager, self.memory_manager, self.command_manager, self.image_generator, self.tips_manager = self._initialize_search_agent(), self._initialize_bio_manager(), self._initialize_memory_manager(), self._initialize_command_manager(), self._initialize_image_generator(), self._initialize_tips_manager()
         default_model_string = self.llm_config.get('model')
         if default_model_string:
             main_llm_client = self._initialize_llm_client(default_model_string)
@@ -306,12 +421,12 @@ class LLMCog(commands.Cog, name="LLM"):
             logger.error(f"Failed to initialize CommandInfoManager: {e}", exc_info=True)
             return None
 
-    def _initialize_image_generator(self) -> Optional[ImageGenerator]:
-        if not ImageGenerator: return None
+    def _initialize_tips_manager(self) -> Optional[TipsManager]:
+        if not TipsManager: return None
         try:
-            return ImageGenerator(self.bot)
+            return TipsManager()
         except Exception as e:
-            logger.error(f"Failed to initialize ImageGenerator: {e}", exc_info=True)
+            logger.error(f"Failed to initialize TipsManager: {e}", exc_info=True)
             return None
 
     def _detect_language_and_create_prompt(self, text: str) -> Optional[str]:
@@ -620,9 +735,12 @@ class LLMCog(commands.Cog, name="LLM"):
             # FIX IS HERE
             f"Messages structure: system={len(messages_for_api[0]['content'])} chars, lang_override={'present' if len(messages_for_api) > 1 and 'CRITICAL' in str(messages_for_api) else 'absent'}")
         try:
+            # 最初のレスポンスかどうかを判定（会話履歴がない場合）
+            is_first_response = len(await self._collect_conversation_history(message)) == 0
             sent_messages, llm_response, used_key_index = await self._handle_llm_streaming_response(message,
                                                                                                     messages_for_api,
-                                                                                                    llm_client)
+                                                                                                    llm_client,
+                                                                                                    is_first_response)
             if sent_messages and llm_response:
                 logger.info(
                     f"✅ LLM response completed | model='{model_in_use}' | response_length={len(llm_response)} chars")
@@ -656,19 +774,27 @@ class LLMCog(commands.Cog, name="LLM"):
                 self.message_to_thread = {k: v for k, v in self.message_to_thread.items() if v != thread_id}
 
     async def _handle_llm_streaming_response(self, message: discord.Message, initial_messages: List[Dict[str, Any]],
-                                             client: openai.AsyncOpenAI) -> Tuple[
+                                             client: openai.AsyncOpenAI, is_first_response: bool = False) -> Tuple[
         Optional[List[discord.Message]], str, Optional[int]]:
         sent_message = None
         try:
             model_name = client.model_name_for_api_calls
-            waiting_message = f"-# :incoming_envelope: waiting response for '{model_name}' :incoming_envelope:"
-            try:
-                sent_message = await message.reply(waiting_message, silent=True)
-            except discord.HTTPException:
-                sent_message = await message.channel.send(waiting_message, silent=True)
+            if self.tips_manager:
+                waiting_embed = self.tips_manager.get_waiting_embed(model_name)
+                try:
+                    sent_message = await message.reply(embed=waiting_embed, silent=True)
+                except discord.HTTPException:
+                    sent_message = await message.channel.send(embed=waiting_embed, silent=True)
+            else:
+                waiting_message = f"-# :incoming_envelope: waiting response for '{model_name}' :incoming_envelope:"
+                try:
+                    sent_message = await message.reply(waiting_message, silent=True)
+                except discord.HTTPException:
+                    sent_message = await message.channel.send(waiting_message, silent=True)
             return await self._process_streaming_and_send_response(sent_message=sent_message, channel=message.channel,
                                                                    user=message.author,
-                                                                   messages_for_api=initial_messages, llm_client=client)
+                                                                   messages_for_api=initial_messages, llm_client=client,
+                                                                   is_first_response=is_first_response)
         except Exception as e:
             logger.error(f"❌ Error during LLM streaming response: {e}", exc_info=True)
             error_msg = f"❌ **Error / エラー** ❌\n\n{self.exception_handler.handle_exception(e)}"
@@ -685,7 +811,8 @@ class LLMCog(commands.Cog, name="LLM"):
                                                    channel: discord.abc.Messageable,
                                                    user: Union[discord.User, discord.Member],
                                                    messages_for_api: List[Dict[str, Any]],
-                                                   llm_client: openai.AsyncOpenAI) -> Tuple[
+                                                   llm_client: openai.AsyncOpenAI,
+                                                   is_first_response: bool = False) -> Tuple[
         Optional[List[discord.Message]], str, Optional[int]]:
         full_response_text, last_update, last_displayed_length, chunk_count = "", 0.0, 0, 0
         update_interval, min_update_chars, retry_sleep_time = 0.5, 15, 2.0
@@ -735,10 +862,15 @@ class LLMCog(commands.Cog, name="LLM"):
         logger.debug(f"Stream completed | Total chunks: {chunk_count} | Final length: {len(full_response_text)} chars")
         if full_response_text:
             if len(full_response_text) <= SAFE_MESSAGE_LENGTH:
+                # 最初のレスポンスのみスレッド作成ボタンを追加
+                view = None
+                if is_first_response:
+                    view = ThreadCreationView(self, sent_message)
+                
                 for attempt in range(max_final_retries):
                     try:
                         if full_response_text != sent_message.content:
-                            await sent_message.edit(content=full_response_text, embed=None, view=None)
+                            await sent_message.edit(content=full_response_text, embed=None, view=view)
                         logger.debug(f"Final message updated successfully (attempt {attempt + 1})")
                         break
                     except discord.NotFound:
@@ -762,9 +894,14 @@ class LLMCog(commands.Cog, name="LLM"):
                 all_messages = []
                 first_chunk = chunks[0]  # 最初のチャンクを取得
 
+                # 最初のレスポンスのみスレッド作成ボタンを追加
+                view = None
+                if is_first_response:
+                    view = ThreadCreationView(self, sent_message)
+
                 for attempt in range(max_final_retries):
                     try:
-                        await sent_message.edit(content=first_chunk, embed=None, view=None)
+                        await sent_message.edit(content=first_chunk, embed=None, view=view)
                         all_messages.append(sent_message)
                         logger.debug(f"Updated first message (1/{len(chunks)})")
                         break
@@ -1104,12 +1241,16 @@ class LLMCog(commands.Cog, name="LLM"):
             messages_for_api.append({"role": "user", "content": user_content_parts})
             logger.info(f"🔵 [API] Sending {len(messages_for_api)} messages to LLM")
             model_name = llm_client.model_name_for_api_calls
-            waiting_message = f"-# :incoming_envelope: waiting response for '{model_name}' :incoming_envelope:"
-            temp_message = await interaction.followup.send(waiting_message,
-                                                           ephemeral=False, wait=True)
+            if self.tips_manager:
+                waiting_embed = self.tips_manager.get_waiting_embed(model_name)
+                temp_message = await interaction.followup.send(embed=waiting_embed, ephemeral=False, wait=True)
+            else:
+                waiting_message = f"-# :incoming_envelope: waiting response for '{model_name}' :incoming_envelope:"
+                temp_message = await interaction.followup.send(waiting_message, ephemeral=False, wait=True)
+            # /chatコマンドは常に最初のレスポンスとして扱う
             sent_messages, full_response_text, used_key_index = await self._process_streaming_and_send_response(
                 sent_message=temp_message, channel=interaction.channel, user=interaction.user,
-                messages_for_api=messages_for_api, llm_client=llm_client)
+                messages_for_api=messages_for_api, llm_client=llm_client, is_first_response=True)
             if sent_messages and full_response_text:
                 logger.info(
                     f"✅ LLM response completed | model='{model_in_use}' | response_length={len(full_response_text)} chars")
