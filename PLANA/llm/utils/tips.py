@@ -6,10 +6,10 @@ import discord
 
 class TipsManager:
     """LLM待機中に表示するランダムなtipsを管理するクラス"""
-    
+
     def __init__(self):
         self.tips = self._create_tips_list()
-    
+
     def _create_tips_list(self) -> List[Dict[str, Any]]:
         """tipsのリストを作成する"""
         return [
@@ -19,7 +19,7 @@ class TipsManager:
                 "color": discord.Color.blue()
             },
             {
-                "title": "💡 AI Tips / AIのヒント", 
+                "title": "💡 AI Tips / AIのヒント",
                 "description": "**会話を続けるには返信機能を！**\nBotのメッセージに返信することで、メンションなしで会話を続けられます。\n\n**Use reply to continue conversations!**\nReply to bot messages to continue chatting without mentioning.\n\n**スレッド内ではメンション/返信不要で会話できます。**\nIn a thread, you can chat without mentioning or replying.",
                 "color": discord.Color.green()
             },
@@ -57,14 +57,9 @@ class TipsManager:
                 "title": "💡 AI Tips / AIのヒント",
                 "description": "**会話履歴をクリア！**\n`/clear_history`コマンドで会話履歴をリセットできます。\n\n**Clear conversation history!**\nUse `/clear_history` command to reset conversation history.\n\n**スレッド内ではメンション/返信不要で会話できます。**\nIn a thread, you can chat without mentioning or replying.",
                 "color": discord.Color.dark_blue()
-            },
-            {
-                "title": "💡 AI Tips / AIのヒント",
-                "description": "**ヘルプを確認しよう！**\n`/llm_help`コマンドでAI機能の詳細な使い方を確認できます。\n\n**Check the help!**\nUse `/llm_help` command to see detailed usage instructions for AI features.\n\n**スレッド内ではメンション/返信不要で会話できます。**\nIn a thread, you can chat without mentioning or replying.",
-                "color": discord.Color.dark_green()
             }
         ]
-    
+
     def get_random_tip(self) -> discord.Embed:
         """ランダムなtipのembedを取得する"""
         tip_data = random.choice(self.tips)
@@ -73,9 +68,9 @@ class TipsManager:
             description=tip_data["description"],
             color=tip_data["color"]
         )
-        embed.set_footer(text="full documentation : https://coffin399.github.io/llmcord-JP-plana/")
+        embed.set_footer(text="we are experiencing technical difficulties with our main server. \n full documentation : https://coffin299.net")
         return embed
-    
+
     def get_waiting_embed(self, model_name: str) -> discord.Embed:
         """待機中のembedを取得する（tips付き）"""
         tip_embed = self.get_random_tip()
