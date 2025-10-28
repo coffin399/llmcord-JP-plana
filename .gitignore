@@ -13,6 +13,9 @@
 !requirements.txt
 !startPLANA.bat
 !plugins
+!utils/
 !website/
 !PLANA/
+!PLANA/llm/
+!PLANA/llm/utils/
 !_config.yml
