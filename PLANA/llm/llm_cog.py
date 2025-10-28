@@ -421,6 +421,14 @@ class LLMCog(commands.Cog, name="LLM"):
             logger.error(f"Failed to initialize CommandInfoManager: {e}", exc_info=True)
             return None
 
+    def _initialize_image_generator(self) -> Optional[ImageGenerator]:
+        if not ImageGenerator: return None
+        try:
+            return ImageGenerator(self.bot)
+        except Exception as e:
+            logger.error(f"Failed to initialize ImageGenerator: {e}", exc_info=True)
+            return None
+
     def _initialize_tips_manager(self) -> Optional[TipsManager]:
         if not TipsManager: return None
         try:
