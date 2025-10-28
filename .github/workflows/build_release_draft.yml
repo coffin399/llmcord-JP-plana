@@ -1,0 +1,176 @@
+name: Build and Release Executables
+
+on:
+  push:
+    branches: [ advanced-bot-utilities ]
+    paths-ignore:
+      - 'docs/**'
+      - 'website/**'
+      - '.github/workflows/deploy-pages.yml'
+      - 'README.md'
+
+permissions:
+  contents: write
+
+jobs:
+  build-all:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux
+            ext: ''
+          - os: windows-latest
+            platform: win
+            ext: '.exe'
+          - os: macos-latest
+            platform: mac
+            ext: ''
+      fail-fast: false
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install PyInstaller
+        run: pip install pyinstaller
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Create data directory
+        run: mkdir -p data
+
+      - name: Build executable
+        run: |
+          pyinstaller --onefile \
+            --name PLANA${{ matrix.ext }} \
+            --add-data "config.default.yaml:." \
+            --add-data "PLANA:PLANA" \
+            --hidden-import discord \
+            --hidden-import discord.ext.commands \
+            --hidden-import yaml \
+            --hidden-import openai \
+            --hidden-import google.genai \
+            --hidden-import PIL \
+            --hidden-import matplotlib \
+            --hidden-import cartopy \
+            --hidden-import langdetect \
+            --hidden-import aiohttp \
+            --hidden-import aiofiles \
+            --hidden-import nacl \
+            --hidden-import yt_dlp \
+            --collect-all discord \
+            --collect-all yt_dlp \
+            main.py
+        shell: bash
+
+      - name: Copy build files
+        run: |
+          mkdir -p release_package
+          cp dist/PLANA${{ matrix.ext }} release_package/
+          cp config.default.yaml release_package/
+          cp requirements.txt release_package/
+          echo "# PLANA Release Package
+
+## Files included:
+- PLANA${{ matrix.ext }}: Main executable
+- config.default.yaml: Default configuration (will be copied to config.yaml on first run)
+- requirements.txt: Python dependencies (for reference only)
+
+## Required files (user must provide):
+- client_secrets.json: Google API credentials (for image generation and TTS features)
+
+## Auto-generated at runtime:
+- config.yaml: Application configuration (generated from config.default.yaml on first run)
+- data/: Directory containing various JSON data files generated during execution
+
+## Usage:
+1. Copy client_secrets.json to this directory
+2. Run PLANA${{ matrix.ext }}
+3. The first run will generate config.yaml from config.default.yaml
+4. Edit config.yaml with your bot token and API keys
+5. Run PLANA${{ matrix.ext }} again
+
+Platform: ${{ matrix.os } (${{ matrix.platform }})" > release_package/README.txt
+
+      - name: Archive release package
+        uses: actions/upload-artifact@v4
+        with:
+          name: plana-release-${{ matrix.platform }}
+          path: release_package/*
+          retention-days: 30
+
+  create-release:
+    needs: build-all
+    runs-on: ubuntu-latest
+    if: needs.build-all.result == 'success'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./artifacts
+
+      - name: Get version
+        id: get_version
+        run: |
+          VERSION=$(date +'%Y%m%d-%H%M%S')
+          SHA=$(git rev-parse --short HEAD)
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Prepare release files
+        run: |
+          mkdir -p release_assets
+          cp artifacts/plana-release-linux/* release_assets/
+          cp artifacts/plana-release-win/* release_assets/
+          cp artifacts/plana-release-mac/* release_assets/
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: release-${{ env.VERSION }}
+          name: "Release ${{ env.VERSION }}"
+          body: |
+            ## Auto-generated Release ${{ env.VERSION }}
+            
+            This is an automated release build.
+            
+            ### Platform: Linux
+            - Extract and run PLANA
+            
+            ### Platform: Windows  
+            - Extract and run PLANA.exe
+            
+            ### Platform: macOS
+            - Extract and run PLANA
+            
+            ### First-time Setup
+            1. Copy your `client_secrets.json` file to the extracted directory
+            2. Run the executable
+            3. Edit the generated `config.yaml` file with your bot token and API keys
+            4. Run the executable again
+            
+            **Note**: Documentation, website files, and development files have been excluded from this release.
+            
+            ---
+            
+            Commit: ${{ github.sha }}
+            Branch: ${{ github.ref_name }}
+          files: release_assets/*
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+

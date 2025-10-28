@@ -19,3 +19,7 @@
 !PLANA/llm/
 !PLANA/llm/utils/
 !_config.yml
+!spec_file_template.py
+!.github/
+!.github/workflows/
+!.github/workflows/build_release_draft.yml
