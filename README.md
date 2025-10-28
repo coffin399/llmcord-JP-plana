@@ -3,7 +3,7 @@
 </h1>
 
 <h3 align="center"><i>
-  A Multi-Functional Discord Bot with AI Chat, Music, and More
+  A Multi-Functional Discord Bot with AI Chat, Music, Text Speech, Image Generation and More
 </i></h3>
 
 <p align="center">
