@@ -7,6 +7,11 @@
 </i></h3>
 
 <p align="center">
+  <strong>⚠️ This branch contains experimental features and modifications.</strong><br>
+  <strong>For the stable version, please refer to the <a href="https://github.com/coffin399/llmcord-JP-plana/tree/main">main branch</a>.</strong>
+</p>
+
+<p align="center">
   <img src="https://i.imgur.com/Q3VuxzG.png" alt="Plana Banner">
 </p>
 
