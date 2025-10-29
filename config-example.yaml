@@ -30,28 +30,48 @@ providers:
   # Remote providers:
   azure-openai:
     base_url: https://<resource name>.openai.azure.com/openai/deployments/<deployment name>
-    api_key: 
+    api_key1:
+    api_key2:
+    api_key3:
+    #you can add more api keys
     extra_query:
       api-version: 2024-12-01-preview
   google:
     base_url: https://generativelanguage.googleapis.com/v1beta/openai
-    api_key: 
+    api_key1: 
+    api_key2:
+    api_key3:
+    #you can add more api keys
   groq:
     base_url: https://api.groq.com/openai/v1
-    api_key: 
+    api_key1: 
+    api_key2:
+    api_key3:
+    #you can add more api keys
   mistral:
     base_url: https://api.mistral.ai/v1
-    api_key: 
+    api_key:
+    api_key1: 
+    api_key2:
+    #you can add more api keys
   openai:
     base_url: https://api.openai.com/v1
-    api_key: 
+    api_key1:
+    api_key2:
+    api_key3:
+    #you can add more api keys
   openrouter:
     base_url: https://openrouter.ai/api/v1
-    api_key: 
+    api_key1:
+    api_key2:
+    api_key3:
+    #you can add more api keys
   x-ai:
     base_url: https://api.x.ai/v1
-    api_key: 
-
+    api_key1:
+    api_key2:
+    api_key3:
+    #you can add more api keys
   # Local providers:
   lmstudio:
     base_url: http://localhost:1234/v1

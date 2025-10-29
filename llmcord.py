@@ -77,7 +77,7 @@ async def model_command(interaction: discord.Interaction, model: str) -> None:
             output = f"Model switched to: `{model}`"
             logging.info(output)
         else:
-            output = "You don't have permission to change the model."
+            output = "You don\'t have permission to change the model."
 
     await interaction.response.send_message(output, ephemeral=(interaction.channel.type == discord.ChannelType.private))
 
@@ -144,8 +144,9 @@ async def on_message(new_msg: discord.Message) -> None:
     provider_config = config["providers"][provider]
 
     base_url = provider_config["base_url"]
-    api_key = provider_config.get("api_key", "sk-no-key-required")
-    openai_client = AsyncOpenAI(base_url=base_url, api_key=api_key)
+    api_keys = [v for k, v in provider_config.items() if k.startswith("api_key") and v]
+    if not api_keys:
+        api_keys.append("sk-no-key-required")
 
     model_parameters = config["models"].get(provider_slash_model, None)
 
@@ -184,7 +185,7 @@ async def on_message(new_msg: discord.Message) -> None:
                 )
 
                 curr_node.images = [
-                    dict(type="image_url", image_url=dict(url=f"data:{att.content_type};base64,{b64encode(resp.content).decode('utf-8')}"))
+                    dict(type="image_url", image_url=dict(url=f"data:{att.content_type};base64,{b64encode(resp.content).decode(\'utf-8\')}"))
                     for att, resp in zip(good_attachments, attachment_responses)
                     if att.content_type.startswith("image")
                 ]
@@ -233,11 +234,11 @@ async def on_message(new_msg: discord.Message) -> None:
             if len(curr_node.text) > max_text:
                 user_warnings.add(f"⚠️ Max {max_text:,} characters per message")
             if len(curr_node.images) > max_images:
-                user_warnings.add(f"⚠️ Max {max_images} image{'' if max_images == 1 else 's'} per message" if max_images > 0 else "⚠️ Can't see images")
+                user_warnings.add(f"⚠️ Max {max_images} image{\'\' if max_images == 1 else \'s\'} per message" if max_images > 0 else "⚠️ Can\'t see images")
             if curr_node.has_bad_attachments:
                 user_warnings.add("⚠️ Unsupported attachments")
             if curr_node.fetch_parent_failed or (curr_node.parent_msg != None and len(messages) == max_messages):
-                user_warnings.add(f"⚠️ Only using last {len(messages)} message{'' if len(messages) == 1 else 's'}")
+                user_warnings.add(f"⚠️ Only using last {len(messages)} message{\'\' if len(messages) == 1 else \'s\'}")
 
             curr_msg = curr_node.parent_msg
 
@@ -248,7 +249,7 @@ async def on_message(new_msg: discord.Message) -> None:
 
         system_prompt = system_prompt.replace("{date}", now.strftime("%B %d %Y")).replace("{time}", now.strftime("%H:%M:%S %Z%z")).strip()
         if accept_usernames:
-            system_prompt += "\n\nUser's names are their Discord IDs and should be typed as '<@ID>'."
+            system_prompt += "\n\nUser\'s names are their Discord IDs and should be typed as \'<@ID>\'."
 
         messages.append(dict(role="system", content=system_prompt))
 
@@ -273,56 +274,66 @@ async def on_message(new_msg: discord.Message) -> None:
         msg_nodes[response_msg.id] = MsgNode(parent_msg=new_msg)
         await msg_nodes[response_msg.id].lock.acquire()
 
-    try:
-        async with new_msg.channel.typing():
-            async for chunk in await openai_client.chat.completions.create(**openai_kwargs):
-                if finish_reason != None:
-                    break
+    last_exception = None
+    for api_key in api_keys:
+        try:
+            async with new_msg.channel.typing():
+                openai_client = AsyncOpenAI(base_url=base_url, api_key=api_key)
+                async for chunk in await openai_client.chat.completions.create(**openai_kwargs):
+                    if finish_reason != None:
+                        break
 
-                if not (choice := chunk.choices[0] if chunk.choices else None):
-                    continue
+                    if not (choice := chunk.choices[0] if chunk.choices else None):
+                        continue
 
-                finish_reason = choice.finish_reason
+                    finish_reason = choice.finish_reason
 
-                prev_content = curr_content or ""
-                curr_content = choice.delta.content or ""
+                    prev_content = curr_content or ""
+                    curr_content = choice.delta.content or ""
 
-                new_content = prev_content if finish_reason == None else (prev_content + curr_content)
+                    new_content = prev_content if finish_reason == None else (prev_content + curr_content)
 
-                if response_contents == [] and new_content == "":
-                    continue
+                    if response_contents == [] and new_content == "":
+                        continue
 
-                if start_next_msg := response_contents == [] or len(response_contents[-1] + new_content) > max_message_length:
-                    response_contents.append("")
+                    if start_next_msg := response_contents == [] or len(response_contents[-1] + new_content) > max_message_length:
+                        response_contents.append("")
 
-                response_contents[-1] += new_content
+                    response_contents[-1] += new_content
 
-                if not use_plain_responses:
-                    time_delta = datetime.now().timestamp() - last_task_time
+                    if not use_plain_responses:
+                        time_delta = datetime.now().timestamp() - last_task_time
 
-                    ready_to_edit = time_delta >= EDIT_DELAY_SECONDS
-                    msg_split_incoming = finish_reason == None and len(response_contents[-1] + curr_content) > max_message_length
-                    is_final_edit = finish_reason != None or msg_split_incoming
-                    is_good_finish = finish_reason != None and finish_reason.lower() in ("stop", "end_turn")
+                        ready_to_edit = time_delta >= EDIT_DELAY_SECONDS
+                        msg_split_incoming = finish_reason == None and len(response_contents[-1] + curr_content) > max_message_length
+                        is_final_edit = finish_reason != None or msg_split_incoming
+                        is_good_finish = finish_reason != None and finish_reason.lower() in ("stop", "end_turn")
 
-                    if start_next_msg or ready_to_edit or is_final_edit:
-                        embed.description = response_contents[-1] if is_final_edit else (response_contents[-1] + STREAMING_INDICATOR)
-                        embed.color = EMBED_COLOR_COMPLETE if msg_split_incoming or is_good_finish else EMBED_COLOR_INCOMPLETE
+                        if start_next_msg or ready_to_edit or is_final_edit:
+                            embed.description = response_contents[-1] if is_final_edit else (response_contents[-1] + STREAMING_INDICATOR)
+                            embed.color = EMBED_COLOR_COMPLETE if msg_split_incoming or is_good_finish else EMBED_COLOR_INCOMPLETE
 
-                        if start_next_msg:
-                            await reply_helper(embed=embed, silent=True)
-                        else:
-                            await asyncio.sleep(EDIT_DELAY_SECONDS - time_delta)
-                            await response_msgs[-1].edit(embed=embed)
+                            if start_next_msg:
+                                await reply_helper(embed=embed, silent=True)
+                            else:
+                                await asyncio.sleep(EDIT_DELAY_SECONDS - time_delta)
+                                await response_msgs[-1].edit(embed=embed)
 
-                        last_task_time = datetime.now().timestamp()
+                            last_task_time = datetime.now().timestamp()
+                
+                # Break from the key rotation loop if the request was successful
+                break
+        except Exception as e:
+            logging.warning(f"API key failed for provider {provider}. Trying next key.")
+            last_exception = e
+    
+    if last_exception:
+        logging.exception("Error while generating response", exc_info=last_exception)
+        return
 
-            if use_plain_responses:
-                for content in response_contents:
-                    await reply_helper(view=LayoutView().add_item(TextDisplay(content=content)))
-
-    except Exception:
-        logging.exception("Error while generating response")
+    if use_plain_responses:
+        for content in response_contents:
+            await reply_helper(view=LayoutView().add_item(TextDisplay(content=content)))
 
     for response_msg in response_msgs:
         msg_nodes[response_msg.id].text = "".join(response_contents)
