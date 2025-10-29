@@ -45,10 +45,17 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Create data directory
+      - name: Create data directory (Linux/macOS)
+        if: matrix.os != 'windows-latest'
         run: mkdir -p data
 
-      - name: Build executable
+      - name: Create data directory (Windows)
+        if: matrix.os == 'windows-latest'
+        run: New-Item -ItemType Directory -Path "data" -Force
+        shell: pwsh
+
+      - name: Build executable (Linux/macOS)
+        if: matrix.os != 'windows-latest'
         run: |
           pyinstaller --onefile \
             --name PLANA${{ matrix.ext }} \
@@ -72,14 +79,39 @@ jobs:
             main.py
         shell: bash
 
-      - name: Copy build files
+      - name: Build executable (Windows)
+        if: matrix.os == 'windows-latest'
         run: |
-          mkdir -p release_package
-          cp dist/PLANA${{ matrix.ext }} release_package/
-          cp config.default.yaml release_package/
-          cp requirements.txt release_package/
-          if [ "${{ matrix.os }}" = "windows-latest" ]; then
-            @"
+          pyinstaller --onefile `
+            --name PLANA${{ matrix.ext }} `
+            --add-data "config.default.yaml;." `
+            --add-data "PLANA;PLANA" `
+            --hidden-import discord `
+            --hidden-import discord.ext.commands `
+            --hidden-import yaml `
+            --hidden-import openai `
+            --hidden-import google.genai `
+            --hidden-import PIL `
+            --hidden-import matplotlib `
+            --hidden-import cartopy `
+            --hidden-import langdetect `
+            --hidden-import aiohttp `
+            --hidden-import aiofiles `
+            --hidden-import nacl `
+            --hidden-import yt_dlp `
+            --collect-all discord `
+            --collect-all yt_dlp `
+            main.py
+        shell: pwsh
+
+      - name: Copy build files (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          New-Item -ItemType Directory -Path "release_package" -Force
+          Copy-Item "dist/PLANA${{ matrix.ext }}" "release_package/"
+          Copy-Item "config.default.yaml" "release_package/"
+          Copy-Item "requirements.txt" "release_package/"
+          @"
           # PLANA Release Package
           
           ## Files included:
@@ -102,9 +134,17 @@ jobs:
           5. Run PLANA${{ matrix.ext }} again
           
           Platform: ${{ matrix.os }} (${{ matrix.platform }})
-          "@ | Out-File -FilePath release_package/README.txt -Encoding UTF8
-          else
-            cat > release_package/README.txt << 'EOF'
+          "@ | Out-File -FilePath "release_package/README.txt" -Encoding UTF8
+        shell: pwsh
+
+      - name: Copy build files (Linux/macOS)
+        if: matrix.os != 'windows-latest'
+        run: |
+          mkdir -p release_package
+          cp dist/PLANA${{ matrix.ext }} release_package/
+          cp config.default.yaml release_package/
+          cp requirements.txt release_package/
+          cat > release_package/README.txt << 'EOF'
           # PLANA Release Package
           
           ## Files included:
@@ -128,7 +168,6 @@ jobs:
           
           Platform: ${{ matrix.os }} (${{ matrix.platform }})
           EOF
-          fi
 
       - name: Archive release package
         uses: actions/upload-artifact@v4
@@ -162,9 +201,10 @@ jobs:
       - name: Prepare release files
         run: |
           mkdir -p release_assets
-          cp artifacts/plana-release-linux/* release_assets/
-          cp artifacts/plana-release-win/* release_assets/
-          cp artifacts/plana-release-mac/* release_assets/
+          # Copy files from each platform artifact
+          find artifacts/plana-release-linux -type f -exec cp {} release_assets/ \;
+          find artifacts/plana-release-win -type f -exec cp {} release_assets/ \;
+          find artifacts/plana-release-mac -type f -exec cp {} release_assets/ \;
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
