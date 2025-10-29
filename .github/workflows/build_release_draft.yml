@@ -61,7 +61,7 @@ jobs:
             --onefile \
             --output-filename=PLANA${{ matrix.ext }} \
             --include-data-dir=PLANA=PLANA \
-            --include-data-file=config.default.yaml=. \
+            --include-data-file=config.default.yaml=config.default.yaml \
             --include-module=discord \
             --include-module=discord.ext.commands \
             --include-module=yaml \
@@ -75,7 +75,6 @@ jobs:
             --include-module=aiofiles \
             --include-module=nacl \
             --include-module=yt_dlp \
-            --enable-plugin=matplotlib \
             main.py
         shell: bash
 
@@ -86,7 +85,7 @@ jobs:
             --onefile `
             --output-filename=PLANA${{ matrix.ext }} `
             --include-data-dir=PLANA=PLANA `
-            --include-data-file=config.default.yaml=. `
+            --include-data-file=config.default.yaml=config.default.yaml `
             --include-module=discord `
             --include-module=discord.ext.commands `
             --include-module=yaml `
@@ -100,7 +99,6 @@ jobs:
             --include-module=aiofiles `
             --include-module=nacl `
             --include-module=yt_dlp `
-            --enable-plugin=matplotlib `
             main.py
         shell: pwsh
 
