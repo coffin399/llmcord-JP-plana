@@ -735,8 +735,9 @@ class LLMCog(commands.Cog, name="LLM"):
         # スレッド内ではBotのメッセージへのリプライのみに反応
         is_thread = isinstance(message.channel, discord.Thread)
         is_mentioned = self.bot.user.mentioned_in(message) and not message.mention_everyone
-        is_reply_to_bot = (message.reference and isinstance(message.reference.resolved,
-                                                            discord.Message) and message.reference.resolved.author == self.bot.user)
+        is_reply_to_bot = (message.reference and message.reference.resolved and 
+                           isinstance(message.reference.resolved, discord.Message) and 
+                           message.reference.resolved.author == self.bot.user)
         
         # スレッド内ではBotのメッセージへのリプライのみ、通常チャンネルではメンション・リプライが必要
         if is_thread:
@@ -761,7 +762,9 @@ class LLMCog(commands.Cog, name="LLM"):
             await message.reply(content=f"❌ **Error / エラー** ❌\n\n{self.exception_handler.handle_exception(e)}",
                                 view=self._create_support_view(), silent=True)
             return
-        guild_log, user_log, model_in_use = f"guild='{message.guild.name}({message.guild.id})'" if message.guild else "guild='DM'", f"user='{message.author.name}({message.author.id})'", llm_client.model_name_for_api_calls
+        guild_log = f"guild='{message.guild.name}({message.guild.id})'" if message.guild else "guild='DM'"
+        user_log = f"user='{message.author.name}({message.author.id})'"
+        model_in_use = llm_client.model_name_for_api_calls
         image_contents, text_content = await self._prepare_multimodal_content(message)
         text_content = text_content.replace(f'<@!{self.bot.user.id}>', '').replace(f'<@{self.bot.user.id}>', '').strip()
         if not text_content and not image_contents:
@@ -789,7 +792,8 @@ class LLMCog(commands.Cog, name="LLM"):
         elif self.language_prompt:
             messages_for_api.append({"role": "system", "content": self.language_prompt})
             logger.info("🌐 [LANG] Using default language prompt as fallback")
-        messages_for_api.extend(await self._collect_conversation_history(message))
+        conversation_history = await self._collect_conversation_history(message)
+        messages_for_api.extend(conversation_history)
         user_content_parts = []
         if text_content: user_content_parts.append(
             {"type": "text", "text": f"{message.created_at.astimezone(self.jst).strftime('[%H:%M]')} {text_content}"})
@@ -804,7 +808,7 @@ class LLMCog(commands.Cog, name="LLM"):
         try:
             # 最初のレスポンスかどうかを判定（会話履歴がない場合）
             # スレッド内では常にスレッド作成ボタンを表示しない
-            is_first_response = not isinstance(message.channel, discord.Thread) and len(await self._collect_conversation_history(message)) == 0
+            is_first_response = not isinstance(message.channel, discord.Thread) and len(conversation_history) == 0
             sent_messages, llm_response, used_key_index = await self._handle_llm_streaming_response(message,
                                                                                                     messages_for_api,
                                                                                                     llm_client,
