@@ -125,16 +125,16 @@ def _find_best_split_point(chunk: str) -> int:
 
 class ThreadCreationView(discord.ui.View):
     """スレッド作成ボタンのViewクラス"""
-
+    
     def __init__(self, llm_cog, original_message: discord.Message):
         super().__init__(timeout=300)  # 5分でタイムアウト
         self.llm_cog = llm_cog
         self.original_message = original_message
-
+    
     @discord.ui.button(label="スレッドを作成する / Create Thread", style=discord.ButtonStyle.primary, emoji="🧵")
     async def create_thread(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer(ephemeral=True)
-
+        
         try:
             # スレッドを作成
             thread = await self.original_message.create_thread(
@@ -142,7 +142,7 @@ class ThreadCreationView(discord.ui.View):
                 auto_archive_duration=60,  # 1時間でアーカイブ
                 reason="AI conversation thread created by user"
             )
-
+            
             # 元のチャンネルの会話履歴を取得（スレッド作成前の履歴）
             messages = []
             try:
@@ -150,18 +150,17 @@ class ThreadCreationView(discord.ui.View):
                 current_msg = self.original_message
                 visited_ids = set()
                 message_count = 0
-
+                
                 while current_msg and message_count < 40:
                     if current_msg.id in visited_ids:
                         break
                     visited_ids.add(current_msg.id)
-
+                    
                     if current_msg.author != self.llm_cog.bot.user:
                         # ユーザーメッセージを処理
                         image_contents, text_content = await self.llm_cog._prepare_multimodal_content(current_msg)
-                        text_content = text_content.replace(f'<@!{self.llm_cog.bot.user.id}>', '').replace(
-                            f'<@{self.llm_cog.bot.user.id}>', '').strip()
-
+                        text_content = text_content.replace(f'<@!{self.llm_cog.bot.user.id}>', '').replace(f'<@{self.llm_cog.bot.user.id}>', '').strip()
+                        
                         if text_content or image_contents:
                             user_content_parts = []
                             if text_content:
@@ -172,39 +171,37 @@ class ThreadCreationView(discord.ui.View):
                             user_content_parts.extend(image_contents)
                             messages.append({"role": "user", "content": user_content_parts})
                             message_count += 1
-
+                    
                     # 前のメッセージを取得
                     if current_msg.reference and current_msg.reference.message_id:
                         try:
-                            current_msg = current_msg.reference.resolved or await current_msg.channel.fetch_message(
-                                current_msg.reference.message_id)
+                            current_msg = current_msg.reference.resolved or await current_msg.channel.fetch_message(current_msg.reference.message_id)
                         except (discord.NotFound, discord.HTTPException):
                             break
                     else:
                         break
-
+                
                 # メッセージを逆順にして正しい順序にする
                 messages.reverse()
-
+                
             except Exception as e:
                 logger.error(f"Failed to collect conversation history for thread: {e}", exc_info=True)
                 messages = []
-
+            
             if messages:
                 # LLMクライアントを取得
                 llm_client = await self.llm_cog._get_llm_client_for_channel(thread.id)
                 if not llm_client:
-                    await thread.send(
-                        "❌ LLM client is not available for this thread.\nこのスレッドではLLMクライアントが利用できません。")
+                    await thread.send("❌ LLM client is not available for this thread.\nこのスレッドではLLMクライアントが利用できません。")
                     return
-
+                
                 # システムプロンプトを準備
                 system_prompt = await self.llm_cog._prepare_system_prompt(
                     thread.id, interaction.user.id, interaction.user.display_name
                 )
-
+                
                 messages_for_api = [{"role": "system", "content": system_prompt}]
-
+                
                 # 言語検出とプロンプト追加
                 if messages:
                     first_user_message = messages[0]
@@ -215,25 +212,25 @@ class ThreadCreationView(discord.ui.View):
                                 text_content += content_part.get("text", "")
                     else:
                         text_content = str(first_user_message.get("content", ""))
-
+                    
                     if detected_lang_prompt := self.llm_cog._detect_language_and_create_prompt(text_content):
                         messages_for_api.append({"role": "system", "content": detected_lang_prompt})
                     elif self.llm_cog.language_prompt:
                         messages_for_api.append({"role": "system", "content": self.llm_cog.language_prompt})
-
+                
                 messages_for_api.extend(messages)
-
+                
                 # スレッド内でLLM応答を生成
                 model_name = llm_client.model_name_for_api_calls
                 waiting_message = f"⏳ Processing conversation history... / 会話履歴を処理中..."
                 temp_message = await thread.send(waiting_message)
-
+                
                 # スレッド内での会話方法を説明
                 await thread.send("💡 **スレッド内での会話方法 / How to chat in this thread:**\n"
-                                  "• メンション不要で直接話しかけることができます / You can chat directly without mentioning\n"
-                                  "• 画像も送信可能です / Images are also supported\n"
-                                  "• 会話履歴は自動的に保持されます / Conversation history is automatically maintained")
-
+                                "• Botのメッセージにリプライして会話を続けられます / Reply to bot messages to continue chatting\n"
+                                "• 画像も送信可能です / Images are also supported\n"
+                                "• 会話履歴は自動的に保持されます / Conversation history is automatically maintained")
+                
                 sent_messages, full_response_text, used_key_index = await self.llm_cog._process_streaming_and_send_response(
                     sent_message=temp_message,
                     channel=thread,
@@ -241,32 +238,30 @@ class ThreadCreationView(discord.ui.View):
                     messages_for_api=messages_for_api,
                     llm_client=llm_client
                 )
-
+                
                 if sent_messages and full_response_text:
-                    logger.info(
-                        f"✅ Thread conversation completed | model='{model_name}' | response_length={len(full_response_text)} chars")
-
+                    logger.info(f"✅ Thread conversation completed | model='{model_name}' | response_length={len(full_response_text)} chars")
+                    
                     # TTS Cogにカスタムイベントを発火
                     try:
                         self.llm_cog.bot.dispatch("llm_response_complete", sent_messages, full_response_text)
                         logger.info("📢 Dispatched 'llm_response_complete' event for TTS from thread.")
                     except Exception as e:
-                        logger.error(f"Failed to dispatch 'llm_response_complete' event from thread: {e}",
-                                     exc_info=True)
-
+                        logger.error(f"Failed to dispatch 'llm_response_complete' event from thread: {e}", exc_info=True)
+                
                 # ボタンを無効化
                 button.disabled = True
                 button.label = "✅ Thread Created / スレッド作成済み"
                 await interaction.edit_original_response(view=self)
-
+                
             else:
                 await thread.send("ℹ️ No conversation history found, but you can start chatting!\n"
-                                  "会話履歴は見つかりませんでしたが、ここから会話を始めることができます！\n\n"
-                                  "💡 **スレッド内での会話方法 / How to chat in this thread:**\n"
-                                  "• メンション不要で直接話しかけることができます / You can chat directly without mentioning\n"
-                                  "• 画像も送信可能です / Images are also supported\n"
-                                  "• 会話履歴は自動的に保持されます / Conversation history is automatically maintained")
-
+                                "会話履歴は見つかりませんでしたが、ここから会話を始めることができます！\n\n"
+                                "💡 **スレッド内での会話方法 / How to chat in this thread:**\n"
+                                "• Botのメッセージにリプライして会話を続けられます / Reply to bot messages to continue chatting\n"
+                                "• 画像も送信可能です / Images are also supported\n"
+                                "• 会話履歴は自動的に保持されます / Conversation history is automatically maintained")
+                
         except Exception as e:
             logger.error(f"Failed to create thread: {e}", exc_info=True)
             await interaction.followup.send("❌ Failed to create thread.\nスレッドの作成に失敗しました。", ephemeral=True)
@@ -369,8 +364,7 @@ class LLMCog(commands.Cog, name="LLM"):
                 api_keys, i = [], 1
                 while True:
                     if provider_config.get(f'api_key{i}'):
-                        api_keys.append(provider_config[f'api_key{i}']);
-                        i += 1
+                        api_keys.append(provider_config[f'api_key{i}']); i += 1
                     else:
                         break
                 if not api_keys and provider_config.get('api_key'): api_keys.append(provider_config['api_key'])
@@ -518,7 +512,7 @@ class LLMCog(commands.Cog, name="LLM"):
                                                               current_time=current_time_str,
                                                               available_commands=available_commands)
             else:
-                # logger.warning("⚠️ {available_commands} not in template")
+                #logger.warning("⚠️ {available_commands} not in template")
                 system_prompt = system_prompt_template.format(current_date=current_date_str,
                                                               current_time=current_time_str)
         except (KeyError, ValueError) as e:
@@ -544,28 +538,28 @@ class LLMCog(commands.Cog, name="LLM"):
         if 'search' in active_tools:
             if self.search_agent:
                 definitions.append(self.search_agent.tool_spec)
-                # logger.info(f"✅ [TOOLS] Added 'search' tool (name: {self.search_agent.tool_spec['function']['name']})")
+                #logger.info(f"✅ [TOOLS] Added 'search' tool (name: {self.search_agent.tool_spec['function']['name']})")
             else:
                 logger.warning(f"⚠️ [TOOLS] 'search' is in active_tools but search_agent is None")
 
         if 'user_bio' in active_tools:
             if self.bio_manager:
                 definitions.append(self.bio_manager.tool_spec)
-                # logger.info(f"✅ [TOOLS] Added 'user_bio' tool (name: {self.bio_manager.tool_spec['function']['name']})")
+                #logger.info(f"✅ [TOOLS] Added 'user_bio' tool (name: {self.bio_manager.tool_spec['function']['name']})")
             else:
                 logger.warning(f"⚠️ [TOOLS] 'user_bio' is in active_tools but bio_manager is None")
 
         if 'memory' in active_tools:
             if self.memory_manager:
                 definitions.append(self.memory_manager.tool_spec)
-                # logger.info(f"✅ [TOOLS] Added 'memory' tool (name: {self.memory_manager.tool_spec['function']['name']})")
+                #logger.info(f"✅ [TOOLS] Added 'memory' tool (name: {self.memory_manager.tool_spec['function']['name']})")
             else:
                 logger.warning(f"⚠️ [TOOLS] 'memory' is in active_tools but memory_manager is None")
 
         if 'image_generator' in active_tools:
             if self.image_generator:
                 definitions.append(self.image_generator.tool_spec)
-                # logger.info(f"✅ [TOOLS] Added 'image_generator' tool (name: {self.image_generator.tool_spec['function']['name']})")
+                #logger.info(f"✅ [TOOLS] Added 'image_generator' tool (name: {self.image_generator.tool_spec['function']['name']})")
             else:
                 logger.warning(f"⚠️ [TOOLS] 'image_generator' is in active_tools but image_generator is None")
 
@@ -575,14 +569,14 @@ class LLMCog(commands.Cog, name="LLM"):
 
     async def _get_conversation_thread_id(self, message: discord.Message) -> int:
         guild_id = message.guild.id if message.guild else 0  # DMの場合は0
-
+        
         # ギルド固有の辞書を初期化
         if guild_id not in self.message_to_thread:
             self.message_to_thread[guild_id] = {}
-
-        if message.id in self.message_to_thread[guild_id]:
+        
+        if message.id in self.message_to_thread[guild_id]: 
             return self.message_to_thread[guild_id][message.id]
-
+        
         current_msg, visited_ids = message, set()
         while current_msg.reference and current_msg.reference.message_id:
             if current_msg.id in visited_ids: break
@@ -600,11 +594,11 @@ class LLMCog(commands.Cog, name="LLM"):
 
     async def _collect_conversation_history(self, message: discord.Message) -> List[Dict[str, Any]]:
         guild_id = message.guild.id if message.guild else 0  # DMの場合は0
-
+        
         # ギルド固有の会話履歴を初期化
         if guild_id not in self.conversation_threads:
             self.conversation_threads[guild_id] = {}
-
+        
         history, current_msg, visited_ids = [], message, set()
         while current_msg.reference and current_msg.reference.message_id:
             if current_msg.reference.message_id in visited_ids: break
@@ -714,7 +708,7 @@ class LLMCog(commands.Cog, name="LLM"):
                 if url not in processed_urls: source_urls.append(url); processed_urls.add(url)
             for attachment in msg.attachments:
                 if attachment.content_type and attachment.content_type.startswith(
-                        'image/') and attachment.url not in processed_urls: source_urls.append(
+                    'image/') and attachment.url not in processed_urls: source_urls.append(
                     attachment.url); processed_urls.add(attachment.url)
             for embed in msg.embeds:
                 if embed.image and embed.image.url and embed.image.url not in processed_urls: source_urls.append(
@@ -733,19 +727,25 @@ class LLMCog(commands.Cog, name="LLM"):
                 pass
         return image_inputs, "\n".join(text_parts)
 
+
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
         if message.author.bot: return
-
-        # スレッド内ではメンション・リプライ不要で会話可能
+        
+        # スレッド内ではBotのメッセージへのリプライのみに反応
         is_thread = isinstance(message.channel, discord.Thread)
         is_mentioned = self.bot.user.mentioned_in(message) and not message.mention_everyone
-        is_reply_to_bot = (message.reference and isinstance(message.reference.resolved,
-                                                            discord.Message) and message.reference.resolved.author == self.bot.user)
-
-        # スレッド内でない場合は従来通りメンション・リプライが必要
-        if not is_thread and not (is_mentioned or is_reply_to_bot):
-            return
+        is_reply_to_bot = (message.reference and message.reference.resolved and 
+                           isinstance(message.reference.resolved, discord.Message) and 
+                           message.reference.resolved.author == self.bot.user)
+        
+        # スレッド内ではBotのメッセージへのリプライのみ、通常チャンネルではメンション・リプライが必要
+        if is_thread:
+            if not is_reply_to_bot:
+                return
+        else:
+            if not (is_mentioned or is_reply_to_bot):
+                return
         try:
             llm_client = await self._get_llm_client_for_channel(message.channel.id)
             if not llm_client:
@@ -762,7 +762,9 @@ class LLMCog(commands.Cog, name="LLM"):
             await message.reply(content=f"❌ **Error / エラー** ❌\n\n{self.exception_handler.handle_exception(e)}",
                                 view=self._create_support_view(), silent=True)
             return
-        guild_log, user_log, model_in_use = f"guild='{message.guild.name}({message.guild.id})'" if message.guild else "guild='DM'", f"user='{message.author.name}({message.author.id})'", llm_client.model_name_for_api_calls
+        guild_log = f"guild='{message.guild.name}({message.guild.id})'" if message.guild else "guild='DM'"
+        user_log = f"user='{message.author.name}({message.author.id})'"
+        model_in_use = llm_client.model_name_for_api_calls
         image_contents, text_content = await self._prepare_multimodal_content(message)
         text_content = text_content.replace(f'<@!{self.bot.user.id}>', '').replace(f'<@{self.bot.user.id}>', '').strip()
         if not text_content and not image_contents:
@@ -790,7 +792,8 @@ class LLMCog(commands.Cog, name="LLM"):
         elif self.language_prompt:
             messages_for_api.append({"role": "system", "content": self.language_prompt})
             logger.info("🌐 [LANG] Using default language prompt as fallback")
-        messages_for_api.extend(await self._collect_conversation_history(message))
+        conversation_history = await self._collect_conversation_history(message)
+        messages_for_api.extend(conversation_history)
         user_content_parts = []
         if text_content: user_content_parts.append(
             {"type": "text", "text": f"{message.created_at.astimezone(self.jst).strftime('[%H:%M]')} {text_content}"})
@@ -805,8 +808,7 @@ class LLMCog(commands.Cog, name="LLM"):
         try:
             # 最初のレスポンスかどうかを判定（会話履歴がない場合）
             # スレッド内では常にスレッド作成ボタンを表示しない
-            is_first_response = not isinstance(message.channel, discord.Thread) and len(
-                await self._collect_conversation_history(message)) == 0
+            is_first_response = not isinstance(message.channel, discord.Thread) and len(conversation_history) == 0
             sent_messages, llm_response, used_key_index = await self._handle_llm_streaming_response(message,
                                                                                                     messages_for_api,
                                                                                                     llm_client,
@@ -819,17 +821,17 @@ class LLMCog(commands.Cog, name="LLM"):
                 logger.info(f"🤖 [LLM_RESPONSE]{key_log_str} {log_response.replace(chr(10), ' ')}")
                 logger.debug(f"LLM full response (length: {len(llm_response)} chars):\n{llm_response}")
                 guild_id = message.guild.id if message.guild else 0  # DMの場合は0
-
+                
                 # ギルド固有の会話履歴を初期化
                 if guild_id not in self.conversation_threads:
                     self.conversation_threads[guild_id] = {}
-                if thread_id not in self.conversation_threads[guild_id]:
+                if thread_id not in self.conversation_threads[guild_id]: 
                     self.conversation_threads[guild_id][thread_id] = []
-
+                
                 self.conversation_threads[guild_id][thread_id].append(user_message_for_api)
                 assistant_message = {"role": "assistant", "content": llm_response, "message_id": sent_messages[0].id}
                 self.conversation_threads[guild_id][thread_id].append(assistant_message)
-                for msg in sent_messages:
+                for msg in sent_messages: 
                     guild_id_for_msg = msg.guild.id if msg.guild else 0
                     if guild_id_for_msg not in self.message_to_thread:
                         self.message_to_thread[guild_id_for_msg] = {}
@@ -856,7 +858,7 @@ class LLMCog(commands.Cog, name="LLM"):
                     del guild_threads[thread_id]
                     if guild_id in self.message_to_thread:
                         self.message_to_thread[guild_id] = {
-                            k: v for k, v in self.message_to_thread[guild_id].items()
+                            k: v for k, v in self.message_to_thread[guild_id].items() 
                             if v != thread_id
                         }
 
@@ -953,7 +955,7 @@ class LLMCog(commands.Cog, name="LLM"):
                 view = None
                 if is_first_response:
                     view = ThreadCreationView(self, sent_message)
-
+                
                 for attempt in range(max_final_retries):
                     try:
                         if full_response_text != sent_message.content:
@@ -2019,10 +2021,10 @@ class LLMCog(commands.Cog, name="LLM"):
         await interaction.response.defer(ephemeral=False)
         guild_id = interaction.guild.id if interaction.guild else 0  # DMの場合は0
         cleared_count, threads_to_clear = 0, set()
-
+        
         try:
             async for msg in interaction.channel.history(limit=200):
-                if guild_id in self.message_to_thread and msg.id in self.message_to_thread[guild_id]:
+                if guild_id in self.message_to_thread and msg.id in self.message_to_thread[guild_id]: 
                     threads_to_clear.add(self.message_to_thread[guild_id][msg.id])
         except (discord.Forbidden, discord.HTTPException):
             embed = discord.Embed(title="⚠️ Permission Error / 権限エラー",
@@ -2031,17 +2033,17 @@ class LLMCog(commands.Cog, name="LLM"):
             self._add_support_footer(embed)
             await interaction.followup.send(embed=embed, view=self._create_support_view())
             return
-
+        
         for thread_id in threads_to_clear:
             if guild_id in self.conversation_threads and thread_id in self.conversation_threads[guild_id]:
                 del self.conversation_threads[guild_id][thread_id]
                 if guild_id in self.message_to_thread:
                     self.message_to_thread[guild_id] = {
-                        k: v for k, v in self.message_to_thread[guild_id].items()
+                        k: v for k, v in self.message_to_thread[guild_id].items() 
                         if v != thread_id
                     }
                 cleared_count += 1
-
+        
         if cleared_count > 0:
             embed = discord.Embed(title="✅ History Cleared / 履歴をクリアしました",
                                   description=f"Cleared the history of {cleared_count} conversation thread(s) related to this channel.\nこのチャンネルに関連する {cleared_count} 個の会話スレッドの履歴をクリアしました。",
