@@ -16,4 +16,4 @@ cartopy
 langdetect
 pillow
 #セルフホストがめんどくさい人向けのリリース用
-pyinstaller
+nuitka

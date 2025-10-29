@@ -39,8 +39,8 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install PyInstaller
-        run: pip install pyinstaller
+      - name: Install Nuitka
+        run: pip install nuitka
 
       - name: Install dependencies
         run: pip install -r requirements.txt
@@ -57,50 +57,52 @@ jobs:
       - name: Build executable (Linux/macOS)
         if: matrix.os != 'windows-latest'
         run: |
-          pyinstaller --onefile \
-            --name PLANA${{ matrix.ext }} \
-            --add-data "config.default.yaml:." \
-            --add-data "PLANA:PLANA" \
-            --hidden-import discord \
-            --hidden-import discord.ext.commands \
-            --hidden-import yaml \
-            --hidden-import openai \
-            --hidden-import google.genai \
-            --hidden-import PIL \
-            --hidden-import matplotlib \
-            --hidden-import cartopy \
-            --hidden-import langdetect \
-            --hidden-import aiohttp \
-            --hidden-import aiofiles \
-            --hidden-import nacl \
-            --hidden-import yt_dlp \
-            --collect-all discord \
-            --collect-all yt_dlp \
+          python -m nuitka \
+            --onefile \
+            --output-filename=PLANA${{ matrix.ext }} \
+            --include-data-dir=PLANA=PLANA \
+            --include-data-file=config.default.yaml=. \
+            --include-module=discord \
+            --include-module=discord.ext.commands \
+            --include-module=yaml \
+            --include-module=openai \
+            --include-module=google.genai \
+            --include-module=PIL \
+            --include-module=matplotlib \
+            --include-module=cartopy \
+            --include-module=langdetect \
+            --include-module=aiohttp \
+            --include-module=aiofiles \
+            --include-module=nacl \
+            --include-module=yt_dlp \
+            --enable-plugin=discord \
+            --enable-plugin=matplotlib \
             main.py
         shell: bash
 
       - name: Build executable (Windows)
         if: matrix.os == 'windows-latest'
         run: |
-          pyinstaller --onefile `
-            --name PLANA${{ matrix.ext }} `
-            --add-data "config.default.yaml;." `
-            --add-data "PLANA;PLANA" `
-            --hidden-import discord `
-            --hidden-import discord.ext.commands `
-            --hidden-import yaml `
-            --hidden-import openai `
-            --hidden-import google.genai `
-            --hidden-import PIL `
-            --hidden-import matplotlib `
-            --hidden-import cartopy `
-            --hidden-import langdetect `
-            --hidden-import aiohttp `
-            --hidden-import aiofiles `
-            --hidden-import nacl `
-            --hidden-import yt_dlp `
-            --collect-all discord `
-            --collect-all yt_dlp `
+          python -m nuitka `
+            --onefile `
+            --output-filename=PLANA${{ matrix.ext }} `
+            --include-data-dir=PLANA=PLANA `
+            --include-data-file=config.default.yaml=. `
+            --include-module=discord `
+            --include-module=discord.ext.commands `
+            --include-module=yaml `
+            --include-module=openai `
+            --include-module=google.genai `
+            --include-module=PIL `
+            --include-module=matplotlib `
+            --include-module=cartopy `
+            --include-module=langdetect `
+            --include-module=aiohttp `
+            --include-module=aiofiles `
+            --include-module=nacl `
+            --include-module=yt_dlp `
+            --enable-plugin=discord `
+            --enable-plugin=matplotlib `
             main.py
         shell: pwsh
 
