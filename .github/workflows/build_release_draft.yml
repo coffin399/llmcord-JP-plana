@@ -75,7 +75,6 @@ jobs:
             --include-module=aiofiles \
             --include-module=nacl \
             --include-module=yt_dlp \
-            --enable-plugin=discord \
             --enable-plugin=matplotlib \
             main.py
         shell: bash
@@ -101,7 +100,6 @@ jobs:
             --include-module=aiofiles `
             --include-module=nacl `
             --include-module=yt_dlp `
-            --enable-plugin=discord `
             --enable-plugin=matplotlib `
             main.py
         shell: pwsh
