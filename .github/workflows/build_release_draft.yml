@@ -12,6 +12,10 @@ on:
 permissions:
   contents: write
 
+env:
+  NUITKA_VERSION: '1.9.7'
+  PYTHON_VERSION: '3.11'
+
 jobs:
   build-all:
     strategy:
@@ -37,36 +41,28 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Cache Nuitka
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: |
             ~/.nuitka
             ~/.cache/Nuitka
-          key: nuitka-${{ runner.os }}-${{ hashFiles('requirements.txt') }}
+          key: nuitka-${{ runner.os }}-${{ env.NUITKA_VERSION }}-${{ hashFiles('**/requirements.txt') }}
           restore-keys: |
+            nuitka-${{ runner.os }}-${{ env.NUITKA_VERSION }}-
             nuitka-${{ runner.os }}-
 
       - name: Install Nuitka
-        run: pip install nuitka
+        run: pip install nuitka==${{ env.NUITKA_VERSION }}
 
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Create data directory (Linux/macOS)
+      - name: Build executable (Linux/macOS)
         if: matrix.os != 'windows-latest'
-        run: mkdir -p data
-
-      - name: Create data directory (Windows)
-        if: matrix.os == 'windows-latest'
-        run: New-Item -ItemType Directory -Path "data" -Force
-        shell: pwsh
-
-       - name: Build executable (Linux/macOS)
-         if: matrix.os != 'windows-latest'
-         run: |
+        run: |
            python -m nuitka \
              --onefile \
              --output-dir=dist \
@@ -92,9 +88,9 @@ jobs:
              main.py
          shell: bash
 
-       - name: Build executable (Windows)
-         if: matrix.os == 'windows-latest'
-         run: |
+      - name: Build executable (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
            python -m nuitka `
              --onefile `
              --output-dir=dist `
@@ -130,7 +126,7 @@ jobs:
           fi
           echo "✅ Build successful: PLANA${{ matrix.ext }} found"
           chmod +x "dist/PLANA${{ matrix.ext }}"
-          ls -la "dist/PLANA${{ matrix.ext }}"
+          ls -lh "dist/PLANA${{ matrix.ext }}"
         shell: bash
 
       - name: Verify build output (Windows)
@@ -143,7 +139,7 @@ jobs:
             exit 1
           }
           Write-Host "✅ Build successful: PLANA${{ matrix.ext }} found"
-          Get-ChildItem "dist/PLANA${{ matrix.ext }}"
+          Get-ChildItem "dist/PLANA${{ matrix.ext }}" | Format-List
         shell: pwsh
 
       - name: Copy build files (Windows)
@@ -176,6 +172,7 @@ jobs:
           5. Run PLANA${{ matrix.ext }} again
           
           Platform: ${{ matrix.os }} (${{ matrix.platform }})
+          Build Date: $(Get-Date -Format "yyyy-MM-dd HH:mm:ss UTC")
           "@ | Out-File -FilePath "release_package/README.txt" -Encoding UTF8
         shell: pwsh
 
@@ -203,12 +200,13 @@ jobs:
           
           ## Usage:
           1. Copy client_secrets.json to this directory
-          2. Run PLANA${{ matrix.ext }}
+          2. Run ./PLANA${{ matrix.ext }}
           3. The first run will generate config.yaml from config.default.yaml
           4. Edit config.yaml with your bot token and API keys
-          5. Run PLANA${{ matrix.ext }} again
+          5. Run ./PLANA${{ matrix.ext }} again
           
           Platform: ${{ matrix.os }} (${{ matrix.platform }})
+          Build Date: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
           EOF
         shell: bash
 
@@ -220,7 +218,8 @@ jobs:
             Write-Error "❌ Failed to create zip package"
             exit 1
           }
-          Write-Host "✅ Zip package created successfully"
+          $fileSize = (Get-Item "PLANA-${{ matrix.platform }}.zip").Length / 1MB
+          Write-Host "✅ Zip package created successfully (Size: $([math]::Round($fileSize, 2)) MB)"
         shell: pwsh
 
       - name: Create zip package (Linux/macOS)
@@ -233,7 +232,8 @@ jobs:
             echo "❌ Failed to create zip package"
             exit 1
           fi
-          echo "✅ Zip package created successfully"
+          size=$(du -h "PLANA-${{ matrix.platform }}.zip" | cut -f1)
+          echo "✅ Zip package created successfully (Size: $size)"
         shell: bash
 
       - name: Archive release package
@@ -265,23 +265,28 @@ jobs:
           FULL_VERSION="${VERSION}-${SHA}"
           echo "VERSION=$FULL_VERSION" >> $GITHUB_ENV
           echo "VERSION=$FULL_VERSION" >> $GITHUB_OUTPUT
+          echo "📦 Version: $FULL_VERSION"
 
       - name: Prepare release files
         run: |
           mkdir -p release_assets
-          # Copy zip files from each platform artifact
-          cp artifacts/plana-release-linux/PLANA-linux.zip release_assets/
-          cp artifacts/plana-release-win/PLANA-win.zip release_assets/
-          cp artifacts/plana-release-mac/PLANA-mac.zip release_assets/
           
-          # Verify all files exist
-          for file in release_assets/*.zip; do
-            if [ ! -f "$file" ]; then
-              echo "❌ Missing release file: $file"
+          # Copy zip files from each platform artifact
+          for platform in linux win mac; do
+            artifact_path="artifacts/plana-release-${platform}/PLANA-${platform}.zip"
+            if [ -f "$artifact_path" ]; then
+              cp "$artifact_path" release_assets/
+              size=$(du -h "$artifact_path" | cut -f1)
+              echo "✅ Found: PLANA-${platform}.zip (Size: $size)"
+            else
+              echo "❌ Missing release file: $artifact_path"
               exit 1
             fi
-            echo "✅ Found: $file"
           done
+          
+          # List all files for verification
+          echo "📦 Release assets:"
+          ls -lh release_assets/
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
@@ -291,7 +296,7 @@ jobs:
           body: |
             ## Auto-generated Release ${{ env.VERSION }}
             
-            This is an automated release build.
+            This is an automated release build from the `advanced-bot-utilities` branch.
             
             ### Downloads
             - **PLANA-linux.zip**: Linux executable package
@@ -301,29 +306,42 @@ jobs:
             ### Package Contents
             Each zip file contains:
             - `PLANA` (or `PLANA.exe` on Windows): Main executable
-            - `config.default.yaml`: Default configuration (will be copied to config.yaml on first run)
-            - `requirements.txt`: Python dependencies (for reference only)
-            - `README.txt`: Setup instructions
+            - `config.default.yaml`: Default configuration
+            - `requirements.txt`: Python dependencies reference
+            - `README.txt`: Detailed setup instructions
             
             ### First-time Setup
             1. Download the zip file for your platform
             2. Extract the zip file
             3. Copy your `client_secrets.json` file to the extracted directory
-            4. Run the executable
-            5. Edit the generated `config.yaml` file with your bot token and API keys
+            4. Run the executable (see platform-specific notes below)
+            5. Edit the generated `config.yaml` file with your credentials
             6. Run the executable again
             
             ### Platform-specific Notes
-            - **macOS**: You may need to right-click the executable and select "Open" the first time due to Gatekeeper security
-            - **Linux**: Ensure the executable has execution permissions: `chmod +x PLANA`
-            - **Windows**: Windows Defender may show a warning for unsigned executables
             
-            **Note**: Documentation, website files, and development files have been excluded from this release.
+            #### macOS
+            - You may need to right-click → "Open" the first time due to Gatekeeper
+            - Or run: `xattr -d com.apple.quarantine PLANA` in Terminal
+            
+            #### Linux
+            - Ensure executable permissions: `chmod +x PLANA`
+            - Run with: `./PLANA`
+            
+            #### Windows
+            - Windows Defender may show a warning for unsigned executables
+            - Click "More info" → "Run anyway" if prompted
+            
+            ### Dependencies
+            Built with:
+            - Python ${{ env.PYTHON_VERSION }}
+            - Nuitka ${{ env.NUITKA_VERSION }}
             
             ---
             
-            Commit: ${{ github.sha }}
-            Branch: ${{ github.ref_name }}
+            **Commit**: `${{ github.sha }}`  
+            **Branch**: `${{ github.ref_name }}`  
+            **Build Date**: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
           files: release_assets/*
           draft: false
           prerelease: false
