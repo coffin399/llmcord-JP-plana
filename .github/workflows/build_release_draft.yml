@@ -67,6 +67,7 @@ jobs:
             --include-package-data=google \
             --include-package-data=PIL \
             --include-package-data=matplotlib \
+            --include-package-data=cartopy \
             --include-package-data=langdetect \
             --include-package-data=aiohttp \
             --include-package-data=aiofiles \
@@ -92,6 +93,7 @@ jobs:
             --include-package-data=google `
             --include-package-data=PIL `
             --include-package-data=matplotlib `
+            --include-package-data=cartopy `
             --include-package-data=langdetect `
             --include-package-data=aiohttp `
             --include-package-data=aiofiles `
