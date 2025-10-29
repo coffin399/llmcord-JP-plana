@@ -23,6 +23,29 @@ permissions:
     allowed_ids: []
     blocked_ids: []
 
+# Plugin settings:
+# Plugins are experimental and may not be stable.
+plugins:
+  # Search Agent using Google Custom Search API
+  # To enable, get an API key from Google AI studio
+  search_agent:
+    enabled: true
+    api_key1: "YOUR_GOOGLE_GEMINI_API_KEY_HERE"
+    api_key2: "YOUR_GOOGLE_GEMINI_API_KEY_HERE"
+    api_key3: "YOUR_GOOGLE_GEMINI_API_KEY_HERE"
+    # You can add more api keys
+    model: "gemini-2.5-flash" # Recommended model for search
+    format_control: "検索結果に基づき、ユーザーの質問に直接回答する形で、構造化された詳細なレポートを作成してください。"
+
+  # Bio Manager for setting and getting user bios
+  bio_manager:
+    enabled: true
+    # No API keys required for this plugin
+
+  # Memory Manager for conversation memory
+  memory_manager:
+    enabled: true
+    # No API keys required for this plugin
 
 # LLM settings:
 
@@ -30,9 +53,9 @@ providers:
   # Remote providers:
   azure-openai:
     base_url: https://<resource name>.openai.azure.com/openai/deployments/<deployment name>
+    api_key: 
     api_key1:
     api_key2:
-    api_key3:
     #you can add more api keys
     extra_query:
       api-version: 2024-12-01-preview
@@ -50,9 +73,9 @@ providers:
     #you can add more api keys
   mistral:
     base_url: https://api.mistral.ai/v1
-    api_key:
     api_key1: 
     api_key2:
+    api_key3:
     #you can add more api keys
   openai:
     base_url: https://api.openai.com/v1
