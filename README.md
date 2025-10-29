@@ -10,11 +10,11 @@
   <img src="https://github.com/user-attachments/assets/7791cc6b-6755-484f-a9e3-0707765b081f" alt="">
 </p>
 
-llmcord transforms Discord into a collaborative LLM frontend. It works with practically any LLM, remote or locally hosted.
+llmcord transforms Discord into a collaborative LLM frontend. It works with practically any LLM, remote or locally hosted, and is extensible with plugins.
 
 <hr>
 
-llmcordはDiscordを共同LLMフロントエンドに変換します。リモートまたはローカルでホストされている、事実上すべてのLLMで動作します。
+llmcordはDiscordを共同LLMフロントエンドに変換します。リモートまたはローカルでホストされている、事実上すべてのLLMで動作し、プラグインで拡張可能です。
 
 ## Features / 機能
 
@@ -58,6 +58,25 @@ Or run local models with: / または、以下のローカルモデルを実行�
 
 ---
 
+### Plugins & Tools / プラグインとツール
+llmcord can be extended with plugins that act as tools for the LLM. If a model decides that a tool is needed to answer a user's query, it will call the tool and use its output to formulate a response.
+
+**Default Plugins:**
+- **`search_agent`**: Performs a web search using the Google Search API to answer questions about recent events or access information on the internet.
+- **`bio_manager`**: Allows users to set and retrieve short biographies for themselves, which the bot can access.
+- **`memory_manager`**: Provides the bot with a simple mechanism to remember and recall specific pieces of information across conversations.
+
+<hr>
+
+llmcordは、LLMのツールとして機能するプラグインで拡張できます。モデルがユーザーの質問に答えるためにツールが必要だと判断した場合、そのツールを呼び出し、その出力を使って応答を作成します。
+
+**デフォルトのプラグイン:**
+- **`search_agent`**: Google Search APIを使用してウェブ検索を実行し、最近の出来事に関する質問に答えたり、インターネット上の情報にアクセスしたりします。
+- **`bio_manager`**: ユーザーが自分用の短い自己紹介を設定・取得できるようにし、ボットがそれにアクセスできるようにします。
+- **`memory_manager`**: ボットが会話をまたいで特定の情報を記憶・想起するための簡単なメカニズムを提供します。
+
+---
+
 ### And more: / その他:
 - Supports image attachments when using a vision model (like gpt-5, grok-4, claude-4, etc.) / ビジョンモデル（gpt-5、grok-4、claude-4など）を使用する場合、画像添付ファイルをサポートします。
 - Supports text file attachments (.txt, .py, .c, etc.) / テキストファイルの添付（.txt、.py、.cなど）をサポートします。
@@ -68,7 +87,6 @@ Or run local models with: / または、以下のローカルモデルを実行�
 - Displays helpful warnings when appropriate (like "⚠️ Only using last 25 messages" when the customizable message limit is exceeded) / 適切な場合に役立つ警告を表示します（カスタマイズ可能なメッセージ制限を超えた場合の「⚠️ 過去25件のメッセージのみを使用しています」など）
 - Caches message data in a size-managed (no memory leaks) and mutex-protected (no race conditions) global dictionary to maximize efficiency and minimize Discord API calls / 効率を最大化し、Discord API呼び出しを最小限に抑えるため、サイズ管理され（メモリリークなし）、ミューテックスで保護された（競合状態なし）グローバル辞書にメッセージデータをキャッシュします
 - Fully asynchronous / 完全非同期
-- 1 Python file, ~200 lines of code / 1つのPythonファイル、約200行のコード
 
 ## Instructions / 手順
 
@@ -92,6 +110,12 @@ Or run local models with: / または、以下のローカルモデルを実行�
 | **use_plain_responses** | When set to `true` the bot will use plaintext responses instead of embeds. Plaintext responses have a shorter character limit so the bot's messages may split more often. (Default: `false`)<br /><br />**Also disables streamed responses and warning messages.**<hr>`true`に設定すると、ボットは埋め込みの代わりにプレーンテキスト応答を使用します。プレーンテキスト応答は文字数制限が短いため、ボットのメッセージがより頻繁に分割されることがあります。（デフォルト: `false`）<br /><br />**ストリーミング応答と警告メッセージも無効になります。** |
 | **allow_dms** | Set to `false` to disable direct message access. (Default: `true`)<hr>`false`に設定すると、ダイレクトメッセージアクセスが無効になります。（デフォルト: `true`） |
 | **permissions** | Configure access permissions for `users`, `roles` and `channels`, each with a list of `allowed_ids` and `blocked_ids`.<br /><br />Control which `users` are admins with `admin_ids`. Admins can change the model with `/model` and DM the bot even if `allow_dms` is `false`.<br /><br />**Leave `allowed_ids` empty to allow ALL in that category.**<br /><br />**Role and channel permissions do not affect DMs.**<br /><br />**You can use [category](https://support.discord.com/hc/en-us/articles/115001580171-Channel-Categories-101) IDs to control channel permissions in groups.**<hr>ユーザー、ロール、チャンネルのアクセス権限を、それぞれ`allowed_ids`と`blocked_ids`のリストで設定します。<br /><br />`admin_ids`でどのユーザーが管理者かを制御します。管理者は`/model`でモデルを変更でき、`allow_dms`が`false`でもボットにDMできます。<br /><br />**`allowed_ids`を空にすると、そのカテゴリのすべてを許可します。**<br /><br />**ロールとチャンネルの権限はDMに影響しません。**<br /><br />**[カテゴリ](https://support.discord.com/hc/en-us/articles/115001580171-Channel-Categories-101)IDを使用して、グループでチャンネルの権限を制御できます。** |
+
+### Plugin settings / プラグイン設定:
+
+| Setting / 設定 | Description / 説明 |
+| --- | --- |
+| **plugins** | This section allows you to enable and configure individual plugins.<br><br>**`search_agent`**: To enable, set `enabled: true`. You must also provide at least one Google Search API key. You can get a key from the [Google Cloud Console](https://console.cloud.google.com/apis/credentials). You can add multiple keys (`api_key`, `api_key1`, etc.) for rotation.<br><br>**`bio_manager`**: Set `enabled: true` to use. No API key required.<br><br>**`memory_manager`**: Set `enabled: true` to use. No API key required.<hr>このセクションでは、個々のプラグインを有効化し、設定することができます。<br><br>**`search_agent`**: 有効にするには `enabled: true` に設定します。また、少なくとも1つのGoogle Search APIキーを提供する必要があります。キーは[Google Cloud Console](https://console.cloud.google.com/apis/credentials)から取得できます。ローテーションのために複数のキー（`api_key`, `api_key1`など）を追加できます。<br><br>**`bio_manager`**: 使用するには `enabled: true` に設定します。APIキーは不要です。<br><br>**`memory_manager`**: 使用するには `enabled: true` に設定します。APIキーは不要です。|
 
 ### LLM settings / LLM設定:
 
