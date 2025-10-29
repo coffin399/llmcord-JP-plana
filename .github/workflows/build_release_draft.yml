@@ -39,6 +39,16 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Cache Nuitka
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.nuitka
+            ~/.cache/Nuitka
+          key: nuitka-${{ runner.os }}-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            nuitka-${{ runner.os }}-
+
       - name: Install Nuitka
         run: pip install nuitka
 
@@ -59,8 +69,10 @@ jobs:
         run: |
           python -m nuitka \
             --onefile \
+            --output-dir=dist \
             --output-filename=PLANA${{ matrix.ext }} \
             --include-data-file=config.default.yaml=config.default.yaml \
+            --include-data-dir=PLANA=PLANA \
             --include-package-data=discord \
             --include-package-data=yaml \
             --include-package-data=openai \
@@ -76,7 +88,7 @@ jobs:
             --assume-yes-for-downloads \
             --show-progress \
             --show-memory \
-            --jobs=2 \
+            --jobs=4 \
             main.py
         shell: bash
 
@@ -85,8 +97,10 @@ jobs:
         run: |
           python -m nuitka `
             --onefile `
+            --output-dir=dist `
             --output-filename=PLANA${{ matrix.ext }} `
             --include-data-file=config.default.yaml=config.default.yaml `
+            --include-data-dir=PLANA=PLANA `
             --include-package-data=discord `
             --include-package-data=yaml `
             --include-package-data=openai `
@@ -102,8 +116,34 @@ jobs:
             --assume-yes-for-downloads `
             --show-progress `
             --show-memory `
-            --jobs=2 `
+            --jobs=4 `
             main.py
+        shell: pwsh
+
+      - name: Verify build output and set permissions (Linux/macOS)
+        if: matrix.os != 'windows-latest'
+        run: |
+          if [ ! -f "dist/PLANA${{ matrix.ext }}" ]; then
+            echo "❌ Build failed: PLANA${{ matrix.ext }} not found in dist/"
+            ls -la dist/ || ls -la
+            exit 1
+          fi
+          echo "✅ Build successful: PLANA${{ matrix.ext }} found"
+          chmod +x "dist/PLANA${{ matrix.ext }}"
+          ls -la "dist/PLANA${{ matrix.ext }}"
+        shell: bash
+
+      - name: Verify build output (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          if (-not (Test-Path "dist/PLANA${{ matrix.ext }}")) {
+            Write-Error "❌ Build failed: PLANA${{ matrix.ext }} not found in dist/"
+            Get-ChildItem dist/ -ErrorAction SilentlyContinue
+            Get-ChildItem .
+            exit 1
+          }
+          Write-Host "✅ Build successful: PLANA${{ matrix.ext }} found"
+          Get-ChildItem "dist/PLANA${{ matrix.ext }}"
         shell: pwsh
 
       - name: Copy build files (Windows)
@@ -143,10 +183,10 @@ jobs:
         if: matrix.os != 'windows-latest'
         run: |
           mkdir -p release_package
-          cp dist/PLANA${{ matrix.ext }} release_package/
+          cp "dist/PLANA${{ matrix.ext }}" release_package/
           cp config.default.yaml release_package/
           cp requirements.txt release_package/
-          cat > release_package/README.txt << 'EOF'
+          cat > release_package/README.txt << EOF
           # PLANA Release Package
           
           ## Files included:
@@ -170,11 +210,17 @@ jobs:
           
           Platform: ${{ matrix.os }} (${{ matrix.platform }})
           EOF
+        shell: bash
 
       - name: Create zip package (Windows)
         if: matrix.os == 'windows-latest'
         run: |
           Compress-Archive -Path "release_package/*" -DestinationPath "PLANA-${{ matrix.platform }}.zip" -Force
+          if (-not (Test-Path "PLANA-${{ matrix.platform }}.zip")) {
+            Write-Error "❌ Failed to create zip package"
+            exit 1
+          }
+          Write-Host "✅ Zip package created successfully"
         shell: pwsh
 
       - name: Create zip package (Linux/macOS)
@@ -183,13 +229,19 @@ jobs:
           cd release_package
           zip -r "../PLANA-${{ matrix.platform }}.zip" .
           cd ..
+          if [ ! -f "PLANA-${{ matrix.platform }}.zip" ]; then
+            echo "❌ Failed to create zip package"
+            exit 1
+          fi
+          echo "✅ Zip package created successfully"
+        shell: bash
 
       - name: Archive release package
         uses: actions/upload-artifact@v4
         with:
           name: plana-release-${{ matrix.platform }}
           path: PLANA-${{ matrix.platform }}.zip
-          retention-days: 30
+          retention-days: 90
 
   create-release:
     needs: build-all
@@ -210,8 +262,9 @@ jobs:
         run: |
           VERSION=$(date +'%Y%m%d-%H%M%S')
           SHA=$(git rev-parse --short HEAD)
-          echo "VERSION=$VERSION" >> $GITHUB_ENV
-          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          FULL_VERSION="${VERSION}-${SHA}"
+          echo "VERSION=$FULL_VERSION" >> $GITHUB_ENV
+          echo "VERSION=$FULL_VERSION" >> $GITHUB_OUTPUT
 
       - name: Prepare release files
         run: |
@@ -220,6 +273,15 @@ jobs:
           cp artifacts/plana-release-linux/PLANA-linux.zip release_assets/
           cp artifacts/plana-release-win/PLANA-win.zip release_assets/
           cp artifacts/plana-release-mac/PLANA-mac.zip release_assets/
+          
+          # Verify all files exist
+          for file in release_assets/*.zip; do
+            if [ ! -f "$file" ]; then
+              echo "❌ Missing release file: $file"
+              exit 1
+            fi
+            echo "✅ Found: $file"
+          done
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
@@ -251,6 +313,11 @@ jobs:
             5. Edit the generated `config.yaml` file with your bot token and API keys
             6. Run the executable again
             
+            ### Platform-specific Notes
+            - **macOS**: You may need to right-click the executable and select "Open" the first time due to Gatekeeper security
+            - **Linux**: Ensure the executable has execution permissions: `chmod +x PLANA`
+            - **Windows**: Windows Defender may show a warning for unsigned executables
+            
             **Note**: Documentation, website files, and development files have been excluded from this release.
             
             ---
@@ -262,4 +329,3 @@ jobs:
           prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
