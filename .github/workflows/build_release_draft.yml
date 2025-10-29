@@ -169,11 +169,24 @@ jobs:
           Platform: ${{ matrix.os }} (${{ matrix.platform }})
           EOF
 
+      - name: Create zip package (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          Compress-Archive -Path "release_package/*" -DestinationPath "PLANA-${{ matrix.platform }}.zip" -Force
+        shell: pwsh
+
+      - name: Create zip package (Linux/macOS)
+        if: matrix.os != 'windows-latest'
+        run: |
+          cd release_package
+          zip -r "../PLANA-${{ matrix.platform }}.zip" .
+          cd ..
+
       - name: Archive release package
         uses: actions/upload-artifact@v4
         with:
           name: plana-release-${{ matrix.platform }}
-          path: release_package/*
+          path: PLANA-${{ matrix.platform }}.zip
           retention-days: 30
 
   create-release:
@@ -201,10 +214,10 @@ jobs:
       - name: Prepare release files
         run: |
           mkdir -p release_assets
-          # Copy files from each platform artifact
-          find artifacts/plana-release-linux -type f -exec cp {} release_assets/ \;
-          find artifacts/plana-release-win -type f -exec cp {} release_assets/ \;
-          find artifacts/plana-release-mac -type f -exec cp {} release_assets/ \;
+          # Copy zip files from each platform artifact
+          cp artifacts/plana-release-linux/PLANA-linux.zip release_assets/
+          cp artifacts/plana-release-win/PLANA-win.zip release_assets/
+          cp artifacts/plana-release-mac/PLANA-mac.zip release_assets/
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
@@ -216,20 +229,25 @@ jobs:
             
             This is an automated release build.
             
-            ### Platform: Linux
-            - Extract and run PLANA
+            ### Downloads
+            - **PLANA-linux.zip**: Linux executable package
+            - **PLANA-win.zip**: Windows executable package  
+            - **PLANA-mac.zip**: macOS executable package
             
-            ### Platform: Windows  
-            - Extract and run PLANA.exe
-            
-            ### Platform: macOS
-            - Extract and run PLANA
+            ### Package Contents
+            Each zip file contains:
+            - `PLANA` (or `PLANA.exe` on Windows): Main executable
+            - `config.default.yaml`: Default configuration (will be copied to config.yaml on first run)
+            - `requirements.txt`: Python dependencies (for reference only)
+            - `README.txt`: Setup instructions
             
             ### First-time Setup
-            1. Copy your `client_secrets.json` file to the extracted directory
-            2. Run the executable
-            3. Edit the generated `config.yaml` file with your bot token and API keys
-            4. Run the executable again
+            1. Download the zip file for your platform
+            2. Extract the zip file
+            3. Copy your `client_secrets.json` file to the extracted directory
+            4. Run the executable
+            5. Edit the generated `config.yaml` file with your bot token and API keys
+            6. Run the executable again
             
             **Note**: Documentation, website files, and development files have been excluded from this release.
             
