@@ -1,13 +1,17 @@
 name: Build and Release Executables
 
 on:
-  push:
-    branches: [ advanced-bot-utilities ]
-    paths-ignore:
-      - 'docs/**'
-      - 'website/**'
-      - '.github/workflows/deploy-pages.yml'
-      - 'README.md'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "New version tag (e.g., v1.2.3 or 1.2.3)"
+        required: true
+        type: string
+      prerelease:
+        description: "Mark as prerelease"
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: write
