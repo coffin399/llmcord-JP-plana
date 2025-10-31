@@ -151,6 +151,38 @@ class ImageGenerator:
         """利用可能なモデルのリストを取得"""
         return self.available_models.copy()
 
+    def get_models_by_provider(self) -> Dict[str, List[str]]:
+        """
+        モデルをプロバイダーごとにグループ化して返す
+        
+        Stable Diffusion WebUI Forgeの場合、モデル名はプロバイダーなしの形式（例: sd_xl_base_1.0.safetensors）
+        だが、表示用に forge/model_name 形式で返す。
+        
+        Returns:
+            プロバイダー名をキー、モデルリストを値とする辞書
+            値のモデル名は "provider/model_name" 形式（表示用）
+        """
+        models_by_provider: Dict[str, List[str]] = {}
+        
+        for model in self.available_models:
+            # モデル名が "provider/model" 形式かチェック
+            if '/' in model:
+                provider, model_name = model.split('/', 1)
+                if provider not in models_by_provider:
+                    models_by_provider[provider] = []
+                models_by_provider[provider].append(model)
+            else:
+                # Stable Diffusion WebUI Forgeの場合、プロバイダー情報がないので "forge" をデフォルトプロバイダーとして使用
+                # 表示用に "forge/model_name" 形式に変換
+                default_provider = "forge"
+                if default_provider not in models_by_provider:
+                    models_by_provider[default_provider] = []
+                # プロバイダー付きの形式に変換して追加（表示用）
+                full_model_name = f"{default_provider}/{model}"
+                models_by_provider[default_provider].append(full_model_name)
+        
+        return models_by_provider
+
     def _validate_and_adjust_size(self, size: str) -> tuple[int, int, str]:
         """
         サイズ文字列を検証し、必要に応じて調整する

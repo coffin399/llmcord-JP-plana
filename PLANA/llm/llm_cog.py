@@ -1803,8 +1803,10 @@ class LLMCog(commands.Cog, name="LLM"):
             self._add_support_footer(embed)
             await interaction.followup.send(embed=embed, view=self._create_support_view())
             return
+        # プロバイダー付き形式（forge/model_name）の場合は実際のモデル名を抽出
+        actual_model = model.split('/', 1)[1] if '/' in model else model
         available_models = self.image_generator.get_available_models()
-        if model not in available_models:
+        if actual_model not in available_models:
             embed = discord.Embed(title="⚠️ Invalid Model / 無効なモデル",
                                   description=f"The specified model `{model}` is not available.\n指定されたモデル `{model}` は利用できません。",
                                   color=discord.Color.gold())
@@ -1812,12 +1814,12 @@ class LLMCog(commands.Cog, name="LLM"):
             await interaction.followup.send(embed=embed, view=self._create_support_view())
             return
         try:
-            await self.image_generator.set_model_for_channel(interaction.channel_id, model)
+            await self.image_generator.set_model_for_channel(interaction.channel_id, actual_model)
             default_model = self.image_generator.default_model
             try:
                 provider, model_name = model.split('/', 1)
             except ValueError:
-                provider, model_name = "unknown", model
+                provider, model_name = "forge", model  # Forgeの場合はデフォルトプロバイダーをforgeに
             if model != default_model:
                 embed = discord.Embed(title="✅ Image Model Switched / 画像生成モデルを切り替えました",
                                       description="The image generation model for this channel has been switched.\nこのチャンネルの画像生成モデルを切り替えました。",
@@ -1899,7 +1901,8 @@ class LLMCog(commands.Cog, name="LLM"):
         try:
             provider, model_name = current_model.split('/', 1)
         except ValueError:
-            provider, model_name = "unknown", current_model
+            # Stable Diffusion WebUI Forgeの場合はプロバイダーなしなのでforgeをデフォルトとする
+            provider, model_name = "forge", current_model
         embed = discord.Embed(title="🎨 Current Image Generation Model / 現在の画像生成モデル",
                               color=discord.Color.blue() if is_default else discord.Color.purple())
         embed.add_field(name="Current Model / 現在のモデル", value=f"```\n{current_model}\n```", inline=False)
@@ -1945,7 +1948,8 @@ class LLMCog(commands.Cog, name="LLM"):
                               description=f"Total: {total_models} models across {len(models_by_provider)} provider(s)\n合計: {len(models_by_provider)}プロバイダー、{total_models}モデル",
                               color=discord.Color.blue())
         for provider_name, models in sorted(models_by_provider.items()):
-            model_names = [m.split('/', 1) for m in models]
+            # モデル名からプロバイダー部分を除去（表示用）
+            model_names = [m.split('/', 1)[1] if '/' in m else m for m in models]
             if len(model_names) > 10:
                 model_text = "\n".join([f"{i + 1}. `{m}`" for i, m in enumerate(model_names[:10])])
                 model_text += f"\n... and {len(model_names) - 10} more"
