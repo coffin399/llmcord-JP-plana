@@ -449,6 +449,10 @@ class LLMCog(commands.Cog, name="LLM"):
             return None
 
     def _initialize_command_manager(self) -> Optional[CommandInfoManager]:
+        # 設定でcommands_managerがfalseの場合は初期化しない
+        if not self.llm_config.get('commands_manager', True):
+            logger.info("commands_manager is disabled in config. CommandInfoManager will not be initialized.")
+            return None
         if not CommandInfoManager: return None
         try:
             return CommandInfoManager(self.bot)
@@ -503,7 +507,11 @@ class LLMCog(commands.Cog, name="LLM"):
             await self.bot.wait_until_ready()
             available_commands = self.command_manager.get_all_commands_info()
         else:
-            logger.warning("CommandInfoManager is not available.")
+            # commands_managerがfalseの場合、またはCommandInfoManagerが利用できない場合
+            if not self.llm_config.get('commands_manager', True):
+                logger.debug("commands_manager is disabled in config. No commands will be collected.")
+            else:
+                logger.warning("CommandInfoManager is not available.")
         try:
             now, current_date_str, current_time_str = datetime.now(self.jst), datetime.now(self.jst).strftime(
                 '%Y年%m月%d日'), datetime.now(self.jst).strftime('%H:%M')
