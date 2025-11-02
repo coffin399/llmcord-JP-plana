@@ -157,6 +157,7 @@ llm:
     </language_instructions>
 
   # --- ツール設定 ---
+  commands_manager: true # trueにすると全コマンドを収集し、LLMにリストとして渡します
   active_tools:
     - "search"
     - "user_bio"
