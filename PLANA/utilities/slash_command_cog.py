@@ -619,54 +619,6 @@ class SlashCommandsCog(commands.Cog, name="スラッシュコマンド"):
                 ephemeral=False)
             logger.error(f"/updates の実行中に接続エラーが発生しました: {e}")
 
-    @app_commands.command(name="enable-logging",
-                          description="指定したチャンネルにBot全体のログを送信するように設定します。")
-    @app_commands.describe(channel="ログを送信するテキストチャンネル")
-    async def enable_logging(self, interaction: discord.Interaction, channel: discord.TextChannel):
-        channel_id = channel.id
-        current_channels = self._load_logging_channels()
-
-        if channel_id in current_channels:
-            await interaction.response.send_message(f"✅ チャンネル {channel.mention} は既にログ送信先に登録されています。", ephemeral=False)
-            return
-
-        current_channels.append(channel_id)
-        self._save_logging_channels(current_channels)
-
-        handler = self._get_discord_log_handler()
-        if handler:
-            handler.add_channel(channel_id)
-            logger.info(f"ロギングチャンネルを追加しました: {channel_id} (Guild: {interaction.guild.id}, User: {interaction.user.id})")
-            await interaction.response.send_message(f"✅ チャンネル {channel.mention} をログの送信先として設定しました。", ephemeral=False)
-        else:
-            logger.warning(f"ロギングチャンネル {channel_id} を設定ファイルに追加しましたが、DiscordLogHandlerが見つかりませんでした。")
-            await interaction.response.send_message(f"✅ チャンネル {channel.mention} をログの送信先として設定しました。\n"
-                                                     f"ボットの再起動後にログ送信が開始されます。", ephemeral=False)
-
-    @app_commands.command(name="disable-logging",
-                          description="指定したチャンネルへのBot全体のログ送信を停止します。")
-    @app_commands.describe(channel="ログ送信を停止するテキストチャンネル")
-    async def disable_logging(self, interaction: discord.Interaction, channel: discord.TextChannel):
-        channel_id = channel.id
-        current_channels = self._load_logging_channels()
-
-        if channel_id not in current_channels:
-            await interaction.response.send_message(f"ℹ️ チャンネル {channel.mention} はログ送信先に登録されていません。", ephemeral=False)
-            return
-
-        current_channels.remove(channel_id)
-        self._save_logging_channels(current_channels)
-
-        handler = self._get_discord_log_handler()
-        if handler:
-            handler.remove_channel(channel_id)
-            logger.info(f"ロギングチャンネルを削除しました: {channel_id} (Guild: {interaction.guild.id}, User: {interaction.user.id})")
-            await interaction.response.send_message(f"✅ チャンネル {channel.mention} へのログ送信を停止しました。", ephemeral=False)
-        else:
-            logger.warning(f"ロギングチャンネル {channel_id} を設定ファイルから削除しましたが、DiscordLogHandlerが見つかりませんでした。")
-            await interaction.response.send_message(f"✅ チャンネル {channel.mention} へのログ送信設定を解除しました。\n"
-                                                     f"ボットの再起動後に完全に停止します。", ephemeral=False)
-
     @app_commands.command(name="help",
                           description="Botのヘルプ情報を表示します。/ Displays help information for the bot.")
     async def help_slash_command(self, interaction: discord.Interaction):
