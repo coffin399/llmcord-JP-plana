@@ -1282,7 +1282,7 @@ class LLMCog(commands.Cog, name="LLM"):
                 for candidate in response.candidates:
                     if hasattr(candidate, 'grounding_metadata'):
                         grounding = candidate.grounding_metadata
-                        if hasattr(grounding, 'grounding_chunks'):
+                        if hasattr(grounding, 'grounding_chunks') and grounding.grounding_chunks:
                             for chunk in grounding.grounding_chunks:
                                 if hasattr(chunk, 'web'):
                                     web_info = chunk.web
