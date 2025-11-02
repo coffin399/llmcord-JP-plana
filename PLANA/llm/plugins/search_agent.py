@@ -89,7 +89,7 @@ class SearchAgent:
         logger.info(f"Rotating to API key {self.current_key_index + 1}/{len(self.clients)}")
         return self.clients[self.current_key_index]
 
-    async def _google_search(self, query: str) -> str:
+    async def _google_search(self, query: str):
         """Google Searchを使用して検索を実行"""
         if not self.clients:
             raise SearchExecutionError("SearchAgent is not properly initialized.")
@@ -117,8 +117,8 @@ class SearchAgent:
                         )
                     )
 
-                    # レスポンステキストを返す
-                    return response.text
+                    # レスポンス全体を返す
+                    return response
 
                 except errors.APIError as e:
                     # 新しいSDKのエラーハンドリング
@@ -170,7 +170,7 @@ class SearchAgent:
         # すべてのキーで失敗した場合
         raise SearchExecutionError("Search failed on all available API keys.")
 
-    async def run(self, *, arguments: dict, bot, channel_id: int) -> str:
+    async def run(self, *, arguments: dict, bot, channel_id: int):
         """検索を実行するメインメソッド"""
         query = arguments.get("query", "")
         if not query:
