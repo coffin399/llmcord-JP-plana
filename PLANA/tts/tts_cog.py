@@ -27,6 +27,14 @@ except ImportError as e:
 
 
 class TTSCog(commands.Cog, name="tts_cog"):
+    """
+    TTS Cog - Style-Bert-VITS2対応
+    
+    Note: KoboldCPPはLLM推論サーバーであり、TTSとは直接関係ありません。
+    このCogはStyle-Bert-VITS2を使用してテキストを音声に変換します。
+    KoboldCPPを使用している場合でも、LLM Cogが応答を生成すると、
+    このCogが自動的にその応答を読み上げます（設定されている場合）。
+    """
     def __init__(self, bot: commands.Bot):
         if TTSCogExceptionHandler is None:
             raise commands.ExtensionFailed(self.qualified_name,

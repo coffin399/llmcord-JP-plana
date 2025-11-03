@@ -20,6 +20,9 @@ admin_user_ids:
 # =============================================================================
 llm:
   # --- モデル設定 ---
+  # デフォルトモデルを設定してください
+  # KoboldCPPを使用する場合は "koboldcpp/モデル名" の形式で指定してください
+  # 例: model: "koboldcpp/mistral-7b-instruct-v0.2"
   model: "google/gemini-2.5-pro"
 
   available_models:
@@ -39,6 +42,11 @@ llm:
 
     # --- Other Providers ---
     - "mistral/mistral-medium-latest"
+
+    # --- KoboldCPP (ローカルLLM) ---
+    # KoboldCPPでロードしているモデル名を指定してください
+    # 例: "koboldcpp/mistral-7b-instruct-v0.2" または "koboldcpp/llama-3-8b-instruct"
+    # - "koboldcpp/mistral-7b-instruct-v0.2"
 
   # --- APIプロバイダー設定 ---
   providers:
@@ -71,9 +79,55 @@ llm:
       api_key1: key
       #you can add more api keys here
 
-  # --- 画像生成設定 (Stable Diffusion WebUI Forge) ---
+    # --- KoboldCPP (ローカルLLM推論サーバー) ---
+    # KoboldCPPはOpenAI互換APIを提供するローカルLLMサーバーです
+    # 通常は http://localhost:5001/v1 または http://localhost:1234/v1 で動作します
+    # APIキーは通常不要ですが、設定されている場合は使用されます
+    #
+    # 【KoboldCPPのセットアップ方法】
+    # 1. KoboldCPPを起動し、モデルをロードしてください
+    # 2. KoboldCPPのAPIエンドポイントを確認してください（通常は /v1 で終わる）
+    # 3. この設定ファイルで base_url をKoboldCPPのエンドポイントに設定してください
+    # 4. available_models に "koboldcpp/モデル名" を追加してください（モデル名はKoboldCPPでロードしているもの）
+    # 5. model を "koboldcpp/モデル名" に設定するか、/switch-models コマンドで切り替えてください
+    #
+    # 【注意事項】
+    # - ツール（関数呼び出し）を使用する場合、モデルがツールをサポートしている必要があります
+    # - 一部のモデルではツールサポートが制限されている場合があります
+    # - ツールが動作しない場合は supports_tools: false に設定してください
+    # - ローカルサーバーなので、タイムアウトは長めに設定できます
+    koboldcpp:
+      # KoboldCPPのベースURL（デフォルト: http://localhost:5001/v1）
+      # ポート番号はKoboldCPPの起動時に指定した値に合わせてください
+      # 例: --port 5001 で起動した場合は "http://localhost:5001/v1"
+      base_url: "http://localhost:5001/v1"
+      # APIキーは通常不要（ダミーキーでOK）
+      # 認証が必要な場合はKoboldCPPの設定に合わせて設定してください
+      api_key1: "koboldcpp-dummy-key"
+      # 複数のKoboldCPPインスタンスがある場合は追加できます
+      # api_key2: "koboldcpp-dummy-key-2"
+      # base_url2: "http://localhost:5002/v1"
+      
+      # KoboldCPP固有の設定（オプション）
+      # タイムアウト設定（秒） - ローカルなので長めに設定可能（デフォルト: 300秒）
+      timeout: 300.0
+      # ツール（関数呼び出し）のサポート
+      # KoboldCPPは一部のモデルでツールサポートが制限されている場合があります
+      # ツールを使用する場合は、モデルがツールをサポートしていることを確認してください
+      # ツールが動作しない場合は false に設定すると、ツールなしで動作します
+      supports_tools: true
+
+  # --- 画像生成設定 (Stable Diffusion WebUI Forge / KoboldCPP) ---
   image_generator:
-    # Forge WebUI のURL (デフォルト: http://127.0.0.1:7860)
+    # KoboldCPP のURL (KoboldCPPを使用する場合はこちらを設定)
+    # koboldcpp_urlが設定されている場合は優先的に使用されます
+    # 例: "http://127.0.0.1:5001" または "http://localhost:5001"
+    # 注意: URLにはポート番号のみを指定し、パス(/sdapi/v1など)は含めないでください
+    # koboldcpp_url: "http://127.0.0.1:5001"
+    
+    # Forge WebUI のURL (koboldcpp_urlが設定されていない場合に使用)
+    # デフォルト: http://127.0.0.1:7860
+    # 注意: URLにはポート番号のみを指定し、パス(/sdapi/v1など)は含めないでください
     forge_url: "http://127.0.0.1:7860"
 
     # デフォルトモデル (Forge WebUI内のモデル名)

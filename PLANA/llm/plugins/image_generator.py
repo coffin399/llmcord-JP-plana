@@ -26,15 +26,33 @@ class GenerationTask:
 
 
 class ImageGenerator:
-    """画像生成プラグイン - Stable Diffusion WebUI Forge対応"""
+    """
+    画像生成プラグイン - Stable Diffusion WebUI Forge / KoboldCPP対応
+    
+    Stable Diffusion WebUI ForgeとKoboldCPPの両方の画像生成APIをサポートします。
+    両プロバイダーは同じAPI仕様を使用するため、URLを設定するだけで切り替え可能です。
+    """
 
     def __init__(self, bot):
         self.bot = bot
         self.config = bot.config.get('llm', {})
         self.image_gen_config = self.config.get('image_generator', {})
 
-        # Forge WebUI設定
+        # プロバイダー設定 (Forge WebUI / KoboldCPP)
+        # koboldcpp_urlが設定されている場合はそれを優先、なければforge_urlを使用
+        self.koboldcpp_url = self.image_gen_config.get('koboldcpp_url')
         self.forge_url = self.image_gen_config.get('forge_url', 'http://127.0.0.1:7860')
+        
+        # 実際に使用するURLとプロバイダー名を決定
+        if self.koboldcpp_url:
+            self.api_url = self.koboldcpp_url.rstrip('/')
+            self.provider_name = "KoboldCPP"
+            logger.info(f"Using KoboldCPP for image generation at: {self.api_url}")
+        else:
+            self.api_url = self.forge_url.rstrip('/')
+            self.provider_name = "Stable Diffusion WebUI Forge"
+            logger.info(f"Using Stable Diffusion WebUI Forge for image generation at: {self.api_url}")
+
         self.default_model = self.image_gen_config.get('model', 'sd_xl_base_1.0.safetensors')
         self.default_size = self.image_gen_config.get('default_size', '1024x1024')
         self.timeout = self.image_gen_config.get('timeout', 180.0)
@@ -74,7 +92,7 @@ class ImageGenerator:
 
         self.http_session = aiohttp.ClientSession()
 
-        logger.info(f"ImageGenerator initialized with Forge WebUI at: {self.forge_url}")
+        logger.info(f"ImageGenerator initialized with {self.provider_name} at: {self.api_url}")
         logger.info(f"Default model: {self.default_model}")
         logger.info(f"Available models: {len(self.available_models)} models")
         logger.info(f"Save images: {self.save_images} (directory: {self.save_directory})")
@@ -155,14 +173,20 @@ class ImageGenerator:
         """
         モデルをプロバイダーごとにグループ化して返す
         
-        Stable Diffusion WebUI Forgeの場合、モデル名はプロバイダーなしの形式（例: sd_xl_base_1.0.safetensors）
-        だが、表示用に forge/model_name 形式で返す。
+        Stable Diffusion WebUI Forge / KoboldCPPの場合、モデル名はプロバイダーなしの形式（例: sd_xl_base_1.0.safetensors）
+        だが、表示用に "provider/model_name" 形式で返す。
         
         Returns:
             プロバイダー名をキー、モデルリストを値とする辞書
             値のモデル名は "provider/model_name" 形式（表示用）
         """
         models_by_provider: Dict[str, List[str]] = {}
+        
+        # 使用中のプロバイダーに応じてデフォルトプロバイダー名を決定
+        if self.provider_name == "KoboldCPP":
+            default_provider = "koboldcpp"
+        else:
+            default_provider = "forge"
         
         for model in self.available_models:
             # モデル名が "provider/model" 形式かチェック
@@ -172,9 +196,8 @@ class ImageGenerator:
                     models_by_provider[provider] = []
                 models_by_provider[provider].append(model)
             else:
-                # Stable Diffusion WebUI Forgeの場合、プロバイダー情報がないので "forge" をデフォルトプロバイダーとして使用
-                # 表示用に "forge/model_name" 形式に変換
-                default_provider = "forge"
+                # プロバイダー情報がないので、現在使用中のプロバイダーをデフォルトとして使用
+                # 表示用に "provider/model_name" 形式に変換
                 if default_provider not in models_by_provider:
                     models_by_provider[default_provider] = []
                 # プロバイダー付きの形式に変換して追加（表示用）
@@ -583,7 +606,11 @@ class ImageGenerator:
                     inline=False
                 )
 
-            embed.set_footer(text="Powered by SDWebUI reForge and PLANA on RTX3050")
+            # フッターメッセージをプロバイダーに応じて動的に変更
+            if self.provider_name == "KoboldCPP":
+                embed.set_footer(text=f"Powered by KoboldCPP and PLANA")
+            else:
+                embed.set_footer(text="Powered by SDWebUI reForge and PLANA")
 
             await channel.send(embed=embed, file=image_file)
 
@@ -674,7 +701,7 @@ class ImageGenerator:
         width, height = map(int, size.split('x'))
 
         # Forge WebUI API エンドポイント
-        url = f"{self.forge_url.rstrip('/')}/sdapi/v1/txt2img"
+        url = f"{self.api_url}/sdapi/v1/txt2img"
 
         # 渡されたパラメータを使用（デフォルトは既に適用済み）
         steps = gen_params.get('steps', 20)
@@ -710,7 +737,7 @@ class ImageGenerator:
                 if key not in payload:
                     payload[key] = value
 
-        logger.info(f"🟢 [IMAGE_GEN] Calling Forge WebUI API")
+        logger.info(f"🟢 [IMAGE_GEN] Calling {self.provider_name} API")
         logger.info(f"🟢 [IMAGE_GEN] URL: {url}")
         logger.info(f"🟢 [IMAGE_GEN] Model: {model}")
         logger.info(f"🟢 [IMAGE_GEN] Size: {width}x{height}")
@@ -848,7 +875,7 @@ class ImageGenerator:
             return None
         except aiohttp.ClientConnectorError as e:
             logger.error(f"❌ [IMAGE_GEN] Connection error: {e}")
-            logger.error(f"❌ [IMAGE_GEN] Make sure Forge WebUI is running at {self.forge_url}")
+            logger.error(f"❌ [IMAGE_GEN] Make sure {self.provider_name} is running at {self.api_url}")
             if progress_task:
                 progress_task.cancel()
             if progress_message:
@@ -877,7 +904,7 @@ class ImageGenerator:
             start_time: float
     ):
         """プログレスを監視してメッセージを更新"""
-        progress_url = f"{self.forge_url.rstrip('/')}/sdapi/v1/progress"
+        progress_url = f"{self.api_url}/sdapi/v1/progress"
 
         last_step = 0
         last_update_time = start_time
@@ -1019,9 +1046,9 @@ class ImageGenerator:
             logger.error(f"❌ [IMAGE_GEN] Failed to save image: {e}", exc_info=True)
             return None
 
-    async def get_available_models_from_forge(self) -> Optional[List[str]]:
-        """Forge WebUIから利用可能なモデルリストを取得"""
-        url = f"{self.forge_url.rstrip('/')}/sdapi/v1/sd-models"
+    async def get_available_models_from_api(self) -> Optional[List[str]]:
+        """Forge WebUI / KoboldCPPから利用可能なモデルリストを取得"""
+        url = f"{self.api_url}/sdapi/v1/sd-models"
 
         try:
             async with self.http_session.get(
@@ -1031,7 +1058,7 @@ class ImageGenerator:
                 if response.status == 200:
                     models = await response.json()
                     model_names = [model['title'] for model in models]
-                    logger.info(f"📋 [IMAGE_GEN] Found {len(model_names)} models in Forge WebUI")
+                    logger.info(f"📋 [IMAGE_GEN] Found {len(model_names)} models in {self.provider_name}")
                     return model_names
                 else:
                     logger.error(f"❌ [IMAGE_GEN] Failed to fetch models: {response.status}")
@@ -1043,4 +1070,4 @@ class ImageGenerator:
     async def close(self):
         """HTTPセッションをクローズ"""
         await self.http_session.close()
-        logger.info("ImageGenerator HTTP session closed")
+        logger.info(f"ImageGenerator HTTP session closed for {self.provider_name}")

@@ -360,6 +360,12 @@ class LLMCog(commands.Cog, name="LLM"):
             if not provider_config:
                 logger.error(f"Configuration for LLM provider '{provider_name}' not found.")
                 return None
+            
+            # KoboldCPP固有の処理
+            is_koboldcpp = provider_name.lower() == 'koboldcpp'
+            if is_koboldcpp:
+                logger.info(f"🔧 [KoboldCPP] Detected KoboldCPP provider. Applying KoboldCPP-specific settings.")
+            
             if provider_name not in self.provider_api_keys:
                 api_keys, i = [], 1
                 while True:
@@ -371,7 +377,12 @@ class LLMCog(commands.Cog, name="LLM"):
                 if not api_keys:
                     logger.info(
                         f"No API keys found for provider '{provider_name}'. Assuming local model or keyless API.")
-                    self.provider_api_keys[provider_name] = ["no-key-required"]
+                    # KoboldCPPの場合、ダミーキーを使用
+                    if is_koboldcpp:
+                        self.provider_api_keys[provider_name] = ["koboldcpp-dummy-key"]
+                        logger.info(f"🔧 [KoboldCPP] Using dummy API key (KoboldCPP usually doesn't require authentication)")
+                    else:
+                        self.provider_api_keys[provider_name] = ["no-key-required"]
                 else:
                     self.provider_api_keys[provider_name] = api_keys
                     logger.info(f"Loaded {len(api_keys)} API key(s) for provider '{provider_name}'.")
@@ -379,8 +390,29 @@ class LLMCog(commands.Cog, name="LLM"):
             key_list, current_key_index = self.provider_api_keys[provider_name], self.provider_key_index[provider_name]
             if current_key_index >= len(key_list): current_key_index = 0; self.provider_key_index[provider_name] = 0
             api_key_to_use = key_list[current_key_index]
-            client = openai.AsyncOpenAI(base_url=provider_config.get('base_url'), api_key=api_key_to_use)
+            
+            base_url = provider_config.get('base_url')
+            if is_koboldcpp:
+                # KoboldCPPのベースURLが正しい形式か確認
+                if not base_url.endswith('/v1'):
+                    if base_url.endswith('/'):
+                        base_url = base_url.rstrip('/') + '/v1'
+                    else:
+                        base_url = base_url + '/v1'
+                    logger.info(f"🔧 [KoboldCPP] Adjusted base_url to: {base_url}")
+            
+            client = openai.AsyncOpenAI(base_url=base_url, api_key=api_key_to_use, timeout=provider_config.get('timeout', 300.0) if is_koboldcpp else None)
             client.model_name_for_api_calls, client.provider_name = model_name, provider_name
+            # KoboldCPP固有のメタデータを設定
+            if is_koboldcpp:
+                client.supports_tools = provider_config.get('supports_tools', True)
+                logger.info(f"🔧 [KoboldCPP] Initialized client with model '{model_name}'")
+                logger.info(f"🔧 [KoboldCPP] Base URL: {base_url}")
+                logger.info(f"🔧 [KoboldCPP] Tools support: {client.supports_tools}")
+                logger.info(f"🔧 [KoboldCPP] Timeout: {provider_config.get('timeout', 300.0)}s")
+            else:
+                client.supports_tools = True  # 他のプロバイダーはデフォルトでTrue
+            
             logger.info(
                 f"Initialized LLM client for provider '{provider_name}' with model '{model_name}' using key index {current_key_index}.")
             return client
@@ -1089,11 +1121,23 @@ class LLMCog(commands.Cog, name="LLM"):
             }
 
             # ✅ Gemini でも tools を正しく渡す
-            if tools_def:
+            # KoboldCPPの場合はツールサポートをチェック
+            is_koboldcpp = provider_name.lower() == 'koboldcpp'
+            supports_tools = getattr(client, 'supports_tools', True)
+            
+            if tools_def and supports_tools:
                 api_kwargs["tools"] = tools_def
                 api_kwargs["tool_choice"] = "auto"
                 logger.info(
                     f"🔧 [TOOLS] Passing {len(tools_def)} tools to API: {[t['function']['name'] for t in tools_def]}")
+                if is_koboldcpp:
+                    logger.info(f"🔧 [KoboldCPP] Tools are enabled for this model")
+            elif tools_def and not supports_tools:
+                logger.warning(
+                    f"⚠️ [TOOLS] Tools are disabled for provider '{provider_name}' (supports_tools=false). Skipping tools.")
+                if is_koboldcpp:
+                    logger.warning(
+                        f"⚠️ [KoboldCPP] This KoboldCPP model may not support tools. Consider enabling 'supports_tools: true' in config if the model supports it.")
             else:
                 logger.warning(f"⚠️ [TOOLS] No tools available to pass to API")
 
@@ -1127,9 +1171,17 @@ class LLMCog(commands.Cog, name="LLM"):
                     next_key = api_keys[next_key_index]
                     logger.info(
                         f"🔄 Switching to next API key for provider '{provider_name}' (index: {next_key_index}) and retrying.")
-                    new_client = openai.AsyncOpenAI(base_url=client.base_url, api_key=next_key)
+                    provider_config = self.llm_config.get('providers', {}).get(provider_name, {})
+                    is_koboldcpp = provider_name.lower() == 'koboldcpp'
+                    timeout = provider_config.get('timeout', 300.0) if is_koboldcpp else None
+                    new_client = openai.AsyncOpenAI(base_url=client.base_url, api_key=next_key, timeout=timeout)
                     new_client.model_name_for_api_calls = client.model_name_for_api_calls
                     new_client.provider_name = client.provider_name
+                    # KoboldCPPメタデータを保持
+                    if is_koboldcpp:
+                        new_client.supports_tools = getattr(client, 'supports_tools', provider_config.get('supports_tools', True))
+                    else:
+                        new_client.supports_tools = getattr(client, 'supports_tools', True)
                     client = new_client
                     self.llm_clients[f"{provider_name}/{client.model_name_for_api_calls}"] = new_client
                     await asyncio.sleep(1)
