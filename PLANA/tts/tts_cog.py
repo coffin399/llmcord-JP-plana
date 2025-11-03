@@ -293,7 +293,7 @@ class TTSCog(commands.Cog, name="tts_cog"):
             if music_state and music_state.mixer:
                 tts_sources = [name for name in music_state.mixer.sources.keys() if name.startswith("tts_")]
                 for name in tts_sources:
-                    await music_state.mixer.set_source_volume(name, float_volume)
+                    await music_state.mixer.set_volume(name, float_volume)
             elif isinstance(voice_client.source, discord.PCMVolumeTransformer):
                 voice_client.source.volume = float_volume
 
