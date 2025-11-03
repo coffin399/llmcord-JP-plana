@@ -10,12 +10,13 @@ logger = logging.getLogger(__name__)
 
 
 class AudioMixer(discord.AudioSource):
-    def __init__(self):
+    def __init__(self, on_source_removed_callback=None):
         self.sources: Dict[str, discord.AudioSource] = {}
         self.volumes: Dict[str, float] = {}
         self.lock = asyncio.Lock()
         self._is_done = False
         self.active = True
+        self.on_source_removed_callback = on_source_removed_callback
 
     def is_done(self) -> bool:
         return self._is_done
@@ -72,6 +73,12 @@ class AudioMixer(discord.AudioSource):
                     self.volumes.pop(name, None)
                     if source and hasattr(source, 'cleanup'):
                         source.cleanup()
+                    # ソースが削除されてミキサーが空になった場合にコールバックを呼ぶ
+                    if not self.sources and self.on_source_removed_callback:
+                        try:
+                            self.on_source_removed_callback(name)
+                        except Exception as e:
+                            logger.error(f"Error in on_source_removed_callback: {e}")
 
         return bytes(final_frame)
 
@@ -91,6 +98,12 @@ class AudioMixer(discord.AudioSource):
             self.volumes.pop(name, None)
             if source and hasattr(source, 'cleanup'):
                 source.cleanup()
+            # ソースが削除されてミキサーが空になった場合にコールバックを呼ぶ
+            if not self.sources and self.on_source_removed_callback:
+                try:
+                    self.on_source_removed_callback(name)
+                except Exception as e:
+                    logger.error(f"Error in on_source_removed_callback: {e}")
             return source
 
     async def set_volume(self, name: str, volume: float):

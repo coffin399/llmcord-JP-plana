@@ -91,6 +91,7 @@ class GuildState:
         self.is_seeking: bool = False
         self.is_loading: bool = False
         self.mixer: Optional[AudioMixer] = None
+        self._playing_next: bool = False  # 次の曲を再生中かどうかのフラグ
 
     def update_activity(self):
         self.last_activity = datetime.now()
@@ -333,8 +334,67 @@ class MusicCog(commands.Cog, name="music_cog"):
             logger.error(f"Guild {guild_id}: Mixer unexpectedly finished with error: {error}")
         logger.info(f"Guild {guild_id}: Mixer has finished.")
         state = self._get_guild_state(guild_id)
-        if state:
+        if state and not state._playing_next:
+            state._playing_next = True
+            
+            finished_track = state.current_track
             state.mixer = None
+            state.is_playing = False
+            
+            # LoopMode.ONEの場合は current_track を保持、それ以外は None にする
+            if state.loop_mode != LoopMode.ONE:
+                state.current_track = None
+            
+            state.reset_playback_tracking()
+            
+            if error:
+                guild = self.bot.get_guild(guild_id)
+                error_message = self.exception_handler.handle_error(error, guild)
+                if state.last_text_channel_id:
+                    asyncio.run_coroutine_threadsafe(
+                        self._send_background_message(state.last_text_channel_id, "error_message_wrapper",
+                                                      error=error_message),
+                        self.bot.loop
+                    )
+            
+            if finished_track and state.loop_mode == LoopMode.ALL:
+                asyncio.run_coroutine_threadsafe(state.queue.put(finished_track), self.bot.loop)
+            
+            def play_next_and_reset_flag():
+                async def _play():
+                    try:
+                        await self._play_next_song(guild_id)
+                    finally:
+                        if state:
+                            state._playing_next = False
+                asyncio.run_coroutine_threadsafe(_play(), self.bot.loop)
+            
+            play_next_and_reset_flag()
+
+    async def _on_music_source_removed(self, guild_id: int):
+        """音楽ソースが削除されたときに呼ばれる（ループモードやキューを考慮して次の曲を再生）"""
+        state = self._get_guild_state(guild_id)
+        if not state or state.is_seeking or state._playing_next:
+            return
+        
+        state._playing_next = True
+        
+        try:
+            finished_track = state.current_track
+            state.is_playing = False
+            
+            # LoopMode.ONEの場合は current_track を保持、それ以外は None にする
+            if state.loop_mode != LoopMode.ONE:
+                state.current_track = None
+            
+            state.reset_playback_tracking()
+            
+            if finished_track and state.loop_mode == LoopMode.ALL:
+                await state.queue.put(finished_track)
+            
+            await self._play_next_song(guild_id)
+        finally:
+            state._playing_next = False
 
     async def _play_next_song(self, guild_id: int, seek_seconds: int = 0):
         state = self._get_guild_state(guild_id)
@@ -406,7 +466,12 @@ class MusicCog(commands.Cog, name="music_cog"):
             )
 
             if state.mixer is None:
-                state.mixer = AudioMixer()
+                def on_source_removed(name: str):
+                    """ソースが削除されたときのコールバック"""
+                    if name == 'music':
+                        asyncio.run_coroutine_threadsafe(self._on_music_source_removed(guild_id), self.bot.loop)
+                
+                state.mixer = AudioMixer(on_source_removed_callback=on_source_removed)
 
             await state.mixer.add_source('music', source, volume=state.volume)
 
