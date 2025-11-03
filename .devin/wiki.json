@@ -1,0 +1,301 @@
+{
+  "repo_notes": [
+    {
+      "content": ""
+    }
+  ],
+  "pages": [
+    {
+      "title": "Overview",
+      "purpose": "Introduce the PLANA Discord bot, its purpose, key features, and high-level architecture",
+      "page_notes": [
+        {
+          "content": ""
+        }
+      ]
+    },
+    {
+      "title": "Getting Started",
+      "purpose": "Guide users through installation, deployment options, and initial configuration",
+      "page_notes": [
+        {
+          "content": ""
+        }
+      ]
+    },
+    {
+      "title": "Installation & Deployment",
+      "purpose": "Detailed instructions for deploying PLANA via Windows batch script, standard Python, or Docker",
+      "parent": "Getting Started",
+      "page_notes": [
+        {
+          "content": ""
+        }
+      ]
+    },
+    {
+      "title": "Configuration Reference",
+      "purpose": "Comprehensive guide to config.yaml structure, all available settings, and their purposes",
+      "parent": "Getting Started",
+      "page_notes": [
+        {
+          "content": ""
+        }
+      ]
+    },
+    {
+      "title": "Core Architecture",
+      "purpose": "Explain the bot's core initialization, lifecycle management, and fundamental systems",
+      "page_notes": [
+        {
+          "content": ""
+        }
+      ]
+    },
+    {
+      "title": "Bot Initialization & Lifecycle",
+      "purpose": "Detail the Shittim bot instance, Cog loading system, and startup sequence",
+      "parent": "Core Architecture",
+      "page_notes": [
+        {
+          "content": ""
+        }
+      ]
+    },
+    {
+      "title": "Logging System",
+      "purpose": "Explain DiscordLogHandler, log routing to Discord channels, and sanitization",
+      "parent": "Core Architecture",
+      "page_notes": [
+        {
+          "content": ""
+        }
+      ]
+    },
+    {
+      "title": "Error Handling Architecture",
+      "purpose": "Document error handling patterns, custom exceptions, and user-facing error messages",
+      "parent": "Core Architecture",
+      "page_notes": [
+        {
+          "content": ""
+        }
+      ]
+    },
+    {
+      "title": "LLM System",
+      "purpose": "Overview of the AI chat system, its plugin architecture, and capabilities",
+      "page_notes": [
+        {
+          "content": ""
+        }
+      ]
+    },
+    {
+      "title": "LLM Cog Core",
+      "purpose": "Explain LLMCog message processing, conversation management, and streaming responses",
+      "parent": "LLM System",
+      "page_notes": [
+        {
+          "content": ""
+        }
+      ]
+    },
+    {
+      "title": "Multi-Provider Support",
+      "purpose": "Document LLM provider abstraction, API key rotation, and model switching",
+      "parent": "LLM System",
+      "page_notes": [
+        {
+          "content": ""
+        }
+      ]
+    },
+    {
+      "title": "Tool Orchestration System",
+      "purpose": "Explain how LLM invokes tools, iteration limits, and tool execution flow",
+      "parent": "LLM System",
+      "page_notes": [
+        {
+          "content": ""
+        }
+      ]
+    },
+    {
+      "title": "Search Agent Plugin",
+      "purpose": "Document Google search integration, API key rotation, and error handling",
+      "parent": "LLM System",
+      "page_notes": [
+        {
+          "content": ""
+        }
+      ]
+    },
+    {
+      "title": "Bio Manager Plugin",
+      "purpose": "Explain channel bios, user bios, and context management system",
+      "parent": "LLM System",
+      "page_notes": [
+        {
+          "content": ""
+        }
+      ]
+    },
+    {
+      "title": "Memory Manager Plugin",
+      "purpose": "Document global shared memory system and persistent knowledge storage",
+      "parent": "LLM System",
+      "page_notes": [
+        {
+          "content": ""
+        }
+      ]
+    },
+    {
+      "title": "Image Generator Plugin",
+      "purpose": "Comprehensive guide to AI image generation, queue system, and Stable Diffusion integration",
+      "parent": "LLM System",
+      "page_notes": [
+        {
+          "content": ""
+        }
+      ]
+    },
+    {
+      "title": "Audio Systems",
+      "purpose": "Overview of music playback and TTS capabilities",
+      "page_notes": [
+        {
+          "content": ""
+        }
+      ]
+    },
+    {
+      "title": "Music System",
+      "purpose": "Document MusicCog, playback controls, queue management, and audio sources",
+      "parent": "Audio Systems",
+      "page_notes": [
+        {
+          "content": ""
+        }
+      ]
+    },
+    {
+      "title": "Music System Architecture",
+      "purpose": "Deep dive into GuildState, AudioMixer, FFmpeg integration, and voice client management",
+      "parent": "Audio Systems",
+      "page_notes": [
+        {
+          "content": ""
+        }
+      ]
+    },
+    {
+      "title": "TTS System",
+      "purpose": "Document text-to-speech features, Style-Bert-VITS2 integration, and voice channel events",
+      "parent": "Audio Systems",
+      "page_notes": [
+        {
+          "content": ""
+        }
+      ]
+    },
+    {
+      "title": "TTS Configuration & Auto-Join",
+      "purpose": "Explain TTS settings management, speech channels, and auto-join behavior",
+      "parent": "Audio Systems",
+      "page_notes": [
+        {
+          "content": ""
+        }
+      ]
+    },
+    {
+      "title": "Notification Systems",
+      "purpose": "Overview of real-time notification capabilities for earthquakes and streams",
+      "page_notes": [
+        {
+          "content": ""
+        }
+      ]
+    },
+    {
+      "title": "Earthquake & Tsunami Notifications",
+      "purpose": "Document P2P Earthquake API integration, WebSocket connection, and map generation",
+      "parent": "Notification Systems",
+      "page_notes": [
+        {
+          "content": ""
+        }
+      ]
+    },
+    {
+      "title": "Earthquake System Architecture",
+      "purpose": "Deep dive into event classification, duplicate detection, and state management",
+      "parent": "Notification Systems",
+      "page_notes": [
+        {
+          "content": ""
+        }
+      ]
+    },
+    {
+      "title": "Twitch Stream Notifications",
+      "purpose": "Document Twitch API integration and stream status monitoring",
+      "parent": "Notification Systems",
+      "page_notes": [
+        {
+          "content": ""
+        }
+      ]
+    },
+    {
+      "title": "Utility Features",
+      "purpose": "Document slash commands, games, and utility functions",
+      "page_notes": [
+        {
+          "content": ""
+        }
+      ]
+    },
+    {
+      "title": "Slash Commands Reference",
+      "purpose": "Comprehensive list of all utility slash commands with usage examples",
+      "parent": "Utility Features",
+      "page_notes": [
+        {
+          "content": ""
+        }
+      ]
+    },
+    {
+      "title": "Dice Rolling System",
+      "purpose": "Document dice notation parsing, validation, and conditional checks",
+      "parent": "Utility Features",
+      "page_notes": [
+        {
+          "content": ""
+        }
+      ]
+    },
+    {
+      "title": "Games & Entertainment",
+      "purpose": "Document gacha system, Akinator, and other entertainment features",
+      "parent": "Utility Features",
+      "page_notes": [
+        {
+          "content": ""
+        }
+      ]
+    },
+    {
+      "title": "Development Guide",
+      "purpose": "Guide for developers wanting to extend or modify PLANA",
+      "page_notes": [
+        {
+          "content": ""
+        }
+      ]
+    }
+  ]
+}The content has been copied to your clipboard. Please paste it here to complete the file creation.
