@@ -2073,9 +2073,39 @@ class LLMCog(commands.Cog, name="LLM"):
         embed.add_field(name="Basic Usage / 基本的な使い方",
                         value=f"• Mention the bot (`@{bot_name}`) to get a response from the AI.\n  Botにメンション (`@{bot_name}`) して話しかけると、AIが応答します。\n• **You can also continue the conversation by replying to the bot's messages (no mention needed).**\n  **Botのメッセージに返信することでも会話を続けられます（メンション不要）。**\n• If you ask the AI to remember something, it will try to store that information.\n  「私の名前は〇〇です。覚えておいて」のように話しかけると、AIがあなたの情報を記憶しようとします。\n• Attach images or paste image URLs with your message, and the AI will try to understand them.\n  画像と一緒に話しかけると、AIが画像の内容も理解しようとします。",
                         inline=False)
-        embed.add_field(name="Useful Commands / 便利なコマンド",
-                        value="**[AI Settings (Per Channel) / AIの設定 (チャンネルごと)]**\n• `/switch-models`: Change the AI model used in this channel. / このチャンネルで使うAIモデルを変更します。\n• `/set-ai-bio`: Set a custom personality/role for the AI in this channel. / このチャンネル専用のAIの性格や役割を設定します。\n• `/show-ai-bio`: Check the current AI bio setting. / 現在のAIのbio設定を確認します。\n• `/reset-ai-bio`: Reset the AI bio to the default. / AIのbio設定をデフォルトに戻します。\n**[Your Information / あなたの情報]**\n• `/set-user-bio`: Set information about you for the AI to remember. / AIに覚えてほしいあなたの情報を設定します。\n• `/show-user-bio`: Check the information the AI has stored about you. / AIが記憶しているあなたの情報を確認します。\n• `/reset-user-bio`: Delete your information from the AI's memory. / あなたの情報をAIの記憶から削除します。\n**[Global Memory / グローバルメモリ]**\n• `/memory-save`: Save information to the global shared memory. / 全サーバー共通のメモリに情報を保存します。\n• `/memory-list`: List all information in the global memory. / グローバルメモリの情報を一覧表示します。\n• `/memory-delete`: Delete information from the global memory. / グローバルメモリから情報を削除します。\n**[Other / その他]**\n• `/clear_history`: Reset the conversation history. / 会話履歴をリセットします。",
+
+        # Split "Useful Commands" into multiple fields to avoid character limits
+        embed.add_field(name="Commands - AI/Channel Settings / コマンド - AI/チャンネル設定",
+                        value="• `/switch-models`: Change the AI model used in this channel. / このチャンネルで使うAIモデルを変更します。\n"
+                              "• `/set-ai-bio`: Set a custom personality/role for the AI in this channel. / このチャンネル専用のAIの性格や役割を設定します。\n"
+                              "• `/show-ai-bio`: Check the current AI bio setting. / 現在のAIのbio設定を確認します。\n"
+                              "• `/reset-ai-bio`: Reset the AI bio to the default. / AIのbio設定をデフォルトに戻します。",
                         inline=False)
+
+        embed.add_field(name="Commands - Image Generation / コマンド - 画像生成",
+                        value="• `/switch-image-model`: Switch the image generation model for this channel. / このチャンネルの画像生成モデルを切り替えます。\n"
+                              "• `/reset-image-model`: Reset the image generation model to default. / 画像生成モデルをデフォルトに戻します。\n"
+                              "• `/show-image-model`: Show the current image generation model. / 現在の画像生成モデルを表示します。\n"
+                              "• `/list-image-models`: List all available image generation models. / 利用可能な全画像生成モデルを一覧表示します。",
+                        inline=False)
+
+        embed.add_field(name="Commands - User Info / コマンド - ユーザー情報",
+                        value="• `/set-user-bio`: Set information about you for the AI to remember. / AIに覚えてほしいあなたの情報を設定します。\n"
+                              "• `/show-user-bio`: Check the information the AI has stored about you. / AIが記憶しているあなたの情報を確認します。\n"
+                              "• `/reset-user-bio`: Delete your information from the AI's memory. / あなたの情報をAIの記憶から削除します。",
+                        inline=False)
+
+        embed.add_field(name="Commands - Global Memory / コマンド - グローバルメモリ",
+                        value="• `/memory-save`: Save information to the global shared memory. / 全サーバー共通のメモリに情報を保存します。\n"
+                              "• `/memory-list`: List all information in the global memory. / グローバルメモリの情報を一覧表示します。\n"
+                              "• `/memory-delete`: Delete information from the global memory. / グローバルメモリから情報を削除します。",
+                        inline=False)
+
+        embed.add_field(name="Commands - Other / コマンド - その他",
+                        value="• `/chat`: Chat with the AI without needing to mention. / AIとメンションなしで対話します。\n"
+                              "• `/clear_history`: Reset the conversation history. / 会話履歴をリセットします。",
+                        inline=False)
+                        
         channel_model_str = self.channel_models.get(str(interaction.channel_id))
         model_display = f"`{channel_model_str}` (Channel-specific / このチャンネル専用)" if channel_model_str else f"`{self.llm_config.get('model', 'Not set / 未設定')}` (Default / デフォルト)"
         ai_bio_display, user_bio_display = "N/A", "N/A"
