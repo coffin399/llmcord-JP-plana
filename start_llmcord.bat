@@ -55,7 +55,7 @@ echo ================================
 echo Starting llmcord...
 echo ================================
 echo.
-python main.py
+python llmcord.py
 
 REM 終了時の処理
 echo.
