@@ -1112,6 +1112,11 @@ class LLMCog(commands.Cog, name="LLM"):
             logger.debug(f"Starting LLM API call (iteration {iteration + 1}/{max_iterations})")
             tools_def = self.get_tools_definition()
 
+            # provider_nameを最初に定義（他の変数より前）
+            provider_name = client.provider_name
+            api_keys = self.provider_api_keys.get(client.provider_name, [])
+            num_keys = len(api_keys)
+
             api_kwargs = {
                 "model": client.model_name_for_api_calls,
                 "messages": current_messages,
@@ -1142,9 +1147,6 @@ class LLMCog(commands.Cog, name="LLM"):
                 logger.warning(f"⚠️ [TOOLS] No tools available to pass to API")
 
             stream = None
-            provider_name = client.provider_name
-            api_keys = self.provider_api_keys.get(client.provider_name, [])
-            num_keys = len(api_keys)
 
             if num_keys == 0:
                 raise Exception(f"No API keys available for provider {provider_name}")
