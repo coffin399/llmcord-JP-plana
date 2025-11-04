@@ -1,6 +1,8 @@
 
 <p align="center">
   <strong>⚠️This branch contains experimental features and modifications.⚠️</strong><br>
+  <strong>This project has diverged significantly from the original fork and become bloated. The multi-functional version has been moved to <a href="https://github.com/coffin399/ProjectMOMOKA">ProjectMOMOKA</a>.</strong><br>
+  <strong>fork元のコードを無視して肥大化したため、多機能版は<a href="https://github.com/coffin399/ProjectMOMOKA">ProjectMOMOKA</a>に移行しました。</strong><br>
   <strong>For the stable version, please refer to the <a href="https://github.com/coffin399/llmcord-JP-plana/tree/main">main branch</a>.</strong>
 </p>
 
