@@ -131,7 +131,6 @@ llmcordは、LLMのツールとして機能するプラグインで拡張でき�
    For Windows, you can simply run `start_llmcord.bat` to automatically install dependencies and start the bot. Otherwise, run the commands below.
    Windowsの場合は、`start_llmcord.bat` を実行するだけで、依存関係が自動的にインストールされ、ボットが起動します。それ以外の場合は、以下のコマンドを実行してください。
    ```bash
-   python -m pip install -U -r requirements.txt
    python llmcord.py
    ```
 
