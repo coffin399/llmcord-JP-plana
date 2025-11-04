@@ -1,3 +1,8 @@
+<div style="text-align: center;">
+For the multi-functional version, please refer to the <a href="https://github.com/coffin399/llmcord-JP-plana/tree/advanced-bot-utilities">advanced-bot-utilities</a> branch.<br>
+多機能版は<a href="https://github.com/coffin399/llmcord-JP-plana/tree/advanced-bot-utilities">advanced-bot-utilities</a>ブランチを参照してください。
+</div>
+
 <h1 align="center">
   llmcord
 </h1>
