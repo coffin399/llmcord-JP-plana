@@ -1158,36 +1158,84 @@ class LLMCog(commands.Cog, name="LLM"):
                     stream = await client.chat.completions.create(**api_kwargs)
                     logger.debug(f"Stream connection established successfully.")
                     break
-                except (openai.RateLimitError, openai.InternalServerError) as e:
-                    error_type = "Rate limit" if isinstance(e, openai.RateLimitError) else "Server"
-                    status_code = getattr(e, 'status_code', 'N/A')
-                    logger.warning(
-                        f"⚠️ {error_type} error ({status_code}) for provider '{provider_name}' with key index {current_key_index}. Details: {e}")
-                    if attempt + 1 >= num_keys:
-                        logger.error(f"❌ All {num_keys} API keys for provider '{provider_name}' have failed. Aborting.")
-                        raise e
-                    next_key_index = (current_key_index + 1) % num_keys
-                    self.provider_key_index[provider_name] = next_key_index
-                    next_key = api_keys[next_key_index]
-                    logger.info(
-                        f"🔄 Switching to next API key for provider '{provider_name}' (index: {next_key_index}) and retrying.")
-                    provider_config = self.llm_config.get('providers', {}).get(provider_name, {})
-                    is_koboldcpp = provider_name.lower() == 'koboldcpp'
-                    timeout = provider_config.get('timeout', 300.0) if is_koboldcpp else None
-                    new_client = openai.AsyncOpenAI(base_url=client.base_url, api_key=next_key, timeout=timeout)
-                    new_client.model_name_for_api_calls = client.model_name_for_api_calls
-                    new_client.provider_name = client.provider_name
-                    # KoboldCPPメタデータを保持
-                    if is_koboldcpp:
-                        new_client.supports_tools = getattr(client, 'supports_tools', provider_config.get('supports_tools', True))
-                    else:
-                        new_client.supports_tools = getattr(client, 'supports_tools', True)
-                    client = new_client
-                    self.llm_clients[f"{provider_name}/{client.model_name_for_api_calls}"] = new_client
-                    await asyncio.sleep(1)
                 except Exception as e:
-                    logger.error(f"❌ Unhandled error calling LLM API: {e}", exc_info=True)
-                    raise
+                    # エラーの種類とステータスコードを取得
+                    status_code = getattr(e, 'status_code', None)
+                    error_type = type(e).__name__
+                    
+                    # ローテーションすべきエラーかどうかを判定
+                    should_rotate = False
+                    rotation_reason = ""
+                    
+                    # RateLimitError (429)
+                    if isinstance(e, openai.RateLimitError):
+                        should_rotate = True
+                        rotation_reason = "Rate limit"
+                    # InternalServerError (500)
+                    elif isinstance(e, openai.InternalServerError):
+                        should_rotate = True
+                        rotation_reason = "Server error"
+                    # APIError (その他のHTTPエラー)
+                    elif isinstance(e, openai.APIError):
+                        if status_code:
+                            # 400-599の範囲のHTTPエラーでローテーション
+                            # ただし、400系の中でもキーに関連する可能性があるものを対象
+                            if status_code == 400:
+                                # 400エラーでも、キーの問題（無効なキーなど）の可能性があるためローテーション
+                                should_rotate = True
+                                rotation_reason = f"Bad Request (400) - possible invalid API key"
+                            elif status_code == 401:
+                                # 401 Unauthorized - 認証エラーのためローテーション
+                                should_rotate = True
+                                rotation_reason = "Unauthorized (401) - invalid API key"
+                            elif status_code == 403:
+                                # 403 Forbidden - 権限エラーのためローテーション
+                                should_rotate = True
+                                rotation_reason = "Forbidden (403) - API key may lack permissions"
+                            elif status_code == 429:
+                                # 429 Too Many Requests - レート制限のためローテーション
+                                should_rotate = True
+                                rotation_reason = "Rate limit (429)"
+                            elif 500 <= status_code < 600:
+                                # 5xx Server Errors - サーバーエラーのためローテーション
+                                should_rotate = True
+                                rotation_reason = f"Server error ({status_code})"
+                    
+                    # ローテーションすべきエラーの場合
+                    if should_rotate:
+                        logger.warning(
+                            f"⚠️ {rotation_reason} error ({status_code or 'N/A'}) for provider '{provider_name}' with key index {current_key_index}. Details: {e}")
+                        
+                        # まだ試していないキーがある場合はローテーション
+                        if attempt + 1 < num_keys:
+                            next_key_index = (current_key_index + 1) % num_keys
+                            self.provider_key_index[provider_name] = next_key_index
+                            next_key = api_keys[next_key_index]
+                            logger.info(
+                                f"🔄 Switching to next API key for provider '{provider_name}' (index: {next_key_index}) and retrying.")
+                            provider_config = self.llm_config.get('providers', {}).get(provider_name, {})
+                            is_koboldcpp = provider_name.lower() == 'koboldcpp'
+                            timeout = provider_config.get('timeout', 300.0) if is_koboldcpp else None
+                            new_client = openai.AsyncOpenAI(base_url=client.base_url, api_key=next_key, timeout=timeout)
+                            new_client.model_name_for_api_calls = client.model_name_for_api_calls
+                            new_client.provider_name = client.provider_name
+                            # KoboldCPPメタデータを保持
+                            if is_koboldcpp:
+                                new_client.supports_tools = getattr(client, 'supports_tools', provider_config.get('supports_tools', True))
+                            else:
+                                new_client.supports_tools = getattr(client, 'supports_tools', True)
+                            client = new_client
+                            self.llm_clients[f"{provider_name}/{client.model_name_for_api_calls}"] = new_client
+                            await asyncio.sleep(1)
+                            continue  # 次のキーで再試行
+                        else:
+                            # すべてのキーを試した場合はエラーを投げる
+                            logger.error(f"❌ All {num_keys} API keys for provider '{provider_name}' have failed with {rotation_reason} error. Aborting.")
+                            raise e
+                    else:
+                        # ローテーションすべきでないエラー（モデル名が無効など、キーとは無関係なエラー）は即座に投げる
+                        logger.error(f"❌ Non-retryable error calling LLM API: {error_type} (status: {status_code or 'N/A'}) - {e}", exc_info=True)
+                        raise e
 
             if stream is None:
                 raise Exception("Failed to establish stream with any API key.")
